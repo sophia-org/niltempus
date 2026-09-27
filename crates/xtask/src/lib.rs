@@ -6,8 +6,11 @@
 //! or the C SDK's source tree.
 pub mod bemenu_artifact;
 pub mod c_sdk_pin;
+pub mod dock;
 pub mod git_tree;
 pub mod pins;
+pub mod product_artifact;
+mod seam_b;
 
 pub(crate) fn hex(value: &str, length: usize) -> bool {
     value.len() == length

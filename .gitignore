@@ -1,2 +1,4 @@
 /target/
 /.provision/
+/.artifacts/
+__pycache__/

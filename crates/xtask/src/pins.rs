@@ -23,6 +23,13 @@ pub const SDK_MANIFEST_SHA256: &str =
     "9da6ca11f381cb18d1772f5b6656a6e6a32dc003502daf53ce6d220e67e3b28e";
 const SOPHIA_PIN: &str = "pins/sophia.toml";
 const CONTRACTS: &str = "pins/contracts.sha256";
+/// Sophia files the attended gates read read-only from the explicit Sophia
+/// checkout under test. They stay in Sophia; only their digests are pinned.
+pub const SHARED: &str = "pins/sophia-shared.sha256";
+const SHARED_PATHS: [&str; 2] = [
+    "tools/run_sophia_session.sh",
+    "tools/fixtures/native_launcher_core.kdl",
+];
 const MANIFESTS: [&str; 4] = [
     "Cargo.toml",
     "crates/xtask/Cargo.toml",
@@ -152,6 +159,25 @@ pub fn parse_contracts(text: &str) -> Result<Vec<Contract>, String> {
     Ok(contracts)
 }
 
+/// The pinned digests of the shared Sophia files, in SHARED_PATHS order.
+pub fn shared(repo: &Path) -> Result<Vec<(String, String)>, String> {
+    parse_shared(&String::from_utf8(read(&repo.join(SHARED))?).map_err(|e| e.to_string())?)
+}
+
+pub fn parse_shared(text: &str) -> Result<Vec<(String, String)>, String> {
+    let entries = text
+        .lines()
+        .map(|line| match line.split(' ').collect::<Vec<_>>()[..] {
+            [digest, path] if hex(digest, 64) => Ok((digest.to_owned(), path.to_owned())),
+            _ => Err(format!("{SHARED}: malformed line {line:?}")),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if entries.iter().map(|(_, p)| p.as_str()).collect::<Vec<_>>() != SHARED_PATHS {
+        return Err(format!("{SHARED}: paths differ from {SHARED_PATHS:?}"));
+    }
+    Ok(entries)
+}
+
 /// Local, offline consistency of every pin; see the module comment.
 pub fn check(repo: &Path) -> Result<Vec<String>, String> {
     let text =
@@ -178,10 +204,12 @@ pub fn check(repo: &Path) -> Result<Vec<String>, String> {
             ));
         }
     }
+    let shared = shared(repo)?;
     Ok(vec![format!(
-        "pins status=pass sophia={SOPHIA_REV} contracts={} copies={}",
+        "pins status=pass sophia={SOPHIA_REV} contracts={} copies={} shared={}",
         contracts.len(),
-        COPIES.len()
+        COPIES.len(),
+        shared.len()
     )])
 }
 
@@ -346,10 +374,17 @@ pub fn audit(repo: &Path, sophia: &Path) -> Result<Vec<String>, String> {
             ));
         }
     }
+    let shared = shared(repo)?;
+    for (pinned, path) in &shared {
+        if digest(path)? != *pinned {
+            return Err(format!("Sophia {SOPHIA_REV}:{path} differs from {SHARED}"));
+        }
+    }
     Ok(vec![format!(
-        "pins status=audited sophia={SOPHIA_REV} contracts={} copies={}",
+        "pins status=audited sophia={SOPHIA_REV} contracts={} copies={} shared={}",
         contracts.len(),
-        COPIES.len()
+        COPIES.len(),
+        shared.len()
     )])
 }
 

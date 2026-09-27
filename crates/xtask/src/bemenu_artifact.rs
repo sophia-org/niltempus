@@ -25,7 +25,7 @@ use crate::{hex, read, sha256};
 const USAGE: &str =
     "usage: cargo xtask prepare-bemenu-artifact <source-repo> <signed-commit> <new-output-dir>";
 const GIT_TIMEOUT: Duration = Duration::from_secs(60);
-const BUILD_TIMEOUT: Duration = Duration::from_secs(900);
+pub(crate) const BUILD_TIMEOUT: Duration = Duration::from_secs(900);
 const OUTPUT_CAP: u64 = 1 << 20;
 const PIPE_GRACE: Duration = Duration::from_secs(2);
 const GROUP_GRACE: Duration = Duration::from_secs(2);
@@ -34,7 +34,7 @@ const BINARY: &str = "bemenu-sophia";
 const MANIFEST: &str = "bemenu-artifact.manifest";
 const COMMIT_OBJECT: &str = "source.commit";
 
-struct RemoveOnDrop(PathBuf);
+pub(crate) struct RemoveOnDrop(pub(crate) PathBuf);
 impl Drop for RemoveOnDrop {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
@@ -46,92 +46,15 @@ pub fn run(repo: &Path, args: &[String]) -> Result<Vec<String>, String> {
     let [source, commit, output] = args else {
         return Err(USAGE.into());
     };
-    if !hex(commit, 40) {
-        return Err(format!(
-            "signed commit must be 40 lowercase hex: {commit:?}"
-        ));
-    }
-    let source = std::fs::canonicalize(source).map_err(|e| format!("{source}: {e}"))?;
-    let output = absolute(Path::new(output))?;
-    if output.symlink_metadata().is_ok() {
-        return Err(format!("output already exists: {}", output.display()));
-    }
-    let parent = output.parent().ok_or("output has no parent directory")?;
-    if !parent.is_dir() {
-        return Err(format!(
-            "output parent is not a directory: {}",
-            parent.display()
-        ));
-    }
-
-    // Identity and signer authorization, read-only against the source repo.
-    let resolved = text(git(
-        &source,
-        &[
-            "rev-parse",
-            "--verify",
-            "--end-of-options",
-            &format!("{commit}^{{commit}}"),
-        ],
-    )?)?;
-    if resolved.trim() != commit {
-        return Err(format!("{commit} does not name that exact commit"));
-    }
-    git(&source, &["verify-commit", commit])
-        .map_err(|e| format!("signature authorization failed for {commit}: {e}"))?;
-    let status = text(git(&source, &["log", "-1", "--format=%G?%n%GF", commit])?)?;
-    let mut status = status.lines();
-    let (signature, signer) = (status.next().unwrap_or(""), status.next().unwrap_or(""));
-    if signature != "G" || signer.is_empty() || !signer.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(format!(
-            "commit {commit} is not a good signature: status={signature:?} signer={signer:?}"
-        ));
-    }
-    let raw = git(&source, &["cat-file", "commit", commit])?;
-    let tree = commit_tree(&raw)?;
-    if !raw
-        .split(|b| *b == b'\n')
-        .any(|line| line.starts_with(b"gpgsig "))
-    {
-        return Err("signed commit object has no gpgsig header".into());
-    }
-
-    // Isolated build input: exactly the signed tree, nothing from the checkout.
-    let scratch = std::env::temp_dir().join(format!(
-        "sophia-bemenu-artifact-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|e| e.to_string())?
-            .as_nanos()
-    ));
-    std::fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&scratch)
-        .map_err(|e| format!("{}: {e}", scratch.display()))?;
-    let _scratch = RemoveOnDrop(scratch.clone());
-    let archive = scratch.join("source.tar");
-    let tree_dir = scratch.join("source");
-    std::fs::create_dir(&tree_dir).map_err(|e| e.to_string())?;
-    git(
-        &source,
-        &["archive", "--format=tar", "-o", path_str(&archive)?, commit],
-    )?;
-    bounded(
-        Command::new("tar")
-            .arg("-x")
-            .arg("--no-same-owner")
-            .arg("-f")
-            .arg(&archive)
-            .arg("-C")
-            .arg(&tree_dir),
-        GIT_TIMEOUT,
-        "tar -x",
-    )?;
-    std::fs::remove_file(&archive).map_err(|e| e.to_string())?;
-    let inventory = crate::git_tree::inventory(&tree_dir)?;
-    crate::git_tree::verify_commit(&raw, commit, &inventory.tree)
-        .map_err(|e| format!("archived Bemenu tree is not the signed commit {commit}: {e}"))?;
+    let (source, output) = inputs(source, commit, output)?;
+    let SignedTree {
+        scratch,
+        _scratch,
+        tree_dir,
+        raw,
+        tree,
+        signer,
+    } = signed_tree(&source, commit, "bemenu")?;
 
     // SDK pin: the Bemenu snapshot is the same audited SDK revision Sophia
     // pinned at the integration revision (pins/c-desktop-sdk).
@@ -167,7 +90,7 @@ pub fn run(repo: &Path, args: &[String]) -> Result<Vec<String>, String> {
         .stderr(log_file)
         .spawn()
         .map_err(|e| format!("make: {e}"))?;
-    let built = wait_logged(child, &log, BUILD_TIMEOUT);
+    let built = wait_logged(child, &log, BUILD_TIMEOUT, &format!("make {BINARY}"));
     if let Err(error) = built {
         return Err(format!("{error}\n{}", tail(&log)));
     }
@@ -206,6 +129,128 @@ pub fn run(repo: &Path, args: &[String]) -> Result<Vec<String>, String> {
     }
 }
 
+/// Refuse ambiguous inputs before anything is read: an exact 40-hex commit,
+/// an existing source and a new output under an existing parent.
+pub(crate) fn inputs(
+    source: &str,
+    commit: &str,
+    output: &str,
+) -> Result<(PathBuf, PathBuf), String> {
+    if !hex(commit, 40) {
+        return Err(format!(
+            "signed commit must be 40 lowercase hex: {commit:?}"
+        ));
+    }
+    let source = std::fs::canonicalize(source).map_err(|e| format!("{source}: {e}"))?;
+    let output = absolute(Path::new(output))?;
+    if output.symlink_metadata().is_ok() {
+        return Err(format!("output already exists: {}", output.display()));
+    }
+    let parent = output.parent().ok_or("output has no parent directory")?;
+    if !parent.is_dir() {
+        return Err(format!(
+            "output parent is not a directory: {}",
+            parent.display()
+        ));
+    }
+    Ok((source, output))
+}
+
+/// The signed commit's exact tree, extracted into a private scratch directory
+/// that is removed when this value is dropped.
+pub(crate) struct SignedTree {
+    pub(crate) scratch: PathBuf,
+    pub(crate) _scratch: RemoveOnDrop,
+    pub(crate) tree_dir: PathBuf,
+    pub(crate) raw: Vec<u8>,
+    pub(crate) tree: String,
+    pub(crate) signer: String,
+}
+
+/// Signer authorization (verify-commit, status G) read-only against the
+/// source repository, then `git archive` of that commit whose extracted tree
+/// must hash to exactly the commit's tree.
+pub(crate) fn signed_tree(source: &Path, commit: &str, label: &str) -> Result<SignedTree, String> {
+    // Identity and signer authorization, read-only against the source repo.
+    let resolved = text(git(
+        source,
+        &[
+            "rev-parse",
+            "--verify",
+            "--end-of-options",
+            &format!("{commit}^{{commit}}"),
+        ],
+    )?)?;
+    if resolved.trim() != commit {
+        return Err(format!("{commit} does not name that exact commit"));
+    }
+    git(source, &["verify-commit", commit])
+        .map_err(|e| format!("signature authorization failed for {commit}: {e}"))?;
+    let status = text(git(source, &["log", "-1", "--format=%G?%n%GF", commit])?)?;
+    let mut status = status.lines();
+    let (signature, signer) = (status.next().unwrap_or(""), status.next().unwrap_or(""));
+    if signature != "G" || signer.is_empty() || !signer.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(format!(
+            "commit {commit} is not a good signature: status={signature:?} signer={signer:?}"
+        ));
+    }
+    let raw = git(source, &["cat-file", "commit", commit])?;
+    let tree = commit_tree(&raw)?;
+    if !raw
+        .split(|b| *b == b'\n')
+        .any(|line| line.starts_with(b"gpgsig "))
+    {
+        return Err("signed commit object has no gpgsig header".into());
+    }
+
+    // Isolated build input: exactly the signed tree, nothing from the checkout.
+    let scratch = std::env::temp_dir().join(format!(
+        "sophia-{label}-artifact-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| e.to_string())?
+            .as_nanos()
+    ));
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&scratch)
+        .map_err(|e| format!("{}: {e}", scratch.display()))?;
+    let _scratch = RemoveOnDrop(scratch.clone());
+    let archive = scratch.join("source.tar");
+    let tree_dir = scratch.join("source");
+    std::fs::create_dir(&tree_dir).map_err(|e| e.to_string())?;
+    git(
+        source,
+        &["archive", "--format=tar", "-o", path_str(&archive)?, commit],
+    )?;
+    bounded(
+        Command::new("tar")
+            .arg("-x")
+            .arg("--no-same-owner")
+            .arg("-f")
+            .arg(&archive)
+            .arg("-C")
+            .arg(&tree_dir),
+        GIT_TIMEOUT,
+        "tar -x",
+    )?;
+    std::fs::remove_file(&archive).map_err(|e| e.to_string())?;
+    let inventory = crate::git_tree::inventory(&tree_dir)?;
+    crate::git_tree::verify_commit(&raw, commit, &inventory.tree)
+        .map_err(|e| format!("archived {label} tree is not the signed commit {commit}: {e}"))?;
+
+    let signer = signer.to_owned();
+    Ok(SignedTree {
+        scratch,
+        _scratch,
+        tree_dir,
+        raw,
+        tree,
+        signer,
+    })
+}
+
 fn write_output(
     output: &Path,
     binary: &Path,
@@ -224,7 +269,7 @@ fn write_output(
     Ok(digest)
 }
 
-fn commit_tree(raw: &[u8]) -> Result<String, String> {
+pub(crate) fn commit_tree(raw: &[u8]) -> Result<String, String> {
     let first = raw.split(|b| *b == b'\n').next().unwrap_or_default();
     let tree = std::str::from_utf8(first)
         .ok()
@@ -354,7 +399,12 @@ fn stop_group(child: &mut Child) {
     let _ = child.wait();
 }
 
-fn wait_logged(mut child: Child, log: &Path, limit: Duration) -> Result<(), String> {
+pub(crate) fn wait_logged(
+    mut child: Child,
+    log: &Path,
+    limit: Duration,
+    what: &str,
+) -> Result<(), String> {
     let deadline = Instant::now() + limit;
     loop {
         if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
@@ -362,25 +412,25 @@ fn wait_logged(mut child: Child, log: &Path, limit: Duration) -> Result<(), Stri
                 return Ok(());
             }
             stop_group(&mut child);
-            return Err(format!("make {BINARY}: {status}"));
+            return Err(format!("{what}: {status}"));
         }
         let size = std::fs::metadata(log).map(|m| m.len()).unwrap_or(0);
         if Instant::now() >= deadline || size > BUILD_LOG_CAP {
             stop_group(&mut child);
             return Err(format!(
-                "make {BINARY} stopped (limit {limit:?}, log {size} bytes)"
+                "{what} stopped (limit {limit:?}, log {size} bytes)"
             ));
         }
         std::thread::sleep(Duration::from_millis(50));
     }
 }
 
-fn tail(log: &Path) -> String {
+pub(crate) fn tail(log: &Path) -> String {
     let bytes = std::fs::read(log).unwrap_or_default();
     String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(4096)..]).into_owned()
 }
 
-fn absolute(path: &Path) -> Result<PathBuf, String> {
+pub(crate) fn absolute(path: &Path) -> Result<PathBuf, String> {
     if path.is_absolute() {
         Ok(path.to_path_buf())
     } else {
@@ -390,16 +440,16 @@ fn absolute(path: &Path) -> Result<PathBuf, String> {
     }
 }
 
-fn path_str(path: &Path) -> Result<&str, String> {
+pub(crate) fn path_str(path: &Path) -> Result<&str, String> {
     path.to_str()
         .ok_or_else(|| format!("non-UTF-8 path {}", path.display()))
 }
 
-fn text(bytes: Vec<u8>) -> Result<String, String> {
+pub(crate) fn text(bytes: Vec<u8>) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|e| e.to_string())
 }
 
-fn set_mode(path: &Path, mode: u32) -> Result<(), String> {
+pub(crate) fn set_mode(path: &Path, mode: u32) -> Result<(), String> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
         .map_err(|e| format!("{}: {e}", path.display()))
 }

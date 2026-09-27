@@ -26,6 +26,28 @@ manifest and `Cargo.lock` agree on that one revision and that every copied
 file still hashes to its pin. `cargo xtask audit-pins ABSOLUTE-SOPHIA-REPO`
 re-derives the copied files and contract digests from a Sophia clone.
 
+## Attended Lom, launcher and dock gates
+
+Moved from Sophia (rule 13): the Lom GPU/content proof, the tty4 panel,
+launcher and dock runners, their transcript verifiers, the workload budgets
+and fixtures, and the `xtask dock` profile generator and verifier. See
+[tools/probes/README.md](tools/probes/README.md). Every input is explicit:
+
+    cargo xtask prepare-product-artifact lom|provlita|hagia REPO SIGNED-COMMIT NEW-DIR
+    cargo xtask prepare-bemenu-artifact BEMENU-REPO SIGNED-COMMIT NEW-DIR
+    SOPHIA_LOM_NATIVE_GATE_ARM=1 SOPHIA_SOURCE=/abs/sophia \
+    SOPHIA_LOM_ARTIFACT=DIR SOPHIA_LOM_COMMIT=REV \
+    SOPHIA_HAGIA_ARTIFACT=DIR SOPHIA_HAGIA_COMMIT=REV \
+    [SOPHIA_BEMENU_ARTIFACT=DIR SOPHIA_BEMENU_COMMIT=REV] \
+    [SOPHIA_PROVLITA_ARTIFACT=DIR SOPHIA_PROVLITA_COMMIT=REV] \
+        tools/run_current_lom_panel_gate_tty4.sh [launcher|dock]
+
+These runs are manual (tty4, real hardware). The Sophia checkout's shared
+session runner and native launcher catalog must match
+`pins/sophia-shared.sha256`. Rust products build `--offline --locked`, so run
+`cargo fetch --locked` in the product repository first. Their verifier
+self-tests are part of the offline gate (`crates/xtask/tests/verifier_self_tests.rs`).
+
 ## Provisioning
 
     sh tools/provision.sh [--source ABSOLUTE-SOPHIA-REPO] [--generate-lockfile]
