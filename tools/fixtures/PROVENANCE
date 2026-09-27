@@ -1,1 +1,2 @@
 lom_workload_budgets.json: moved byte for byte from Sophia tools/fixtures/lom_workload_budgets.json at 9fcaec782ce4fe9978568c0466ee17a78b3d4571 (Sophia rule 13). JSON carries no comments, so its provenance is recorded here.
+firefox_m8_local_page.html: moved byte for byte from Sophia tools/fixtures/firefox_m8_local_page.html at a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (pin pending) (Sophia rule 13). The session recipes pass it by path, so no header was added.

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 const USAGE: &str = "usage:
   xtask prepare-bemenu-artifact SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR
   xtask prepare-product-artifact lom|provlita|hagia SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR
+  xtask session-recipe prepare-arguments|prepare-inputs|stage-proofs|prepare-environment --name=value ... -- [session arguments]
   xtask check-pins
   xtask check-provision
   xtask dock profile LOM LOM_CONFIG BEMENU PROVLITA DOCK_CONFIG
@@ -52,6 +53,10 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
                     .into(),
             ),
         },
+        Some("session-recipe") => {
+            xtask::session::run(&arguments[1..]).map_err(|e| e.to_string())?;
+            Ok(Vec::new())
+        }
         Some("check-pins") if arguments.len() == 1 => xtask::pins::check(&repo),
         Some("check-provision") if arguments.len() == 1 => xtask::pins::check_provision(&repo),
         Some("audit-pins") => match &arguments[1..] {

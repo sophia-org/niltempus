@@ -1,0 +1,14 @@
+#!/bin/sh
+# Thin launcher for the maintained Rust host checker (crates/xtask
+# src/session_preflight.rs, bin active-session-preflight). A packaged release
+# ships the binary itself; this script runs a development build from the
+# explicit SOPHIA_INTEGRATION_BIN_DIR (the private target's release dir).
+set -eu
+case ${SOPHIA_INTEGRATION_BIN_DIR:-} in
+/*) ;;
+*)
+    echo "active-session-preflight: SOPHIA_INTEGRATION_BIN_DIR must be absolute" >&2
+    exit 2
+    ;;
+esac
+exec "$SOPHIA_INTEGRATION_BIN_DIR/active-session-preflight" "$@"
