@@ -133,6 +133,9 @@ fn run_sophia_terminal_gate_tty3_self_test() {
         .arg("--self-test")
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
+        // The script resolves its state directory from HOME before the
+        // self-test branch (nothing is written there).
+        .env("HOME", std::env::var_os("HOME").unwrap_or_default())
         .output()
         .unwrap();
     assert!(
