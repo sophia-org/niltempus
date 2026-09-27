@@ -1,0 +1,17 @@
+[package]
+name = "live-tests"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dev-dependencies]
+rustix = { workspace = true, features = ["time"] }
+sophia-protocol.workspace = true
+sophia-runtime.workspace = true
+xtask = { path = "../xtask" }
+
+[lints]
+workspace = true

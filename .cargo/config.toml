@@ -1,0 +1,3 @@
+# `cargo xtask` runs this repository's artifact preparation and pin checks.
+[alias]
+xtask = "run --package xtask --"
