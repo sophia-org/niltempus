@@ -25,7 +25,7 @@ sha2 = "0.10.9"
 # Sophia's public crates, pinned to one revision by its canonical URL. No
 # sibling path is ever named: tools/provision.sh redirects the URL to a local
 # clone only while fetching, and every gate then builds --offline --locked
-# from the private CARGO_HOME in .provision/cargo-home. See pins/sophia.toml.
+# from an explicit private CARGO_HOME outside this tree. See pins/sophia.toml.
 # The public session-log record reader (seam B). Only an exact git checkout
 # builds this package (its conformance-host bins use ../ paths), so
 # provisioning fetches into a private CARGO_HOME rather than `cargo vendor`.

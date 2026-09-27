@@ -142,7 +142,11 @@ impl Fixture {
         }
         // The dock branch builds xtask only from an accepted private
         // CARGO_HOME; the fixture's cargo is a stub.
-        fs::write(root.join(".provision/accepted"), "sophia=fixture\n").unwrap();
+        fs::write(
+            root.join(".provision/accepted"),
+            "url=fixture\nrev=fixture\ncargo_lock_sha256=fixture\ncargo_home=/nonexistent/fixture-cargo-home\n",
+        )
+        .unwrap();
         for name in [
             "tools/run_current_lom_panel_gate_tty4.sh",
             "tools/lib/artifacts.sh",

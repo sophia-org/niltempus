@@ -177,8 +177,11 @@ fn contract_bindings_cannot_be_dropped_or_rebound() {
 fn a_stale_provisioning_marker_is_refused() {
     use xtask::pins::check_marker;
     let lock = "a".repeat(64);
-    let good = format!("url={SOPHIA_URL}\nrev={SOPHIA_REV}\ncargo_lock_sha256={lock}\n");
-    check_marker(&good, &lock).unwrap();
+    let home = "/private/cargo-home";
+    let good =
+        format!("url={SOPHIA_URL}\nrev={SOPHIA_REV}\ncargo_lock_sha256={lock}\ncargo_home={home}\n");
+    check_marker(&good, &lock, None).unwrap();
+    check_marker(&good, &lock, Some(home)).unwrap();
     let cases = [
         ("stale pin", good.replace(SOPHIA_REV, OTHER_REV), lock.clone()),
         ("stale lock", good.clone(), "b".repeat(64)),
@@ -189,13 +192,19 @@ fn a_stale_provisioning_marker_is_refused() {
         ),
         (
             "missing lock digest",
-            good.lines().take(2).collect::<Vec<_>>().join("\n"),
+            good.lines()
+                .filter(|l| !l.starts_with("cargo_lock"))
+                .collect::<Vec<_>>()
+                .join("\n"),
             lock.clone(),
         ),
+        ("relative home", good.replace(home, "cargo-home"), lock.clone()),
         ("extra line", format!("{good}note=1\n"), lock.clone()),
     ];
     for (what, text, current_lock) in cases {
-        let error = check_marker(&text, &current_lock).unwrap_err();
+        let error = check_marker(&text, &current_lock, None).unwrap_err();
         assert!(error.contains("re-run tools/provision.sh"), "{what}: {error}");
     }
+    let error = check_marker(&good, &lock, Some("/another/cargo-home")).unwrap_err();
+    assert!(error.contains("not the provisioned"), "{error}");
 }

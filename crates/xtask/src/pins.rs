@@ -183,7 +183,11 @@ pub fn check(repo: &Path) -> Result<Vec<String>, String> {
     // dependency set. (Provisioning itself runs this before writing it.)
     let provision = match std::fs::read(repo.join(PROVISION_MARKER)) {
         Ok(marker) => {
-            check_marker(&String::from_utf8(marker).map_err(|e| e.to_string())?, &lock_sha256(repo)?)?;
+            check_marker(
+                &String::from_utf8(marker).map_err(|e| e.to_string())?,
+                &lock_sha256(repo)?,
+                None,
+            )?;
             "matched"
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => "unmarked",
@@ -204,31 +208,50 @@ fn lock_sha256(repo: &Path) -> Result<String, String> {
     Ok(sha256(&read(&repo.join("Cargo.lock"))?))
 }
 
-/// Gate entry: the provisioned CARGO_HOME exists and was accepted for exactly
-/// this pin and this Cargo.lock. Gates run it in addition to check-pins.
+/// Gate entry: the CARGO_HOME this gate uses is the provisioned one, accepted
+/// for exactly this pin and this Cargo.lock. Gates run it in addition to
+/// check-pins.
 pub fn check_provision(repo: &Path) -> Result<Vec<String>, String> {
     let marker = std::fs::read(repo.join(PROVISION_MARKER)).map_err(|e| {
         format!("{PROVISION_MARKER}: {e}; run tools/provision.sh")
     })?;
     let lock = lock_sha256(repo)?;
-    check_marker(&String::from_utf8(marker).map_err(|e| e.to_string())?, &lock)?;
+    let home = std::env::var("CARGO_HOME")
+        .map_err(|_| "CARGO_HOME must name the provisioned private CARGO_HOME".to_owned())?;
+    check_marker(
+        &String::from_utf8(marker).map_err(|e| e.to_string())?,
+        &lock,
+        Some(&home),
+    )?;
     Ok(vec![format!(
-        "provision status=pass sophia={SOPHIA_REV} cargo_lock_sha256={lock}"
+        "provision status=pass sophia={SOPHIA_REV} cargo_lock_sha256={lock} cargo_home={home}"
     )])
 }
 
-/// The marker names exactly url, rev and the Cargo.lock digest, in order.
-pub fn check_marker(text: &str, lock_sha256: &str) -> Result<(), String> {
+/// The marker names exactly url, rev, the Cargo.lock digest and the absolute
+/// private CARGO_HOME, in order. With `cargo_home`, that home must match.
+pub fn check_marker(text: &str, lock_sha256: &str, cargo_home: Option<&str>) -> Result<(), String> {
     let lines = text.lines().collect::<Vec<_>>();
     let expected = [
         format!("url={SOPHIA_URL}"),
         format!("rev={SOPHIA_REV}"),
         format!("cargo_lock_sha256={lock_sha256}"),
     ];
-    if lines != expected {
+    let recorded = match lines.as_slice() {
+        [url, rev, lock, home] if [*url, *rev, *lock] == expected.each_ref().map(String::as_str) => {
+            home.strip_prefix("cargo_home=").filter(|home| home.starts_with('/'))
+        }
+        _ => None,
+    };
+    let Some(recorded) = recorded else {
         return Err(format!(
             "{PROVISION_MARKER} is stale or malformed (pin or Cargo.lock changed since \
              provisioning); re-run tools/provision.sh"
+        ));
+    };
+    if cargo_home.is_some_and(|home| home != recorded) {
+        return Err(format!(
+            "CARGO_HOME is not the provisioned {recorded}; re-run tools/provision.sh or use it"
         ));
     }
     Ok(())

@@ -1,10 +1,17 @@
 #!/bin/sh
-# Provision the pinned Sophia crates and every crates.io dependency into a
-# private CARGO_HOME (.provision/cargo-home) so that all later gates build with
-#   CARGO_HOME="$PWD/.provision/cargo-home" cargo <command> --offline --locked
+# Provision the pinned Sophia crates and every crates.io dependency into an
+# explicit private CARGO_HOME so that all later gates build with
+#   CARGO_HOME=/abs/private-cargo-home cargo <command> --offline --locked
 #
-# usage: sh tools/provision.sh [--source ABSOLUTE-SOPHIA-REPO]
+# usage: sh tools/provision.sh --cargo-home ABSOLUTE-DIR
+#                              [--source ABSOLUTE-SOPHIA-REPO]
 #                              [--generate-lockfile | --update-lockfile]
+#
+# The CARGO_HOME must lie OUTSIDE this repository and outside the Sophia
+# source: Cargo resolves workspace inheritance of the pinned Sophia checkout's
+# nested packages (the vendored Rust desktop SDK) by searching upward from the
+# git checkout, and a checkout inside this repository reaches this
+# repository's own workspace and is skipped as malformed.
 #
 # Default route: fetch the pinned revision from its canonical public URL
 # (pins/sophia.toml). Optional route: --source redirects that URL to an
@@ -41,17 +48,23 @@
 set -eu
 
 usage() {
-    echo "usage: sh tools/provision.sh [--source ABSOLUTE-SOPHIA-REPO] [--generate-lockfile | --update-lockfile]" >&2
+    echo "usage: sh tools/provision.sh --cargo-home ABSOLUTE-DIR [--source ABSOLUTE-SOPHIA-REPO] [--generate-lockfile | --update-lockfile]" >&2
     exit 2
 }
 
 source_repo=
 generate=
+cargo_home=
 while [ $# -gt 0 ]; do
     case $1 in
     --source)
         [ $# -ge 2 ] || usage
         source_repo=$2
+        shift 2
+        ;;
+    --cargo-home)
+        [ $# -ge 2 ] || usage
+        cargo_home=$2
         shift 2
         ;;
     --generate-lockfile)
@@ -81,7 +94,32 @@ pin() {
 }
 url=$(pin url)
 rev=$(pin rev)
-cargo_home="$repo/.provision/cargo-home"
+
+outside() { # DIR TREE: DIR is neither TREE, inside it, nor containing it
+    d=$(realpath -m -- "$1")
+    t=$(realpath -m -- "$2")
+    case "$d/" in "$t"/*) return 1 ;; esac
+    case "$t/" in "$d"/*) return 1 ;; esac
+    return 0
+}
+case $cargo_home in
+/*) ;;
+*)
+    echo "provision: --cargo-home ABSOLUTE-DIR is required" >&2
+    exit 2
+    ;;
+esac
+outside "$cargo_home" "$repo" || {
+    echo "provision: --cargo-home must be outside this repository" >&2
+    exit 2
+}
+if [ -n "$source_repo" ]; then
+    outside "$cargo_home" "$source_repo" || {
+        echo "provision: --cargo-home must be outside the Sophia source" >&2
+        exit 2
+    }
+fi
+cargo_home=$(realpath -m -- "$cargo_home")
 
 : "${CARGO_BUILD_JOBS:=2}"
 export CARGO_BUILD_JOBS
@@ -192,5 +230,6 @@ if [ -n "$source_repo" ]; then
     check audit-pins "$source_repo"
 fi
 lock_sha256=$(sha256sum Cargo.lock | cut -d' ' -f1)
-printf 'url=%s\nrev=%s\ncargo_lock_sha256=%s\n' "$url" "$rev" "$lock_sha256" >.provision/accepted
-echo "provision status=pass sophia=$rev cargo_home=.provision/cargo-home"
+printf 'url=%s\nrev=%s\ncargo_lock_sha256=%s\ncargo_home=%s\n' "$url" "$rev" "$lock_sha256" \
+    "$cargo_home" >.provision/accepted
+echo "provision status=pass sophia=$rev cargo_home=$cargo_home"

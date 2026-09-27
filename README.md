@@ -58,13 +58,16 @@ self-tests are part of the offline gate (`crates/xtask/tests/verifier_self_tests
 
 ## Provisioning
 
-    sh tools/provision.sh [--source ABSOLUTE-SOPHIA-REPO] [--generate-lockfile | --update-lockfile]
+    sh tools/provision.sh --cargo-home ABSOLUTE-DIR [--source ABSOLUTE-SOPHIA-REPO] \
+        [--generate-lockfile | --update-lockfile]
 
-This fetches every dependency into a private `CARGO_HOME` under `.provision/`
-(ignored), seeded by copying the operator's `~/.cargo/registry` index, cache
+This fetches every dependency into an explicit private `CARGO_HOME` that must
+lie outside this repository and the Sophia source (inside it, Cargo's upward
+workspace search from the pinned checkout's vendored SDK reaches this
+repository's workspace and skips those packages), seeded by copying the operator's `~/.cargo/registry` index, cache
 and src (never credentials or config, never a link back), and accepts it
-(`.provision/accepted`, binding the pin's url and rev and the `Cargo.lock`
-sha256) only after `check-pins` passes. `.provision/provision.log` records
+(`.provision/accepted`, binding the pin's url and rev, the `Cargo.lock`
+sha256 and the `CARGO_HOME` path) only after `check-pins` passes. `.provision/provision.log` records
 whether the registry index or git database changed and every crate that was
 downloaded. The default fetches the pinned revision from its public URL;
 `--source` redirects that URL to a local clone for the script's own cargo and
@@ -72,14 +75,14 @@ git children only. A private `CARGO_HOME` rather than `cargo vendor` is used
 because `sophia-conformance` builds only from an exact git checkout.
 Afterwards every command is offline:
 
-    CARGO_HOME="$PWD/.provision/cargo-home" cargo <command> --offline --locked
+    CARGO_HOME=/abs/private-cargo-home cargo <command> --offline --locked
 
 ## Gates
 
 All with a private target outside this tree, two jobs, low priority and a hard
 timeout:
 
-    export CARGO_HOME="$PWD/.provision/cargo-home" CARGO_TARGET_DIR=/abs/private-target CARGO_BUILD_JOBS=2
+    export CARGO_HOME=/abs/private-cargo-home CARGO_TARGET_DIR=/abs/private-target CARGO_BUILD_JOBS=2
     timeout -s KILL 600 nice -n 19 cargo run --offline --locked -p xtask -- check-pins
     timeout -s KILL 600 nice -n 19 cargo run --offline --locked -p xtask -- check-provision
     timeout -s KILL 3600 nice -n 19 cargo test --workspace --offline --locked

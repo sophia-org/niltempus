@@ -90,9 +90,12 @@ if [[ "$GATE_MODE" == launcher ]]; then
 fi
 XTASK_BIN="$INTEGRATION_TARGET/release/xtask"
 if [[ "$GATE_MODE" == dock ]]; then
-    # This repository builds offline from its accepted private CARGO_HOME.
+    # This repository builds offline from its accepted private CARGO_HOME,
+    # which the marker names (outside every source tree).
     [[ -f "$ROOT_DIR/.provision/accepted" ]] || { echo "Run tools/provision.sh first" >&2; exit 2; }
-    (export CARGO_HOME="$ROOT_DIR/.provision/cargo-home"
+    provisioned_home=$(sed -n 's/^cargo_home=\(\/.*\)$/\1/p' "$ROOT_DIR/.provision/accepted")
+    [[ -n "$provisioned_home" ]] || { echo "Re-run tools/provision.sh (marker has no cargo_home)" >&2; exit 2; }
+    (export CARGO_HOME="$provisioned_home"
         CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR="$INTEGRATION_TARGET" nice -n 19 cargo build --locked --offline \
             --release -p xtask --manifest-path "$ROOT_DIR/Cargo.toml")
     "$XTASK_BIN" dock profile "$LOM_BIN" "$LOM_CONFIG" "$BEMENU_BIN" "$PROVLITA_BIN" "$PROVLITA_CONFIG" \
