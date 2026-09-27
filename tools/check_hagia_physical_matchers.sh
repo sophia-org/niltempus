@@ -25,8 +25,17 @@ grep -Fq 'bind "Super+Shift+Left" "policy:move-to-output-prev"' \
     "$SOPHIA_ROOT/crates/sophia-config/src/desktop_profile.rs"
 # The physical gate must select Hagia's tracked default explicitly. Hagia owns
 # the 28 px panel claim; Sophia's no-file fallback remains profile-neutral.
-grep -Fq 'desktop_profile="$HAGIA_ROOT/examples/config/default.kdl"' \
+# The profile comes from Hagia's staged signed tree through the prepared
+# physical inputs, never from the checkout.
+grep -Fq -- '--profile=hagia:examples/config/default.kdl' \
     "$root_dir/tools/run_current_hagia_policy_gate_tty4.sh"
+grep -Fq 'desktop_profile="${PI[SOPHIA_PROFILE_DIR]}/hagia/examples/config/default.kdl"' \
+    "$root_dir/tools/run_current_hagia_policy_gate_tty4.sh"
+if grep -Fq '$HAGIA_ROOT/examples/config/default.kdl' \
+    "$root_dir/tools/run_current_hagia_policy_gate_tty4.sh"; then
+    echo "the Hagia policy gate reads its default profile from the checkout" >&2
+    exit 1
+fi
 grep -Fq -- '--desktop-profile="$desktop_profile"' \
     "$root_dir/tools/run_current_hagia_policy_gate_tty4.sh"
 grep -Fq 'bind "Super+p" "session:window-switcher"' \
