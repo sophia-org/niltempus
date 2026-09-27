@@ -49,7 +49,7 @@ BUILD_DIR="$(realpath -- "$SOPHIA_GATE_BUILD_DIR")"
 SOPHIA_TREE="$BUILD_DIR/sophia-tree"
 SOPHIA_TARGET="$BUILD_DIR/sophia-target"
 INTEGRATION_TARGET="$BUILD_DIR/integration-target"
-stage_sophia_tree "$SOPHIA_SOURCE" "$SOPHIA_TREE"
+stage_sophia_tree "$SOPHIA_SOURCE" "$BUILD_DIR" "$SOPHIA_TREE"
 if [[ "$GATE_MODE" == panel ]]; then
     default_core="$ROOT_DIR/tools/fixtures/lom_panel_core.kdl"
 else

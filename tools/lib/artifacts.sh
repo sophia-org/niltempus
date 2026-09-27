@@ -73,36 +73,58 @@ check_sophia_source() {
     git -C "$dir" verify-commit "$rev" >/dev/null 2>&1 || source_fail "Sophia $rev is not a good signed commit"
 }
 
-# stage_sophia_tree SOURCE DEST: the exact pinned tree, extracted with
-# `git archive` into DEST (inside the private build directory) and proven
-# equal to the revision's tree. Every Sophia file the gates read or execute
-# comes from here, never from the operator's working tree, so the pin covers
-# the complete transitive input set by construction.
+# stage_sophia_tree SOURCE BUILD_DIR DEST: the exact pinned tree, extracted
+# with `git archive` into DEST (a direct child of the private BUILD_DIR) and
+# proven equal to the revision's tree. Every Sophia file the gates read or
+# execute comes from here, never from the operator's working tree, so the pin
+# covers the complete transitive input set by construction.
+#
+# A destination that already holds exactly the pinned tree is reused
+# read-only (a nested stage sharing the build directory keeps the parent's
+# tree). Nothing is modified before the destination is proven to be a real
+# directory owned by this user directly inside the build directory: a symlink
+# there, or a symlinked build directory, is refused before any chmod or rm.
 stage_sophia_tree() {
-    local source=$1 dest=$2 rev
-    rev=$(pinned_sophia_rev)
-    [[ ! -e "$dest" ]] || chmod -R u+w -- "$dest"
-    rm -rf -- "$dest"
+    local source=$1 build=$2 dest=$3
+    [[ -d "$build" && ! -L "$build" && -O "$build" ]] \
+        || source_fail "build directory is not a real directory owned by this user: $build"
+    [[ "$(dirname -- "$dest")" == "$build" && "$(basename -- "$dest")" != . && "$(basename -- "$dest")" != .. ]] \
+        || source_fail "staged tree must be a direct child of the build directory: $dest"
+    [[ ! -L "$dest" ]] || source_fail "staged tree destination is a symlink: $dest"
+    if [[ -e "$dest" ]]; then
+        [[ -d "$dest" && -O "$dest" ]] || source_fail "staged tree destination is not an owned directory: $dest"
+        if staged_tree_matches "$source" "$dest"; then
+            return 0
+        fi
+        chmod -R u+w -- "$dest"
+        rm -rf -- "$dest"
+    fi
     mkdir -m 700 -- "$dest"
-    git -C "$source" archive --format=tar "$rev" | tar -x --no-same-owner -C "$dest"
+    git -C "$source" archive --format=tar "$(pinned_sophia_rev)" | tar -x --no-same-owner -C "$dest"
     verify_staged_tree "$source" "$dest"
     # Read-only from here on: builds write only to the private target.
     chmod -R a-w -- "$dest"
 }
 
-# verify_staged_tree SOURCE DEST: DEST hashes to exactly the pinned revision's
-# tree. Re-run before and after each stage that executes staged files.
-verify_staged_tree() {
+# staged_tree_matches SOURCE DEST: whether DEST hashes to exactly the pinned
+# revision's tree.
+staged_tree_matches() {
     local source=$1 dest=$2 rev expected actual index
     rev=$(pinned_sophia_rev)
     expected=$(git -C "$source" rev-parse --verify "$rev^{tree}")
     index=$(mktemp -d)
     git init -q "$index"
-    git --git-dir="$index/.git" --work-tree="$dest" -c core.autocrlf=false -c core.fileMode=true \
-        add -A -f
-    actual=$(git --git-dir="$index/.git" write-tree)
+    actual=$(git --git-dir="$index/.git" --work-tree="$dest" -c core.autocrlf=false -c core.fileMode=true \
+        add -A -f && git --git-dir="$index/.git" write-tree) || actual=
     rm -rf -- "$index"
-    [[ "$actual" == "$expected" ]] || source_fail "staged Sophia tree $actual is not $rev's tree $expected"
+    [[ -n "$actual" && "$actual" == "$expected" ]]
+}
+
+# verify_staged_tree SOURCE DEST: refuse unless DEST is exactly the pinned
+# tree. Run before and after each stage that executes staged files.
+verify_staged_tree() {
+    staged_tree_matches "$1" "$2" \
+        || source_fail "staged Sophia tree is not $(pinned_sophia_rev)'s tree: $2"
 }
 
 # load_artifact KIND DIR COMMIT BINARY_SHA256 DEST [CONFIG_SHA256 DEST_CONFIG]

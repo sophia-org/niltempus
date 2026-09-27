@@ -311,6 +311,54 @@ exit "${TEST_SESSION_STATUS:-0}"''')
         self.commit_sophia()
         self.assert_refused_before_build("staged Sophia tree")
 
+    def test_symlinked_staging_destination_is_refused_before_any_change(self):
+        outside = self.base / "outside"
+        (outside / "nested").mkdir(parents=True)
+        sentinel = outside / "nested/sentinel"
+        sentinel.write_text("sentinel\n")
+        sentinel.chmod(0o640)
+        os.utime(sentinel, (1_000_000_000, 1_000_000_000))
+        outside.chmod(0o500)
+        before = [(p, p.read_bytes() if p.is_file() else None, p.lstat().st_mode, p.lstat().st_mtime_ns)
+                  for p in (outside, outside / "nested", sentinel)]
+        self.build.mkdir(parents=True, exist_ok=True)
+        (self.build / "sophia-tree").symlink_to(outside)
+        try:
+            self.assert_refused_before_build("staged tree destination is a symlink")
+            after = [(p, p.read_bytes() if p.is_file() else None, p.lstat().st_mode, p.lstat().st_mtime_ns)
+                     for p in (outside, outside / "nested", sentinel)]
+            self.assertEqual(before, after)
+        finally:
+            outside.chmod(0o700)
+
+    def test_symlinked_build_directory_is_refused(self):
+        real = self.base / "real-build"
+        real.mkdir()
+        link = self.base / "linked-build"
+        link.symlink_to(real)
+        self.assert_refused_before_build("must be owned by this user", SOPHIA_GATE_BUILD_DIR=str(link))
+        self.assertEqual(list(real.iterdir()), [])
+
+    def test_a_verified_staged_tree_is_reused_read_only(self):
+        self.assertEqual(self.run_launcher().returncode, 0)
+        staged = self.build / "sophia-tree/tools/run_sophia_session.sh"
+        identity = (staged.stat().st_ino, staged.stat().st_mtime_ns)
+        self.assertEqual(staged.stat().st_mode & 0o222, 0)
+        result = self.run_launcher(SOPHIA_LOM_NATIVE_EVIDENCE_DIR=str(self.base / "evidence-again"))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((staged.stat().st_ino, staged.stat().st_mtime_ns), identity)
+
+    def test_a_modified_staged_tree_is_replaced_not_reused(self):
+        self.assertEqual(self.run_launcher().returncode, 0)
+        staged = self.build / "sophia-tree/tools/run_sophia_session.sh"
+        staged.parent.chmod(0o700)
+        staged.chmod(0o700)
+        with staged.open("a") as script:
+            script.write("# tampered\n")
+        result = self.run_launcher(SOPHIA_LOM_NATIVE_EVIDENCE_DIR=str(self.base / "evidence-again"))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("# tampered", staged.read_text())
+
     def test_an_input_outside_the_pinned_tree_is_unavailable(self):
         # Ignored and untracked: the checkout stays clean, but the pinned tree
         # lacks it, so the staged session runner cannot read it.

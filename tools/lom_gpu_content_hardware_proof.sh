@@ -49,7 +49,7 @@ mkdir -m 700 "$EVIDENCE_DIR"
 BUILD_DIR="$(realpath -- "$SOPHIA_GATE_BUILD_DIR")"
 SOPHIA_TREE="$BUILD_DIR/sophia-tree"
 SOPHIA_TARGET="$BUILD_DIR/sophia-target"
-stage_sophia_tree "$SOPHIA_SOURCE" "$SOPHIA_TREE"
+stage_sophia_tree "$SOPHIA_SOURCE" "$BUILD_DIR" "$SOPHIA_TREE"
 LOM_BIN="$EVIDENCE_DIR/lom"
 LOM_CONFIG="$EVIDENCE_DIR/lom-config.kdl"
 load_artifact lom "$SOPHIA_LOM_ARTIFACT" "$SOPHIA_LOM_COMMIT" "$SOPHIA_LOM_SHA256" "$LOM_BIN" \
@@ -57,6 +57,8 @@ load_artifact lom "$SOPHIA_LOM_ARTIFACT" "$SOPHIA_LOM_COMMIT" "$SOPHIA_LOM_SHA25
 CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR="$SOPHIA_TARGET" nice -n 19 cargo build --locked --offline --release \
     -p sophia-cli --features native-session --manifest-path "$SOPHIA_TREE/Cargo.toml"
 SOPHIA_BIN="$SOPHIA_TARGET/release/sophia"
+# Tree check: after the build, before anything staged is executed.
+verify_staged_tree "$SOPHIA_SOURCE" "$SOPHIA_TREE"
 {
     printf 'integration_commit=%s\n' "$(git -C "$ROOT_DIR" rev-parse HEAD)"
     printf 'sophia_commit=%s\n' "$(pinned_sophia_rev)"
@@ -78,6 +80,9 @@ env -u DISPLAY -u WAYLAND_DISPLAY -u WAYLAND_SOCKET SOPHIA_SHELL_GPU_PROOF_ARM=1
     "$SOPHIA_BIN" shell-gpu-content-proof \
     "--client=$LOM_BIN" --client-arg=--serve "--config=$LOM_CONFIG" \
     "--seat=$SEAT" "--render-node=$RENDER_NODE" --output=256x64 --surface=256x24 --edge=top \
-    --outcomes=presented,renderer-failed --end=client-exits --discrete-input=granted \
+    --pixels=full-surface-raster --outcomes=presented,renderer-failed --end=client-exits \
+    --discrete-input=granted \
     --timeout-ms=30000 2>&1 | tee "$LOG"
+# Tree check: after the proof, before its result is trusted.
+verify_staged_tree "$SOPHIA_SOURCE" "$SOPHIA_TREE"
 "$ROOT_DIR/tools/verify_lom_gpu_content_hardware_proof.sh" "$LOG" | tee "$EVIDENCE_DIR/verification.log"

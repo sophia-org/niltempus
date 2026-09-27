@@ -173,6 +173,30 @@ for script in "$runner" "$ROOT_DIR/tools/lom_gpu_content_hardware_proof.sh" "$RO
         }
     done < <(grep -E '(^|[[:space:]])cargo([[:space:]]|$)' "$script" | grep -vE '^[[:space:]]*#')
 done
+# The standalone GPU wrapper keeps the staged-tree invariant on its own:
+# stage, build, verify before exec, run the proof, verify after it, and only
+# then trust the verifier. Each mutant drops one tree check and must fail.
+wrapper="$ROOT_DIR/tools/lom_gpu_content_hardware_proof.sh"
+wrapper_invariant() {
+    local file=$1 stage build before proof after verdict
+    stage=$(grep -n '^stage_sophia_tree ' "$file" | cut -d: -f1)
+    build=$(grep -n 'cargo build' "$file" | cut -d: -f1)
+    proof=$(grep -n '"\$SOPHIA_BIN" shell-gpu-content-proof' "$file" | cut -d: -f1)
+    verdict=$(grep -n 'tools/verify_lom_gpu_content_hardware_proof.sh" "\$LOG"' "$file" | cut -d: -f1)
+    mapfile -t checks < <(grep -n '^verify_staged_tree ' "$file" | cut -d: -f1)
+    [[ ${#checks[@]} -eq 2 && -n "$stage" && -n "$build" && -n "$proof" && -n "$verdict" ]] || return 1
+    before=${checks[0]} after=${checks[1]}
+    (( stage < build && build < before && before < proof && proof < after && after < verdict ))
+}
+wrapper_invariant "$wrapper" || { echo "GPU wrapper does not re-verify the staged tree around exec" >&2; exit 1; }
+for drop in 1 2; do
+    awk -v drop="$drop" '/^verify_staged_tree / { seen++; if (seen == drop) next } { print }' \
+        "$wrapper" > "$work/wrapper-mutant-$drop.sh"
+    if wrapper_invariant "$work/wrapper-mutant-$drop.sh"; then
+        echo "wrapper invariant accepted a mutant without tree check $drop" >&2
+        exit 1
+    fi
+done
 grep -q 'SOPHIA_CORE_CONFIG="$LOM_CORE_CONFIG"' "$runner" || {
     echo "native runner does not pass its bounded application catalog to Sophia" >&2
     exit 1
