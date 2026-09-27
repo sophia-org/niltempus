@@ -6,6 +6,9 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+# The `cargo xtask` alias (`run --package xtask --`) must resolve to this
+# binary; the package also ships the active-session-preflight checker.
+default-run = "xtask"
 
 [dependencies]
 rustix = { workspace = true, features = ["rand"] }
