@@ -326,6 +326,9 @@ fn builders_refuse_a_missing_or_misplaced_dependency_manifest_before_staging() {
     fs::set_permissions(&build, fs::Permissions::from_mode(0o750)).unwrap();
     assert!(product(&[&build_arg]).contains("private (0700)"));
 
+    // The Hagia C SDK revision is required before any other option is
+    // examined; supply it so the refusals below are the ones under test.
+    let sdk_rev = format!("--hagia-c-sdk-rev={}", "8".repeat(40));
     let pair = xtask::wm_pair::run(&[
         "--hagia".to_owned(),
         root.clone(),
@@ -334,6 +337,7 @@ fn builders_refuse_a_missing_or_misplaced_dependency_manifest_before_staging() {
         root.clone(),
         zero.clone(),
         out.clone(),
+        sdk_rev.clone(),
     ])
     .unwrap_err();
     assert!(pair.contains("--build-dir is required"), "{pair}");
@@ -349,6 +353,7 @@ fn builders_refuse_a_missing_or_misplaced_dependency_manifest_before_staging() {
         build_arg,
         format!("--hagia-nim-deps={}", dir.0.join("deps").display()),
         digest.replace("--nim", "--hagia-nim"),
+        sdk_rev,
     ])
     .unwrap_err();
     assert!(

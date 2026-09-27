@@ -121,7 +121,7 @@ pub fn reviewed_deps(product: &str, commit: &str) -> String {
     .unwrap()
 }
 
-/// A prepared-pair directory in `prepare-wm-pair`'s layout (schema 2).
+/// A prepared-pair directory in `prepare-wm-pair`'s layout (schema 3).
 /// The SDK revision the fixture pair's Hagia vendors.
 pub const HAGIA_C_SDK_REV: &str = "841563d614ed8540472f0edfa7f4cddaafe3fdde";
 
