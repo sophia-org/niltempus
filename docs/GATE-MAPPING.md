@@ -111,9 +111,22 @@ archive aggregate; the decoy configuration fixture read by
 `sophia_conformance::profile`; the direct-scanout verifiers and archive
 family; generic shell-component, policy-host and content-lifecycle tests.
 
+## G2 9P-only live evidence
+
+`live-tests/tests/bemenu_files.rs` passed 1/1 at integration master `f8aeb84`,
+in an operator-authorized isolated run by root. The log is
+`development-evidence/integration-g4/g2l-live-root-f8aeb84.log`.
+- Artifact: Bemenu `536d6b25704e1361e2f3485f8899cf89afecc0d3`, binary sha256
+  `e853e5bf76e7aeb44a610ee2459b808787c49d2bf6e95ca8503357efd57cafa6`, signer
+  `7E2364149E81DD79B293EA6F57184BB62A800062`, C SDK
+  `a0ab8c853fe56b68e01ae69b82d06c15fc177484`.
+- Record: `sophia_bemenu_files status=pass openings=2 candidates=3 edits=1
+  activations=1 fonts=isolated neighbour=unchanged held_lease=retired`.
+
+The run used scripted Session owners plus the real Bemenu executable over
+Sophia's production 9P file export. It makes no physical rendering claim.
+
 ## Pending
 
 - Lom: the panel, launcher and dock gates, the GPU content proof and the
   content-proof step, pending the Sophia 9P seams ([Lom content](lom-content.md)).
-- Bemenu: the new signed artifact preparation at Bemenu `536d6b25` (a slot and
-  the operator's confirmation of the binary SHA before any live run).
