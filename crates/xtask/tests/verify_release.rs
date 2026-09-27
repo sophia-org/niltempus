@@ -143,9 +143,12 @@ fn a_changed_or_missing_sealed_sdk_manifest_is_refused() {
     assert!(error.contains("no regular"), "{error}");
 }
 
+/// One way to damage a sealed release in place.
+type Damage = fn(&Path);
+
 #[test]
 fn sums_and_contents_must_agree_exactly() {
-    let cases: [(&str, fn(&Path)); 7] = [
+    let cases: [(&str, Damage); 7] = [
         ("changed binary", |out| {
             fs::write(out.join("target/release/sophia"), "changed").unwrap()
         }),
