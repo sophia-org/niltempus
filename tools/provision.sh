@@ -22,9 +22,22 @@
 # requires (`cargo fetch` without --locked); the change must then be reviewed
 # and committed. Otherwise Cargo.lock is required and used --locked.
 #
+# Seeding: a new private CARGO_HOME gets a COPY (cp -a --reflink=auto) of the
+# operator's registry index, cache and src from $SOPHIA_PROVISION_SEED_REGISTRY
+# (default ~/.cargo/registry). Nothing else is copied (no credentials, no
+# config) and nothing links back to a shared writable cache.
+#
+# Network accounting: online mode is recorded separately from actual network
+# use. Fingerprints of the registry index, the downloaded crate archives and
+# the git database are taken before and after fetching; the log states
+# whether the index changed and lists every crate that was downloaded
+# (.provision/provision.log). Every gate afterwards runs --offline --locked.
+#
 # The result is accepted only after `cargo xtask check-pins` passes offline
-# against it (and `audit-pins` when a local clone was named): until then no
-# .provision/accepted marker exists.
+# against it (and `audit-pins` when a local clone was named): only then is
+# .provision/accepted written, binding url, rev and the Cargo.lock sha256.
+# Gates re-run check-pins and check-provision themselves; a marker for another
+# pin or lock file fails them.
 set -eu
 
 usage() {
@@ -102,7 +115,40 @@ else
 fi
 
 rm -f .provision/accepted
+log="$repo/.provision/provision.log"
+
+if [ ! -d "$cargo_home/registry" ]; then
+    seed=${SOPHIA_PROVISION_SEED_REGISTRY:-$HOME/.cargo/registry}
+    mkdir -p "$cargo_home/registry"
+    for part in index cache src; do
+        if [ -d "$seed/$part" ]; then
+            cp -a --reflink=auto -- "$seed/$part" "$cargo_home/registry/$part"
+        fi
+    done
+    # Refuse a seed that smuggled a link back to the shared cache.
+    if [ -n "$(find "$cargo_home/registry" -maxdepth 3 -type l -print -quit)" ]; then
+        echo "provision: seeded registry contains symbolic links; refusing" >&2
+        exit 1
+    fi
+    echo "provision seed=$seed" >"$log"
+else
+    echo "provision seed=reused" >"$log"
+fi
 mkdir -p "$cargo_home"
+
+fingerprint() { # DIR
+    if [ -d "$1" ]; then
+        (cd "$1" && find . -type f -printf '%P %s %T@\n' | LC_ALL=C sort | sha256sum | cut -d' ' -f1)
+    else
+        echo none
+    fi
+}
+crates() {
+    find "$cargo_home/registry/cache" -type f -name '*.crate' -printf '%P\n' 2>/dev/null | LC_ALL=C sort
+}
+index_before=$(fingerprint "$cargo_home/registry/index")
+git_before=$(fingerprint "$cargo_home/git/db")
+crates >"$repo/.provision/crates.before"
 
 if [ "$generate" = update ]; then
     [ -e Cargo.lock ] || {
@@ -123,6 +169,20 @@ fi
 
 run_cargo fetch --locked
 
+index_after=$(fingerprint "$cargo_home/registry/index")
+git_after=$(fingerprint "$cargo_home/git/db")
+crates >"$repo/.provision/crates.after"
+downloaded=$(LC_ALL=C comm -13 "$repo/.provision/crates.before" "$repo/.provision/crates.after")
+{
+    echo "provision mode=online source=${source_repo:-canonical}"
+    [ "$index_before" = "$index_after" ] && echo "registry_index changed=false" \
+        || echo "registry_index changed=true"
+    [ "$git_before" = "$git_after" ] && echo "git_db changed=false" || echo "git_db changed=true"
+    echo "crates_downloaded count=$(printf '%s' "$downloaded" | grep -c . || true)"
+    [ -z "$downloaded" ] || printf '%s\n' "$downloaded" | sed 's/^/crate_downloaded /'
+} >>"$log"
+cat "$log"
+
 # Accept the provisioned home only when every pin agrees, offline.
 check() {
     env CARGO_HOME="$cargo_home" nice -n 19 cargo run --offline --locked --package xtask -- "$@"
@@ -131,5 +191,6 @@ check check-pins
 if [ -n "$source_repo" ]; then
     check audit-pins "$source_repo"
 fi
-printf 'sophia=%s\n' "$rev" >.provision/accepted
+lock_sha256=$(sha256sum Cargo.lock | cut -d' ' -f1)
+printf 'url=%s\nrev=%s\ncargo_lock_sha256=%s\n' "$url" "$rev" "$lock_sha256" >.provision/accepted
 echo "provision status=pass sophia=$rev cargo_home=.provision/cargo-home"

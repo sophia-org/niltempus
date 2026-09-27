@@ -172,3 +172,30 @@ fn contract_bindings_cannot_be_dropped_or_rebound() {
         assert!(parse_contracts(&bad).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn a_stale_provisioning_marker_is_refused() {
+    use xtask::pins::check_marker;
+    let lock = "a".repeat(64);
+    let good = format!("url={SOPHIA_URL}\nrev={SOPHIA_REV}\ncargo_lock_sha256={lock}\n");
+    check_marker(&good, &lock).unwrap();
+    let cases = [
+        ("stale pin", good.replace(SOPHIA_REV, OTHER_REV), lock.clone()),
+        ("stale lock", good.clone(), "b".repeat(64)),
+        (
+            "other url",
+            good.replace(SOPHIA_URL, "https://github.com/example/sophia.git"),
+            lock.clone(),
+        ),
+        (
+            "missing lock digest",
+            good.lines().take(2).collect::<Vec<_>>().join("\n"),
+            lock.clone(),
+        ),
+        ("extra line", format!("{good}note=1\n"), lock.clone()),
+    ];
+    for (what, text, current_lock) in cases {
+        let error = check_marker(&text, &current_lock).unwrap_err();
+        assert!(error.contains("re-run tools/provision.sh"), "{what}: {error}");
+    }
+}

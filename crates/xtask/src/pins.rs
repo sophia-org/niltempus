@@ -178,11 +178,60 @@ pub fn check(repo: &Path) -> Result<Vec<String>, String> {
             ));
         }
     }
+    // A present provisioning marker must match this pin and this lock file:
+    // a stale provisioned CARGO_HOME fails here rather than building an old
+    // dependency set. (Provisioning itself runs this before writing it.)
+    let provision = match std::fs::read(repo.join(PROVISION_MARKER)) {
+        Ok(marker) => {
+            check_marker(&String::from_utf8(marker).map_err(|e| e.to_string())?, &lock_sha256(repo)?)?;
+            "matched"
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => "unmarked",
+        Err(error) => return Err(format!("{PROVISION_MARKER}: {error}")),
+    };
     Ok(vec![format!(
-        "pins status=pass sophia={SOPHIA_REV} contracts={} copies={}",
+        "pins status=pass sophia={SOPHIA_REV} contracts={} copies={} provision={provision}",
         contracts.len(),
         COPIES.len()
     )])
+}
+
+/// The marker tools/provision.sh writes once check-pins has passed against
+/// the provisioned private CARGO_HOME.
+pub const PROVISION_MARKER: &str = ".provision/accepted";
+
+fn lock_sha256(repo: &Path) -> Result<String, String> {
+    Ok(sha256(&read(&repo.join("Cargo.lock"))?))
+}
+
+/// Gate entry: the provisioned CARGO_HOME exists and was accepted for exactly
+/// this pin and this Cargo.lock. Gates run it in addition to check-pins.
+pub fn check_provision(repo: &Path) -> Result<Vec<String>, String> {
+    let marker = std::fs::read(repo.join(PROVISION_MARKER)).map_err(|e| {
+        format!("{PROVISION_MARKER}: {e}; run tools/provision.sh")
+    })?;
+    let lock = lock_sha256(repo)?;
+    check_marker(&String::from_utf8(marker).map_err(|e| e.to_string())?, &lock)?;
+    Ok(vec![format!(
+        "provision status=pass sophia={SOPHIA_REV} cargo_lock_sha256={lock}"
+    )])
+}
+
+/// The marker names exactly url, rev and the Cargo.lock digest, in order.
+pub fn check_marker(text: &str, lock_sha256: &str) -> Result<(), String> {
+    let lines = text.lines().collect::<Vec<_>>();
+    let expected = [
+        format!("url={SOPHIA_URL}"),
+        format!("rev={SOPHIA_REV}"),
+        format!("cargo_lock_sha256={lock_sha256}"),
+    ];
+    if lines != expected {
+        return Err(format!(
+            "{PROVISION_MARKER} is stale or malformed (pin or Cargo.lock changed since \
+             provisioning); re-run tools/provision.sh"
+        ));
+    }
+    Ok(())
 }
 
 /// pins/sophia.toml names exactly the canonical URL and revision.

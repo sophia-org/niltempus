@@ -5,6 +5,7 @@ const USAGE: &str = "usage:
   xtask prepare-bemenu-artifact SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR
   xtask prepare-product-artifact lom|provlita|hagia SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR
   xtask check-pins
+  xtask check-provision
   xtask dock profile LOM LOM_CONFIG BEMENU PROVLITA DOCK_CONFIG
   xtask dock verify HOST_LOG
   xtask audit-pins ABSOLUTE-SOPHIA-REPO";
@@ -51,6 +52,7 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
             ),
         },
         Some("check-pins") if arguments.len() == 1 => xtask::pins::check(&repo),
+        Some("check-provision") if arguments.len() == 1 => xtask::pins::check_provision(&repo),
         Some("audit-pins") => match &arguments[1..] {
             [sophia] => xtask::pins::audit(&repo, Path::new(sophia)),
             _ => Err(USAGE.into()),
