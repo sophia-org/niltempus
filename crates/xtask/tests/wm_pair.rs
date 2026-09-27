@@ -81,18 +81,35 @@ fn verify_binds_every_identity_to_the_files() {
     let ids = write_pair(&pair);
     let commits = [ids.commits[0].as_str(), ids.commits[1].as_str()];
     let digests = [ids.digests[0].as_str(), ids.digests[1].as_str()];
-    let verified = verify(&pair, commits, digests).unwrap();
+    let verified = verify(&pair, commits, digests, &ids.profile).unwrap();
     assert_eq!(verified.hagia, pair.join("hagia"));
     assert_eq!(verified.narthex_sha256, ids.digests[1]);
 
     assert!(
-        verify(std::path::Path::new("pair"), commits, digests)
+        verify(std::path::Path::new("pair"), commits, digests, &ids.profile)
             .unwrap_err()
             .contains("absolute")
     );
+    // The default profile replaced together with its manifest hash: the
+    // manifest agrees, the operator's expected digest does not.
+    let replaced = b"schema 1\n// substituted\n";
+    fs::write(pair.join("default.kdl"), replaced).unwrap();
+    let manifest = fs::read_to_string(pair.join("wm-pair.manifest")).unwrap();
+    fs::write(
+        pair.join("wm-pair.manifest"),
+        manifest.replace(&ids.profile, &fixture::sha256(replaced)),
+    )
+    .unwrap();
+    let error = verify(&pair, commits, digests, &ids.profile).unwrap_err();
+    assert!(
+        error.contains("default.kdl SHA-256 is not the expected one"),
+        "{error}"
+    );
+    // Accepted only when the operator names the new digest, which is the point.
+    verify(&pair, commits, digests, &fixture::sha256(replaced)).unwrap();
     // A raw commit object that does not hash to the expected commit.
     fs::write(pair.join("narthex.commit"), b"tree 1111\n").unwrap();
-    assert!(verify(&pair, commits, digests).is_err());
+    assert!(verify(&pair, commits, digests, &ids.profile).is_err());
     // A symlinked binary is not a regular file.
     let dir = Dir::new("wm-pair-link");
     let pair = dir.0.join("pair");
@@ -103,6 +120,7 @@ fn verify_binds_every_identity_to_the_files() {
         &pair,
         [ids.commits[0].as_str(), ids.commits[1].as_str()],
         [ids.digests[0].as_str(), ids.digests[1].as_str()],
+        &ids.profile,
     )
     .unwrap_err();
     assert!(error.contains("no regular hagia"), "{error}");

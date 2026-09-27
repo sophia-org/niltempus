@@ -85,6 +85,7 @@ pub fn commit_object(label: &str) -> (Vec<u8>, String) {
 pub struct PairIds {
     pub commits: [String; 2],
     pub digests: [String; 2],
+    pub profile: String,
 }
 
 /// A prepared-pair directory in `prepare-wm-pair`'s layout.
@@ -127,6 +128,7 @@ pub fn write_pair(dir: &Path) -> PairIds {
     PairIds {
         commits: [commits[0].clone(), commits[1].clone()],
         digests: [digests[0].clone(), digests[1].clone()],
+        profile: sha256(profile),
     }
 }
 
@@ -135,6 +137,7 @@ pub fn verified_pair(dir: &Path, ids: &PairIds) -> VerifiedPair {
         dir,
         [ids.commits[0].as_str(), ids.commits[1].as_str()],
         [ids.digests[0].as_str(), ids.digests[1].as_str()],
+        &ids.profile,
     )
     .unwrap()
 }

@@ -8,7 +8,8 @@
 //! ```text
 //! cargo xtask package-desktop --sophia-root=/ABS --sophia-rev=<pin> \
 //!     --wm-pair=/ABS --wm-pair-commits=<hagia>,<narthex> \
-//!     --wm-pair-sha256=<hagia>,<narthex> --build-dir=/ABS --out=/ABS/NEW
+//!     --wm-pair-sha256=<hagia>,<narthex> --wm-pair-profile-sha256=<sha> \
+//!     --build-dir=/ABS --out=/ABS/NEW
 //! ```
 //!
 //! Custody:
@@ -18,10 +19,16 @@
 //!   build directory; the release's retained generic session files come from
 //!   that staged tree, never from a checkout.
 //! - The Hagia/Narthex pair is a `prepare-wm-pair` directory bound to the
-//!   operator's expected commits and binary digests.
-//! - This repository must be clean; its recipe tool and host checker are
-//!   built from it (offline, from the provisioned CARGO_HOME) and sealed in
-//!   the release with everything else in SHA256SUMS.
+//!   operator's expected commits, binary digests and default-profile digest.
+//! - The provisioning marker is validated in full (canonical URL, pinned
+//!   revision, Cargo.lock digest, and CARGO_HOME equal to the provisioned
+//!   home) before anything is staged or built.
+//! - This repository must be clean with a signed HEAD, and it is used only
+//!   through that commit's exact staged tree (tracked files, tree-hash
+//!   proven): the recipe tool and host checker are built there (offline,
+//!   from the provisioned CARGO_HOME) and every packaged file is copied from
+//!   there, never from the mutable checkout. Both staged trees are
+//!   re-verified after the builds and before assembly.
 //! - Every build writes only below the private build directory; the output
 //!   is new and created last.
 //!
@@ -38,19 +45,23 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use crate::bemenu_artifact::{bounded, set_mode, signed_tree, tail, text, wait_logged};
+use crate::bemenu_artifact::{
+    SignedTree, archive_tree, authorize, bounded, set_mode, tail, text, wait_logged,
+};
 use crate::wm_pair::{VerifiedPair, verify};
 use crate::{hex, pins, read, sha256};
 
 const USAGE: &str = "usage: cargo xtask package-desktop --sophia-root=/ABS --sophia-rev=SHA \
                      --wm-pair=/ABS --wm-pair-commits=HAGIA,NARTHEX \
-                     --wm-pair-sha256=HAGIA,NARTHEX --build-dir=/ABS --out=/ABS/NEW";
-const OPTIONS: [&str; 7] = [
+                     --wm-pair-sha256=HAGIA,NARTHEX --wm-pair-profile-sha256=SHA \
+                     --build-dir=/ABS --out=/ABS/NEW";
+const OPTIONS: [&str; 8] = [
     "sophia-root",
     "sophia-rev",
     "wm-pair",
     "wm-pair-commits",
     "wm-pair-sha256",
+    "wm-pair-profile-sha256",
     "build-dir",
     "out",
 ];
@@ -313,7 +324,8 @@ pub struct Binaries {
 /// Everything `assemble` needs, already verified.
 #[derive(Debug, Clone)]
 pub struct Assembly {
-    /// This repository (wrappers, adapter, fixtures, docs).
+    /// This repository's staged signed tree (wrappers, adapter, fixtures,
+    /// docs); never the mutable checkout.
     pub repo: PathBuf,
     /// The staged pinned Sophia tree (retained generic session files).
     pub sophia_tree: PathBuf,
@@ -327,6 +339,15 @@ pub struct Assembly {
 }
 
 pub fn run(repo: &Path, args: &[String]) -> Result<Vec<String>, String> {
+    run_with(repo, args, std::env::var("CARGO_HOME").ok().as_deref())
+}
+
+/// `run` with the caller's CARGO_HOME passed explicitly (tests).
+pub fn run_with(
+    repo: &Path,
+    args: &[String],
+    cargo_home: Option<&str>,
+) -> Result<Vec<String>, String> {
     let options = parse(args)?;
     let get = |key: &str| options[key].as_str();
     for key in ["sophia-root", "wm-pair", "build-dir", "out"] {
@@ -373,7 +394,11 @@ pub fn run(repo: &Path, args: &[String]) -> Result<Vec<String>, String> {
         Path::new(get("wm-pair")),
         pair_values(get("wm-pair-commits"), "--wm-pair-commits")?,
         pair_values(get("wm-pair-sha256"), "--wm-pair-sha256")?,
+        get("wm-pair-profile-sha256"),
     )?;
+    // The full provisioning marker (URL, pin, lock digest, home) before any
+    // staging or build.
+    let (cargo_home, lock_sha256) = provisioned(&repo, cargo_home)?;
     clean_checkout(&sophia_root, "Sophia checkout")?;
     let head = git_text(&sophia_root, &["rev-parse", "--verify", "HEAD"])?;
     if head.trim() != rev {
@@ -386,16 +411,18 @@ pub fn run(repo: &Path, args: &[String]) -> Result<Vec<String>, String> {
     let integration_commit = git_text(&repo, &["rev-parse", "--verify", "HEAD"])?
         .trim()
         .to_owned();
-    git_text(&repo, &["verify-commit", integration_commit.as_str()])
-        .map_err(|e| format!("integration HEAD is not a good signed commit: {e}"))?;
-    let cargo_home = provisioned_home(&repo)?;
 
-    // Sophia's exact signed tree (authorization plus tree-hash proof).
-    let staged = signed_tree(&sophia_root, rev, "sophia")?;
-    let sophia_version = workspace_version(&staged.tree_dir)?;
+    // Both inputs are the exact signed trees (authorization plus tree-hash
+    // proof); the mutable checkouts are never read again.
+    let integration = StagedTree::signed(&repo, &integration_commit, "integration")?;
+    if sha256(&read(&integration.dir().join("Cargo.lock"))?) != lock_sha256 {
+        return Err("the signed integration tree's Cargo.lock is not the provisioned lock".into());
+    }
+    let sophia = StagedTree::signed(&sophia_root, rev, "sophia")?;
+    let sophia_version = workspace_version(sophia.dir())?;
     let sophia_target = build_dir.join("sophia-target");
     cargo(
-        &staged.tree_dir,
+        sophia.dir(),
         &sophia_target,
         None,
         &[
@@ -411,16 +438,19 @@ pub fn run(repo: &Path, args: &[String]) -> Result<Vec<String>, String> {
     )?;
     let integration_target = build_dir.join("integration-target");
     cargo(
-        &repo,
+        integration.dir(),
         &integration_target,
-        Some(&cargo_home),
+        Some(cargo_home.as_path()),
         &["-p", "xtask", "--bins"],
         &build_dir.join("integration-build.log"),
         "build the recipe tool and host checker",
     )?;
+    // The builds must not have changed either staged input.
+    sophia.reverify()?;
+    integration.reverify()?;
     let assembly = Assembly {
-        repo,
-        sophia_tree: staged.tree_dir.clone(),
+        repo: integration.dir().to_path_buf(),
+        sophia_tree: sophia.dir().to_path_buf(),
         sophia_rev: rev.to_owned(),
         sophia_version,
         integration_commit,
@@ -533,22 +563,60 @@ fn git_text(repo: &Path, args: &[&str]) -> Result<String, String> {
 }
 
 fn clean_checkout(repo: &Path, what: &str) -> Result<(), String> {
-    let status = git_text(repo, &["status", "--porcelain", "--untracked-files=normal"])?;
+    let status = git_text(repo, &["status", "--porcelain", "--untracked-files=normal"])
+        .map_err(|e| format!("{what} {} is not a readable checkout: {e}", repo.display()))?;
     if !status.is_empty() {
         return Err(format!("{what} must be clean: {}", repo.display()));
     }
     Ok(())
 }
 
-fn provisioned_home(repo: &Path) -> Result<PathBuf, String> {
+/// The full provisioning marker check (pins::check_marker: canonical URL,
+/// pinned revision, this checkout's Cargo.lock digest) plus the caller's
+/// CARGO_HOME, which must be the provisioned one. Returns (home, lock digest).
+fn provisioned(repo: &Path, cargo_home: Option<&str>) -> Result<(PathBuf, String), String> {
     let marker =
-        String::from_utf8(read(&repo.join(".provision/accepted"))?).map_err(|e| e.to_string())?;
-    marker
-        .lines()
-        .find_map(|l| l.strip_prefix("cargo_home="))
+        String::from_utf8(read(&repo.join(pins::PROVISION_MARKER))?).map_err(|e| e.to_string())?;
+    let lock = sha256(&read(&repo.join("Cargo.lock"))?);
+    let home = cargo_home
         .filter(|home| home.starts_with('/'))
-        .map(PathBuf::from)
-        .ok_or_else(|| "Re-run tools/provision.sh (marker has no cargo_home)".into())
+        .ok_or("CARGO_HOME must name the provisioned private CARGO_HOME")?;
+    pins::check_marker(&marker, &lock, Some(home))?;
+    Ok((PathBuf::from(home), lock))
+}
+
+/// An exact commit's tree staged in a private scratch directory: tracked
+/// files only, hashing to the commit's tree. Removed when dropped.
+pub struct StagedTree(SignedTree);
+
+impl StagedTree {
+    /// Signer authorization (verify-commit, status G), then the exact tree.
+    pub fn signed(source: &Path, commit: &str, label: &str) -> Result<Self, String> {
+        let signer = authorize(source, commit)?;
+        Ok(Self(archive_tree(source, commit, label, signer)?))
+    }
+
+    /// The exact tree WITHOUT signer authorization: tests only, and any
+    /// caller that authorized the commit itself.
+    pub fn unauthorized(source: &Path, commit: &str, label: &str) -> Result<Self, String> {
+        Ok(Self(archive_tree(source, commit, label, String::new())?))
+    }
+
+    pub fn dir(&self) -> &Path {
+        &self.0.tree_dir
+    }
+
+    /// The staged tree still hashes to exactly the commit's tree.
+    pub fn reverify(&self) -> Result<(), String> {
+        let inventory = crate::git_tree::inventory(&self.0.tree_dir)?;
+        if inventory.tree != self.0.tree {
+            return Err(format!(
+                "the staged tree {} changed after staging",
+                self.0.tree_dir.display()
+            ));
+        }
+        Ok(())
+    }
 }
 
 fn workspace_version(tree: &Path) -> Result<String, String> {

@@ -165,10 +165,17 @@ pub struct VerifiedPair {
 }
 
 /// Bind a prepared pair to the operator's expected commits and binary digests
-/// (hagia first). Every identity is re-derived from the files: the raw commit
-/// objects must hash to the commits, the binaries to the digests, and the
-/// unsigned manifest must agree with all of them.
-pub fn verify(dir: &Path, commits: [&str; 2], digests: [&str; 2]) -> Result<VerifiedPair, String> {
+/// (hagia first) and the expected default-profile digest. Every identity is
+/// re-derived from the files: the raw commit objects must hash to the
+/// commits, the binaries and the profile to the operator's digests, and the
+/// unsigned manifest must agree with all of them. The manifest alone binds
+/// nothing: replacing a file together with its manifest hash is refused.
+pub fn verify(
+    dir: &Path,
+    commits: [&str; 2],
+    digests: [&str; 2],
+    profile_digest: &str,
+) -> Result<VerifiedPair, String> {
     if !dir.is_absolute() {
         return Err(format!(
             "WM pair must be an absolute directory: {}",
@@ -185,7 +192,7 @@ pub fn verify(dir: &Path, commits: [&str; 2], digests: [&str; 2]) -> Result<Veri
             ));
         }
     }
-    for value in digests {
+    for value in digests.into_iter().chain([profile_digest]) {
         if !hex(value, 64) {
             return Err(format!(
                 "WM pair SHA-256 must be 64 lowercase hex: {value:?}"
@@ -229,6 +236,9 @@ pub fn verify(dir: &Path, commits: [&str; 2], digests: [&str; 2]) -> Result<Veri
     }
     let profile = regular(PROFILE)?;
     let profile_sha256 = sha256(&read(&profile)?);
+    if profile_sha256 != profile_digest {
+        return Err(format!("{PROFILE} SHA-256 is not the expected one"));
+    }
     for (key, expected) in [
         ("schema", "1"),
         ("default_profile", PROFILE),

@@ -171,7 +171,14 @@ pub(crate) struct SignedTree {
 /// source repository, then `git archive` of that commit whose extracted tree
 /// must hash to exactly the commit's tree.
 pub(crate) fn signed_tree(source: &Path, commit: &str, label: &str) -> Result<SignedTree, String> {
-    // Identity and signer authorization, read-only against the source repo.
+    let signer = authorize(source, commit)?;
+    archive_tree(source, commit, label, signer)
+}
+
+/// Signer authorization, read-only against the source repository: the
+/// commit resolves to exactly itself, `git verify-commit` passes with status
+/// G, and the raw object carries a gpgsig header. Returns the signer.
+pub(crate) fn authorize(source: &Path, commit: &str) -> Result<String, String> {
     let resolved = text(git(
         source,
         &[
@@ -195,13 +202,27 @@ pub(crate) fn signed_tree(source: &Path, commit: &str, label: &str) -> Result<Si
         ));
     }
     let raw = git(source, &["cat-file", "commit", commit])?;
-    let tree = commit_tree(&raw)?;
     if !raw
         .split(|b| *b == b'\n')
         .any(|line| line.starts_with(b"gpgsig "))
     {
         return Err("signed commit object has no gpgsig header".into());
     }
+    Ok(signer.to_owned())
+}
+
+/// `git archive` of `commit` into a private scratch directory whose tree
+/// must hash to exactly the commit's tree (tracked files only: nothing
+/// ignored or untracked in the checkout can enter). This proves content,
+/// not authorization; callers authorize the signer first (`authorize`).
+pub(crate) fn archive_tree(
+    source: &Path,
+    commit: &str,
+    label: &str,
+    signer: String,
+) -> Result<SignedTree, String> {
+    let raw = git(source, &["cat-file", "commit", commit])?;
+    let tree = commit_tree(&raw)?;
 
     // Isolated build input: exactly the signed tree, nothing from the checkout.
     let scratch = std::env::temp_dir().join(format!(
@@ -240,7 +261,6 @@ pub(crate) fn signed_tree(source: &Path, commit: &str, label: &str) -> Result<Si
     crate::git_tree::verify_commit(&raw, commit, &inventory.tree)
         .map_err(|e| format!("archived {label} tree is not the signed commit {commit}: {e}"))?;
 
-    let signer = signer.to_owned();
     Ok(SignedTree {
         scratch,
         _scratch,

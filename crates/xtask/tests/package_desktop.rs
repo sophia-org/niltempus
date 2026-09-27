@@ -8,18 +8,20 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 use xtask::package_desktop::{
-    COMMANDS, SESSIONS, SOPHIA_RETAINED, TOOLS, assemble, manifest, release_id, run,
+    COMMANDS, OPERATIONS_DOC, SESSIONS, SOPHIA_RETAINED, StagedTree, TOOLS, assemble, manifest,
+    release_id, run, run_with,
 };
-use xtask::pins::SOPHIA_REV;
+use xtask::pins::{SOPHIA_REV, SOPHIA_URL};
 
 #[path = "support/release_fixture.rs"]
 mod fixture;
-use fixture::{Dir, repo, write_pair};
+use fixture::{Dir, repo, sha256, write_pair};
 
 struct Inputs {
     dir: Dir,
     commits: String,
     digests: String,
+    profile: String,
 }
 
 fn inputs(tag: &str) -> Inputs {
@@ -31,8 +33,30 @@ fn inputs(tag: &str) -> Inputs {
     Inputs {
         commits: ids.commits.join(","),
         digests: ids.digests.join(","),
+        profile: ids.profile.clone(),
         dir,
     }
+}
+
+const HOME: &str = "/fixture/cargo-home";
+
+/// A stand-in integration checkout whose provisioning marker is valid for
+/// its own Cargo.lock and HOME (the real one is used where no later step is
+/// reached).
+fn provisioned_repo(dir: &Path) -> std::path::PathBuf {
+    let repo = dir.join("integration");
+    fs::create_dir_all(repo.join(".provision")).unwrap();
+    fs::write(repo.join("Cargo.lock"), "# fixture lock\n").unwrap();
+    marker(&repo, SOPHIA_REV, &sha256(b"# fixture lock\n"), HOME);
+    repo
+}
+
+fn marker(repo: &Path, rev: &str, lock: &str, home: &str) {
+    fs::write(
+        repo.join(".provision/accepted"),
+        format!("url={SOPHIA_URL}\nrev={rev}\ncargo_lock_sha256={lock}\ncargo_home={home}\n"),
+    )
+    .unwrap();
 }
 
 impl Inputs {
@@ -44,6 +68,7 @@ impl Inputs {
             ("wm-pair", d.join("wm-pair").display().to_string()),
             ("wm-pair-commits", self.commits.clone()),
             ("wm-pair-sha256", self.digests.clone()),
+            ("wm-pair-profile-sha256", self.profile.clone()),
             ("build-dir", d.join("build").display().to_string()),
             ("out", d.join("release").display().to_string()),
         ];
@@ -61,7 +86,17 @@ impl Inputs {
     }
 
     fn refused(&self, changes: &[(&str, &str)], message: &str) {
-        let error = run(&repo(), &self.args(changes)).unwrap_err();
+        self.refused_with(&repo(), None, changes, message);
+    }
+
+    fn refused_with(
+        &self,
+        integration: &Path,
+        home: Option<&str>,
+        changes: &[(&str, &str)],
+        message: &str,
+    ) {
+        let error = run_with(integration, &self.args(changes), home).unwrap_err();
         assert!(error.contains(message), "{changes:?}: {error}");
         assert!(!self.dir.0.join("release").exists(), "{changes:?}");
         assert_eq!(
@@ -153,6 +188,22 @@ fn a_pair_or_digest_mismatch_is_refused() {
     let pair = f.dir.0.join("wm-pair");
     fs::write(pair.join("narthex"), "substituted\n").unwrap();
     f.refused(&[], "narthex binary SHA-256 is not the expected one");
+    // The default profile and its manifest hash replaced together.
+    let f = inputs("profile");
+    let pair = f.dir.0.join("wm-pair");
+    let replaced = b"schema 1\n// substituted\n";
+    fs::write(pair.join("default.kdl"), replaced).unwrap();
+    let text = fs::read_to_string(pair.join("wm-pair.manifest")).unwrap();
+    fs::write(
+        pair.join("wm-pair.manifest"),
+        text.replace(&f.profile, &fixture::sha256(replaced)),
+    )
+    .unwrap();
+    f.refused(&[], "default.kdl SHA-256 is not the expected one");
+    f.refused(
+        &[("wm-pair-profile-sha256", "")],
+        "--wm-pair-profile-sha256 is required",
+    );
     // A manifest that disagrees with the files it describes.
     let f = inputs("manifest");
     let path = f.dir.0.join("wm-pair/wm-pair.manifest");
@@ -168,32 +219,152 @@ fn a_pair_or_digest_mismatch_is_refused() {
 }
 
 #[test]
+fn the_full_provisioning_marker_is_checked_before_any_build() {
+    let f = inputs("marker");
+    let integration = provisioned_repo(&f.dir.0);
+    // A valid marker lets the run reach the next check (the Sophia source).
+    f.refused_with(&integration, Some(HOME), &[], "Sophia checkout");
+    f.refused_with(
+        &integration,
+        None,
+        &[],
+        "CARGO_HOME must name the provisioned",
+    );
+    f.refused_with(
+        &integration,
+        Some("/another/cargo-home"),
+        &[],
+        "CARGO_HOME is not the provisioned",
+    );
+    // A stale pin.
+    marker(
+        &integration,
+        &"0".repeat(40),
+        &sha256(b"# fixture lock\n"),
+        HOME,
+    );
+    f.refused_with(&integration, Some(HOME), &[], "stale or malformed");
+    // A stale lock: Cargo.lock changed since provisioning.
+    marker(&integration, SOPHIA_REV, &sha256(b"# fixture lock\n"), HOME);
+    fs::write(integration.join("Cargo.lock"), "# changed lock\n").unwrap();
+    f.refused_with(&integration, Some(HOME), &[], "stale or malformed");
+    // A different recorded home.
+    fs::write(integration.join("Cargo.lock"), "# fixture lock\n").unwrap();
+    marker(
+        &integration,
+        SOPHIA_REV,
+        &sha256(b"# fixture lock\n"),
+        "/elsewhere",
+    );
+    f.refused_with(
+        &integration,
+        Some(HOME),
+        &[],
+        "CARGO_HOME is not the provisioned",
+    );
+    // No marker at all.
+    fs::remove_file(integration.join(".provision/accepted")).unwrap();
+    f.refused_with(&integration, Some(HOME), &[], "accepted");
+}
+
+fn git(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["-c", "user.name=F", "-c", "user.email=f@example.com"])
+        .args(["-c", "commit.gpgsign=false"])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}
+
+#[test]
 fn a_dirty_sophia_source_is_refused_before_staging() {
     let f = inputs("dirty");
+    let integration = provisioned_repo(&f.dir.0);
     let sophia = f.dir.0.join("sophia");
-    let git = |args: &[&str]| {
-        assert!(
-            Command::new("git")
-                .arg("-C")
-                .arg(&sophia)
-                .args(["-c", "user.name=F", "-c", "user.email=f@example.com"])
-                .args(["-c", "commit.gpgsign=false"])
-                .args(args)
-                .output()
-                .unwrap()
-                .status
-                .success()
-        )
-    };
-    git(&["init", "-q"]);
+    git(&sophia, &["init", "-q"]);
     fs::write(sophia.join("file"), "one\n").unwrap();
-    git(&["add", "file"]);
-    git(&["commit", "-q", "-m", "fixture"]);
+    git(&sophia, &["add", "file"]);
+    git(&sophia, &["commit", "-q", "-m", "fixture"]);
     fs::write(sophia.join("file"), "drift\n").unwrap();
-    f.refused(&[], "Sophia checkout must be clean");
+    f.refused_with(
+        &integration,
+        Some(HOME),
+        &[],
+        "Sophia checkout must be clean",
+    );
     // Clean, but not the pinned revision.
-    git(&["checkout", "-q", "--", "file"]);
-    f.refused(&[], "is not the pinned revision");
+    git(&sophia, &["checkout", "-q", "--", "file"]);
+    f.refused_with(&integration, Some(HOME), &[], "is not the pinned revision");
+}
+
+/// A committed integration checkout holding every file the release copies.
+fn integration_checkout(dir: &Path) -> std::path::PathBuf {
+    let checkout = dir.join("checkout");
+    let real = repo();
+    let mut paths = COMMANDS
+        .iter()
+        .map(|(_, source)| *source)
+        .collect::<Vec<_>>();
+    paths.extend(TOOLS.iter().map(|(path, _)| *path));
+    paths.push(OPERATIONS_DOC);
+    for path in paths {
+        let target = checkout.join(path);
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::copy(real.join(path), &target).unwrap();
+    }
+    fs::write(checkout.join(".gitignore"), "ignored.txt\n").unwrap();
+    fs::write(checkout.join("ignored.txt"), "never packaged\n").unwrap();
+    git(&checkout, &["init", "-q"]);
+    git(&checkout, &["add", "-A"]);
+    git(&checkout, &["commit", "-q", "-m", "fixture"]);
+    checkout
+}
+
+#[test]
+fn the_release_comes_from_the_staged_commit_not_the_checkout() {
+    let dir = Dir::new("staged");
+    let checkout = integration_checkout(&dir.0);
+    let head = git(&checkout, &["rev-parse", "HEAD"]);
+    let staged = StagedTree::unauthorized(&checkout, &head, "integration").unwrap();
+    assert!(!staged.dir().join("ignored.txt").exists());
+    assert!(!staged.dir().join(".git").exists());
+    let original = fs::read(checkout.join("tools/installed/sophia-session")).unwrap();
+
+    // The checkout changes after staging: tracked, committed and untracked.
+    fs::write(
+        checkout.join("tools/installed/sophia-session"),
+        "tampered\n",
+    )
+    .unwrap();
+    fs::write(checkout.join("tools/installed/sophia-stop"), "tampered\n").unwrap();
+    git(&checkout, &["commit", "-q", "-am", "later"]);
+    fs::write(checkout.join("tools/installed/untracked"), "x\n").unwrap();
+
+    staged.reverify().unwrap();
+    let mut assembly = fixture::assembly(&dir.0);
+    assembly.repo = staged.dir().to_path_buf();
+    assemble(&assembly).unwrap();
+    assert_eq!(
+        fs::read(assembly.out.join("bin/sophia-session")).unwrap(),
+        original
+    );
+    assert_ne!(
+        fs::read(assembly.out.join("bin/sophia-stop")).unwrap(),
+        b"tampered\n"
+    );
+
+    // A staged tree changed after staging is refused.
+    fs::write(
+        staged.dir().join("tools/installed/sophia-session"),
+        "late\n",
+    )
+    .unwrap();
+    let error = staged.reverify().unwrap_err();
+    assert!(error.contains("changed after staging"), "{error}");
 }
 
 fn listing(root: &Path, dir: &Path, out: &mut BTreeSet<String>) {
