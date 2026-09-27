@@ -250,7 +250,7 @@ pub fn check_manifest(name: &str, text: &str, root: bool) -> Result<(), String> 
                 || compact == format!("{key}={{workspace=true}}");
             if root && SOPHIA_CRATES.contains(&key) && value == pinned {
                 found.push(key);
-            } else if !(member && !root) {
+            } else if root || !member {
                 return Err(format!("{name}: Sophia crate not at the pin: {line:?}"));
             }
         } else if compact.contains("git=") {
