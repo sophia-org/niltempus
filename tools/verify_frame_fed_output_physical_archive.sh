@@ -7,6 +7,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # retained files from the pinned SOPHIA_ROOT (tools/lib/sophia_source.sh).
 source "$ROOT_DIR/tools/lib/sophia_source.sh"
 sophia_source="$(sophia_source_repo)" || exit 2
+# New archives bind this repository's signed commit; older ones verify only
+# with an explicit --legacy (tools/lib/integration_identity.sh).
+source "$ROOT_DIR/tools/lib/integration_identity.sh"
+integration_verify_mode "$@"
+set -- ${INTEGRATION_ARGS[@]+"${INTEGRATION_ARGS[@]}"}
 state_home="${XDG_STATE_HOME:-$HOME/.local/state}"
 run_root="${SOPHIA_FRAME_FED_OUTPUT_RUN_ROOT:-$state_home/sophia/promotion/frame-fed-output-runs}"
 hagia_root="${SOPHIA_HAGIA_ROOT:-}"
@@ -29,6 +34,7 @@ fi
     echo "frame-fed output archive checksum verification failed: $run" >&2
     exit 1
 }
+integration_identity_verify "$run" "$INTEGRATION_MODE"
 [[ "$(cat "$run/result.kdl")" == \
     'sophia_frame_fed_output_physical schema=1 status=passed boundary=after_apply phases=2' ]] || {
     echo "frame-fed output archive is not passing: $run" >&2

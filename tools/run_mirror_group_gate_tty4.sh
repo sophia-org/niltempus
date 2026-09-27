@@ -93,6 +93,8 @@ if [[ -n "$(git -C "$SOPHIA_SOURCE" status --porcelain --untracked-files=all)" ]
     exit 2
 fi
 integration_commit="$(runner_integration_commit)"
+# Archives bind this signed integration commit of this checkout.
+export SOPHIA_INTEGRATION_COMMIT="$integration_commit" SOPHIA_INTEGRATION_SOURCE="$ROOT_DIR"
 source_commit="$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)"
 if ! git -C "$SOPHIA_SOURCE" verify-commit "$source_commit" >/dev/null 2>&1; then
     echo "Sophia HEAD must have a valid cryptographic signature before a physical gate." >&2

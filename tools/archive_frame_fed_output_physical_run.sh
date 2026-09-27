@@ -12,6 +12,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # retained files from the pinned SOPHIA_ROOT (tools/lib/sophia_source.sh).
 source "$ROOT_DIR/tools/lib/sophia_source.sh"
 sophia_source="$(sophia_source_repo)" || exit 2
+# This repository is explicit too: the runner's signed integration commit is
+# bound into the archive (tools/lib/integration_identity.sh).
+source "$ROOT_DIR/tools/lib/integration_identity.sh"
 success_log="$1"
 rollback_log="$2"
 connectors="$3"
@@ -134,6 +137,7 @@ while true; do
     sequence=$((sequence + 1))
 done
 trap 'rm -rf -- "$run_dir"' ERR HUP INT TERM
+integration_commit="$(integration_identity_bind "$run_dir")"
 
 install -m 600 "$success_log" "$run_dir/success.log"
 install -m 600 "$rollback_log" "$run_dir/rollback.log"
@@ -147,11 +151,12 @@ printf 'record_schema=1\nrecord_kind=frame_fed_output_physical\nrecorded_at_utc=
     "$success_text" "$rollback_text" "$success_sha256" "$rollback_sha256" "$pair_sha256" \
     "$sophia_sha256" "$hagia_sha256" "$core_config_path" "$core_sha256" \
     "$desktop_profile_path" "$profile_sha256" "$connectors_sha256" >"$run_dir/manifest"
+printf 'integration_schema=1\nintegration_commit=%s\n' "$integration_commit" >>"$run_dir/manifest"
 chmod 600 "$run_dir/manifest" "$run_dir/result.kdl"
 (
     cd "$run_dir"
     sha256sum connectors.txt core.kdl desktop-profile.kdl manifest result.kdl \
-        rollback.log success.log >SHA256SUMS
+        rollback.log success.log integration.commit >SHA256SUMS
 )
 chmod 600 "$run_dir/SHA256SUMS"
 "$ROOT_DIR/tools/verify_frame_fed_output_physical_archive.sh" "$run_dir" >/dev/null

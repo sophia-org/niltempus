@@ -73,6 +73,8 @@ verify_repo "$ROOT_DIR" Integration
 verify_repo "$HAGIA_ROOT" Hagia
 sophia_commit="$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)"
 integration_commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+# Archives bind this signed integration commit of this checkout.
+export SOPHIA_INTEGRATION_COMMIT="$integration_commit" SOPHIA_INTEGRATION_SOURCE="$ROOT_DIR"
 hagia_commit="$(git -C "$HAGIA_ROOT" rev-parse HEAD)"
 
 check_reference_connectors() {

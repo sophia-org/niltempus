@@ -11,6 +11,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # retained files from the pinned SOPHIA_ROOT (tools/lib/sophia_source.sh).
 source "$ROOT_DIR/tools/lib/sophia_source.sh"
 sophia_source="$(sophia_source_repo)" || exit 2
+# New archives bind this repository's signed commit; older ones verify only
+# with an explicit --legacy (tools/lib/integration_identity.sh).
+source "$ROOT_DIR/tools/lib/integration_identity.sh"
+integration_verify_mode "$@"
+set -- ${INTEGRATION_ARGS[@]+"${INTEGRATION_ARGS[@]}"}
 # shellcheck source=tools/lib/proof_checkout.sh
 source "$ROOT_DIR/tools/lib/proof_checkout.sh"
 hagia_root="${SOPHIA_HAGIA_ROOT:-}"
@@ -35,6 +40,7 @@ proof_checkout_root "$hagia_root" || {
     echo "Hagia native session archive checksum verification failed: $run" >&2
     exit 1
 }
+integration_identity_verify "$run" "$INTEGRATION_MODE"
 # record_schema=2 binds the Narthex commit and names the shell binary narthex.
 # record_schema=1 is the pre-split spelling; these archives are immutable
 # history and every one of them is re-verified by `cargo xtask check`.

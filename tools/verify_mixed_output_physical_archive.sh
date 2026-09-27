@@ -7,6 +7,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # retained files from the pinned SOPHIA_ROOT (tools/lib/sophia_source.sh).
 source "$ROOT_DIR/tools/lib/sophia_source.sh"
 sophia_source="$(sophia_source_repo)" || exit 2
+# New archives bind this repository's signed commit; older ones verify only
+# with an explicit --legacy (tools/lib/integration_identity.sh).
+source "$ROOT_DIR/tools/lib/integration_identity.sh"
+integration_verify_mode "$@"
+set -- ${INTEGRATION_ARGS[@]+"${INTEGRATION_ARGS[@]}"}
 state_home="${XDG_STATE_HOME:-$HOME/.local/state}"
 run_root="${SOPHIA_MIXED_RUN_ROOT:-$state_home/sophia/promotion/mixed-output-runs}"
 run="${1:-}"
@@ -24,6 +29,7 @@ fi
     echo "mixed-output archive checksum verification failed: $run" >&2
     exit 1
 }
+integration_identity_verify "$run" "$INTEGRATION_MODE"
 [[ "$(sed -n 's/^record_schema=//p' "$run/manifest")" == 1 \
     && "$(sed -n 's/^record_kind=//p' "$run/manifest")" == mixed_output_physical ]] || {
     echo "mixed-output archive has the wrong record identity: $run" >&2

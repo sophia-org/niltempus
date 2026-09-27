@@ -164,7 +164,7 @@ cp "$run_dir/manifest" "$work/manifest"
 sed -i 's/^sophia_binary_sha256=.*/sophia_binary_sha256=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/' "$run_dir/manifest"
 (
     cd "$run_dir"
-    sha256sum connectors.txt core.kdl desktop-profile.kdl manifest result.kdl rollback.log success.log >SHA256SUMS
+    sha256sum connectors.txt core.kdl desktop-profile.kdl manifest result.kdl rollback.log success.log integration.commit >SHA256SUMS
 )
 if SOPHIA_HAGIA_ROOT="$hagia_root" "$ARCHIVE_VERIFIER" "$run_dir" >/dev/null 2>&1; then
     echo 'frame-fed output archive accepted a binary digest different from its evidence' >&2
@@ -175,7 +175,7 @@ cp "$work/manifest" "$run_dir/manifest"
 sed -i 's|^desktop_profile_path=.*|desktop_profile_path=validation/desktop-comparison/profiles/hagia.kdl|' "$run_dir/manifest"
 (
     cd "$run_dir"
-    sha256sum connectors.txt core.kdl desktop-profile.kdl manifest result.kdl rollback.log success.log >SHA256SUMS
+    sha256sum connectors.txt core.kdl desktop-profile.kdl manifest result.kdl rollback.log success.log integration.commit >SHA256SUMS
 )
 if SOPHIA_HAGIA_ROOT="$hagia_root" "$ARCHIVE_VERIFIER" "$run_dir" >/dev/null 2>&1; then
     echo 'frame-fed output archive accepted a profile outside its signed source blob' >&2

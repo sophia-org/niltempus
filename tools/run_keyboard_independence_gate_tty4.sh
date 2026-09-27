@@ -44,6 +44,8 @@ if [[ -n "$(git -C "$SOPHIA_SOURCE" status --short)" ]]; then
     exit 1
 fi
 integration_commit="$(runner_integration_commit)"
+# Archives bind this signed integration commit of this checkout.
+export SOPHIA_INTEGRATION_COMMIT="$integration_commit" SOPHIA_INTEGRATION_SOURCE="$ROOT_DIR"
 
 sophia_commit="$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)"
 git -C "$SOPHIA_SOURCE" verify-commit "$sophia_commit" >/dev/null 2>&1 || {

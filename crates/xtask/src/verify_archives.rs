@@ -11,10 +11,20 @@
 //! from the same assumption it just broke. Re-verifying the archives is how a
 //! broken reader is caught by a machine rather than by a burned TTY.
 //!
-//! Absent families are reported and never fail. Sophia's commits are checked
-//! against the explicit SOPHIA_SOURCE repository (and Hagia's and Narthex's
-//! against SOPHIA_HAGIA_ROOT and SOPHIA_NARTHEX_ROOT), which the verifiers
-//! require; nothing is inferred from this checkout.
+//! A family whose directory does not exist (NotFound on the family root), or
+//! that holds no runs, is reported absent and never fails. Every other error
+//! fails with its path: an unreadable family root, a family path that is not a
+//! directory, an unreadable entry, and any entry that is not a real directory.
+//! SYMLINK POLICY: a run is a real directory; a symlinked (or dangling) entry
+//! is refused, never followed, so the corpus cannot be redirected elsewhere.
+//!
+//! Sophia's commits are checked against the explicit SOPHIA_SOURCE repository
+//! (and Hagia's and Narthex's against SOPHIA_HAGIA_ROOT and
+//! SOPHIA_NARTHEX_ROOT), and this repository's against
+//! SOPHIA_INTEGRATION_SOURCE, all of which the verifiers require; nothing is
+//! inferred from this checkout. Archives written before the integration
+//! binding verify only with `--legacy`, which is passed to every verifier and
+//! reported per family as "integration identity unavailable".
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -46,34 +56,61 @@ pub fn promotion_root() -> Option<PathBuf> {
     Some(state.join("sophia/promotion"))
 }
 
+/// The run directories of one family: `Ok(None)` only when the family root
+/// does not exist; every other listing or metadata error, and every entry
+/// that is not a real directory (symlinks included), is an error.
+pub fn runs(directory: &Path) -> Result<Option<Vec<PathBuf>>, String> {
+    let entries = match std::fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("{}: {error}", directory.display())),
+    };
+    let mut runs = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("{}: {error}", directory.display()))?;
+        let path = entry.path();
+        let meta = std::fs::symlink_metadata(&path)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        if meta.file_type().is_symlink() {
+            return Err(format!(
+                "{} is a symlink; promoted runs must be real directories",
+                path.display()
+            ));
+        }
+        if !meta.is_dir() {
+            return Err(format!(
+                "{} is not a directory; a promoted family holds only run directories",
+                path.display()
+            ));
+        }
+        runs.push(path);
+    }
+    runs.sort();
+    Ok(Some(runs))
+}
+
 /// Re-verify every run of every family under `root` with this repository's
-/// verifiers; returns the summary line.
-pub fn verify(repo: &Path, root: &Path) -> Result<String, String> {
+/// verifiers (in legacy mode when `legacy`); returns the summary line.
+pub fn verify(repo: &Path, root: &Path, legacy: bool) -> Result<String, String> {
     let mut summary = Vec::new();
     let mut absent = Vec::new();
     for (family, tool) in FAMILIES {
-        let directory = root.join(family);
-        let Ok(entries) = std::fs::read_dir(&directory) else {
-            absent.push(family);
-            continue;
+        let runs = match runs(&root.join(family))? {
+            Some(runs) if !runs.is_empty() => runs,
+            _ => {
+                absent.push(family);
+                continue;
+            }
         };
-        let mut runs = entries
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| path.is_dir())
-            .collect::<Vec<_>>();
-        runs.sort();
-        if runs.is_empty() {
-            absent.push(family);
-            continue;
-        }
         let total = runs.len();
+        let mut unavailable = 0;
         for run in runs {
-            bounded(
-                Command::new(repo.join(tool))
-                    .arg(&run)
-                    .current_dir(repo)
-                    .stdin(Stdio::null()),
+            let mut command = Command::new(repo.join(tool));
+            if legacy {
+                command.arg("--legacy");
+            }
+            let output = bounded(
+                command.arg(&run).current_dir(repo).stdin(Stdio::null()),
                 VERIFY_TIMEOUT,
                 tool,
             )
@@ -83,8 +120,17 @@ pub fn verify(repo: &Path, root: &Path) -> Result<String, String> {
                     run.display()
                 )
             })?;
+            if String::from_utf8_lossy(&output).contains("integration identity unavailable") {
+                unavailable += 1;
+            }
         }
-        summary.push(format!("{family} {total}/{total}"));
+        if unavailable == 0 {
+            summary.push(format!("{family} {total}/{total}"));
+        } else {
+            summary.push(format!(
+                "{family} {total}/{total} (legacy {unavailable}: integration identity unavailable)"
+            ));
+        }
     }
     if !absent.is_empty() {
         summary.push(format!("(absent: {})", absent.join(" ")));
@@ -93,11 +139,13 @@ pub fn verify(repo: &Path, root: &Path) -> Result<String, String> {
 }
 
 pub fn run(repo: &Path, arguments: &[String]) -> Result<Vec<String>, String> {
-    if !arguments.is_empty() {
-        return Err("usage: cargo xtask verify-archives".into());
-    }
+    let legacy = match arguments {
+        [] => false,
+        [flag] if flag == "--legacy" => true,
+        _ => return Err("usage: cargo xtask verify-archives [--legacy]".into()),
+    };
     let Some(root) = promotion_root() else {
         return Ok(vec!["archives: no state home, corpus skipped".to_owned()]);
     };
-    Ok(vec![verify(repo, &root)?])
+    Ok(vec![verify(repo, &root, legacy)?])
 }

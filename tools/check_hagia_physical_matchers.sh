@@ -276,7 +276,7 @@ sed -i \
     "$run_dir/manifest"
 (
     cd "$run_dir"
-    sha256sum manifest result.kdl session.log >SHA256SUMS
+    sha256sum manifest result.kdl session.log integration.commit >SHA256SUMS
 )
 if SOPHIA_HAGIA_ROOT="$hagia_root" \
     "$root_dir/tools/verify_hagia_policy_physical_archive.sh" \

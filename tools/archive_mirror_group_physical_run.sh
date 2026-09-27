@@ -7,6 +7,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # retained files from the pinned SOPHIA_ROOT (tools/lib/sophia_source.sh).
 source "$ROOT_DIR/tools/lib/sophia_source.sh"
 sophia_source="$(sophia_source_repo)" || exit 2
+# This repository is explicit too: the runner's signed integration commit is
+# bound into the archive (tools/lib/integration_identity.sh).
+source "$ROOT_DIR/tools/lib/integration_identity.sh"
 evidence="${1:?usage: archive_mirror_group_physical_run.sh EVIDENCE}"
 state_home="${XDG_STATE_HOME:-$HOME/.local/state}"
 run_root="${SOPHIA_MIRROR_RUN_ROOT:-$state_home/sophia/promotion/mirror-group-runs}"
@@ -68,6 +71,7 @@ while true; do
     sequence=$((sequence + 1))
 done
 trap 'rm -rf -- "$run_dir"' ERR HUP INT TERM
+integration_commit="$(integration_identity_bind "$run_dir")"
 
 install -m 600 "$evidence" "$run_dir/session.log"
 install -m 600 "$profile" "$run_dir/profile.kdl"
@@ -75,10 +79,11 @@ printf '%s\n' 'sophia_mirror_group_physical schema=1 status=passed' >"$run_dir/r
 printf 'record_schema=1\nrecord_kind=mirror_group_physical\nrecorded_at_utc=%s\nsource_commit=%s\nevidence_sha256=%s\nsophia_binary_sha256=%s\nprofile_sha256=%s\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$source_commit" "$evidence_sha256" \
     "$sophia_sha256" "$profile_sha256" >"$run_dir/manifest"
+printf 'integration_schema=1\nintegration_commit=%s\n' "$integration_commit" >>"$run_dir/manifest"
 chmod 600 "$run_dir/manifest" "$run_dir/result.kdl"
 (
     cd "$run_dir"
-    sha256sum manifest profile.kdl result.kdl session.log >SHA256SUMS
+    sha256sum manifest profile.kdl result.kdl session.log integration.commit >SHA256SUMS
 )
 chmod 600 "$run_dir/SHA256SUMS"
 (

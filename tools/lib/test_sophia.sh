@@ -5,7 +5,9 @@
 # a fixture needs a signed "policy" repository it uses the same clone.
 #
 # test_sophia_setup WORK_DIR ROOT_DIR
-#   exports SOPHIA_SOURCE (the clone), SOPHIA_TEST_COMMIT (the pinned
+#   exports SOPHIA_INTEGRATION_SOURCE and SOPHIA_INTEGRATION_COMMIT (a shared
+#   no-checkout clone of this repository and its HEAD), SOPHIA_SOURCE (the
+#   Sophia clone), SOPHIA_TEST_COMMIT (the pinned
 #   revision from ROOT_DIR/pins/sophia.toml) and, when SOPHIA_TEST_TREE is
 #   set, SOPHIA_ROOT (the staged pinned tree for Sophia's retained files).
 test_sophia_setup() {
@@ -23,6 +25,12 @@ test_sophia_setup() {
     }
     export SOPHIA_SOURCE="$work/sophia-source"
     export SOPHIA_TEST_COMMIT="$rev"
+    # This repository's own identity, the same way: a temporary shared
+    # no-checkout clone, bound at its committed (signed) HEAD.
+    git -c init.templateDir= clone --quiet --shared --no-checkout "$root" "$work/integration-source"
+    export SOPHIA_INTEGRATION_SOURCE="$work/integration-source"
+    SOPHIA_INTEGRATION_COMMIT="$(git -C "$work/integration-source" rev-parse HEAD)"
+    export SOPHIA_INTEGRATION_COMMIT
     if [[ -n "${SOPHIA_TEST_TREE:-}" ]]; then
         [[ "$SOPHIA_TEST_TREE" == /* && -d "$SOPHIA_TEST_TREE/tools" ]] || {
             echo "SOPHIA_TEST_TREE must name the absolute staged pinned tree." >&2

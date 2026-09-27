@@ -727,7 +727,7 @@ archive_fixture_checksums() {
     candidate="$1"
     digest="$(sha256sum "$candidate/session.log" | awk '{ print $1 }')"
     sed -i "s/^evidence_sha256=.*/evidence_sha256=$digest/" "$candidate/manifest"
-    (cd "$candidate" && sha256sum manifest result.kdl session.log >SHA256SUMS)
+    (cd "$candidate" && sha256sum manifest result.kdl session.log integration.commit >SHA256SUMS)
 }
 refuse_narthex_archive() {
     candidate="$1"
@@ -806,7 +806,7 @@ sed -i \
     "$run_dir/manifest"
 (
     cd "$run_dir"
-    sha256sum manifest result.kdl session.log >SHA256SUMS
+    sha256sum manifest result.kdl session.log integration.commit >SHA256SUMS
 )
 if SOPHIA_HAGIA_ROOT="$hagia_root" \
     SOPHIA_NARTHEX_ROOT="$narthex_root" \

@@ -36,6 +36,8 @@ if [[ -n "$(git -C "$SOPHIA_SOURCE" status --short)" ]]; then
     exit 1
 fi
 integration_commit="$(runner_integration_commit)"
+# Archives bind this signed integration commit of this checkout.
+export SOPHIA_INTEGRATION_COMMIT="$integration_commit" SOPHIA_INTEGRATION_SOURCE="$ROOT_DIR"
 if [[ -n "$(git -C "$HAGIA_ROOT" status --short)" ]]; then
     echo "Hagia worktree must be clean before the physical proof." >&2
     exit 1

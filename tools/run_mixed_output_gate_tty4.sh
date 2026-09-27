@@ -180,6 +180,8 @@ if [[ -n "$(git -C "$ROOT_DIR" status --porcelain --untracked-files=all)" ]]; th
     refuse worktree_dirty "Integration worktree must be clean before a signed physical gate."
 fi
 integration_commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+# Archives bind this signed integration commit of this checkout.
+export SOPHIA_INTEGRATION_COMMIT="$integration_commit" SOPHIA_INTEGRATION_SOURCE="$ROOT_DIR"
 git -C "$ROOT_DIR" verify-commit "$integration_commit" >/dev/null 2>&1 || {
     refuse unsigned_head "Integration HEAD must have a valid cryptographic signature."
 }

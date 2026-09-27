@@ -274,6 +274,76 @@ if env \
     echo "mirror-group promotion archive accepted an unverifiable commit signature" >&2
     exit 1
 fi
+# The integration identity (finding A): a current archive declares
+# integration_schema=1 and seals this repository's signed commit object; every
+# broken form is refused for its own reason, and an archive without the
+# binding verifies only in the explicit legacy mode.
+integration_case() {
+    local name="$1" expected="$2" mode="${3:-}"
+    local case_dir="$work/integration-$name"
+    rm -rf "$case_dir"
+    cp -a "$run_dir" "$case_dir"
+    "integration_edit_$name" "$case_dir"
+    (cd "$case_dir" && sha256sum $(awk '{print $2}' SHA256SUMS) >SHA256SUMS.new && mv SHA256SUMS.new SHA256SUMS)
+    local output
+    if output="$("$ROOT_DIR/tools/verify_mirror_group_physical_archive.sh" ${mode:+"$mode"} "$case_dir" 2>&1)"; then
+        if [[ "$expected" == accepted* ]]; then
+            grep -Fq "${expected#accepted:}" <<<"$output" || {
+                echo "integration case $name was accepted without: ${expected#accepted:}" >&2
+                exit 1
+            }
+            return 0
+        fi
+        echo "mirror-group archive accepted integration case: $name" >&2
+        exit 1
+    fi
+    [[ "$expected" != accepted* ]] && grep -Fq "$expected" <<<"$output" || {
+        echo "integration case $name refused for the wrong reason: $output" >&2
+        exit 1
+    }
+}
+integration_edit_missing() { sed -i '/^integration_commit=/d' "$1/manifest"; }
+integration_edit_repeated() { local line; line="$(grep '^integration_commit=' "$1/manifest")"; printf '%s\n' "$line" >>"$1/manifest"; }
+integration_edit_malformed() { sed -i 's/^integration_commit=.*/integration_commit=NOT-A-COMMIT/' "$1/manifest"; }
+integration_edit_mismatched() {
+    sed -i "s/^integration_commit=.*/integration_commit=$SOPHIA_TEST_COMMIT/" "$1/manifest"
+}
+integration_edit_schema() { sed -i 's/^integration_schema=1$/integration_schema=2/' "$1/manifest"; }
+integration_edit_legacy() {
+    sed -i '/^integration_schema=/d; /^integration_commit=/d' "$1/manifest"
+    rm -f "$1/integration.commit"
+    sed -i '/  integration\.commit$/d' "$1/SHA256SUMS"
+}
+integration_edit_half_legacy() { sed -i '/^integration_schema=/d' "$1/manifest"; }
+integration_case missing 'missing or repeated integration_commit'
+integration_case repeated 'missing or repeated integration_commit'
+integration_case malformed 'malformed integration_commit'
+integration_case mismatched 'does not match its commit object'
+integration_case schema 'unsupported integration_schema'
+integration_case legacy 'verify it explicitly with --legacy'
+integration_case legacy 'accepted:integration identity unavailable' --legacy
+integration_case half_legacy 'verify it explicitly with --legacy'
+integration_case half_legacy 'legacy archive carries integration fields' --legacy
+# The archiver binds only a signed commit of the explicit integration source.
+if env SOPHIA_INTEGRATION_COMMIT= XDG_STATE_HOME="$work/no-integration-state" \
+    SOPHIA_MIRROR_SOPHIA_BIN="$work/sophia" SOPHIA_MIRROR_PROFILE="$work/profile.kdl" \
+    "$ROOT_DIR/tools/archive_mirror_group_physical_run.sh" "$work/archive.log" >/dev/null 2>&1; then
+    echo "mirror-group archiver accepted a missing integration commit" >&2
+    exit 1
+fi
+if env PATH="$work/fake-bin:$PATH" XDG_STATE_HOME="$work/unsigned-integration-state" \
+    SOPHIA_MIRROR_SOPHIA_BIN="$work/sophia" SOPHIA_MIRROR_PROFILE="$work/profile.kdl" \
+    "$ROOT_DIR/tools/archive_mirror_group_physical_run.sh" "$work/archive.log" >/dev/null 2>&1; then
+    echo "mirror-group archiver accepted an unsigned integration commit" >&2
+    exit 1
+fi
+if env SOPHIA_INTEGRATION_SOURCE= XDG_STATE_HOME="$work/no-source-state" \
+    SOPHIA_MIRROR_SOPHIA_BIN="$work/sophia" SOPHIA_MIRROR_PROFILE="$work/profile.kdl" \
+    "$ROOT_DIR/tools/archive_mirror_group_physical_run.sh" "$work/archive.log" >/dev/null 2>&1; then
+    echo "mirror-group archiver accepted an implicit integration source" >&2
+    exit 1
+fi
+
 printf '\n' >>"$run_dir/session.log"
 if "$ROOT_DIR/tools/verify_mirror_group_physical_archive.sh" "$run_dir" >/dev/null 2>&1; then
     echo "mirror-group archive accepted tampered evidence" >&2

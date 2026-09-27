@@ -76,7 +76,7 @@ sed -i \
     "$run_dir/manifest"
 (
     cd "$run_dir"
-    sha256sum core.kdl desktop-profile.kdl manifest result.kdl session.log >SHA256SUMS
+    sha256sum core.kdl desktop-profile.kdl manifest result.kdl session.log integration.commit >SHA256SUMS
 )
 if "$ROOT_DIR/tools/verify_mixed_output_physical_archive.sh" \
     "$run_dir" >/dev/null 2>&1; then
@@ -91,7 +91,7 @@ sed -i \
     "$run_dir/manifest"
 (
     cd "$run_dir"
-    sha256sum core.kdl desktop-profile.kdl manifest result.kdl session.log >SHA256SUMS
+    sha256sum core.kdl desktop-profile.kdl manifest result.kdl session.log integration.commit >SHA256SUMS
 )
 if "$ROOT_DIR/tools/verify_mixed_output_physical_archive.sh" \
     "$run_dir" >/dev/null 2>&1; then
