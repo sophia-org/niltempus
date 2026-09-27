@@ -13,6 +13,9 @@ use std::process::{Command, Output};
 
 const BWRAP: &str = "/usr/bin/bwrap";
 
+#[path = "support/release_fixture.rs"]
+mod fixture;
+
 struct Release(PathBuf);
 impl Drop for Release {
     fn drop(&mut self) {
@@ -111,4 +114,36 @@ fn the_installed_recipe_tool_runs_with_its_checkout_hidden() {
             .stdout
             .starts_with(b"sophia_session_inputs schema=1 status=prepared\0")
     );
+}
+
+#[test]
+fn the_installed_tool_verifies_a_release_with_its_checkout_hidden() {
+    let (_release, binary) = installed_binary();
+    let dir = fixture::Dir::new("installed-verify-release");
+    let assembly = fixture::assembly(&dir.0);
+    xtask::package_desktop::assemble(&assembly).unwrap();
+    let out = assembly.out.display().to_string();
+    let rev = format!("--c-sdk-rev={}", fixture::HAGIA_C_SDK_REV);
+
+    let output = hidden(&binary, &["verify-release", &out, &rev]);
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(stdout.lines().count(), 1, "{stdout}");
+    assert!(
+        stdout.starts_with("release_verification schema=1 status=pass release_id="),
+        "{stdout}"
+    );
+
+    // Any failure is a nonzero exit with no success record.
+    let wrong = format!("--c-sdk-rev={}", "0".repeat(40));
+    let output = hidden(&binary, &["verify-release", &out, &wrong]);
+    assert!(!output.status.success(), "{output:?}");
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("status=pass"));
+    std::fs::write(
+        assembly.out.join("target/release/sophia"),
+        "tampered after sealing",
+    )
+    .unwrap();
+    let output = hidden(&binary, &["verify-release", &out, &rev]);
+    assert!(!output.status.success(), "{output:?}");
 }

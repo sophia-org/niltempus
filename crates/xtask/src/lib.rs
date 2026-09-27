@@ -17,6 +17,7 @@ pub mod physical_inputs;
 pub mod pins;
 pub mod product_artifact;
 pub mod records;
+pub mod release_verify;
 pub mod session;
 pub mod session_preflight;
 pub mod verify_archives;

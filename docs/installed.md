@@ -72,6 +72,35 @@ release_id to the sha256 of its `manifest` and of its `SHA256SUMS`:
 Historical schema-6 releases are otherwise read only through the legacy path
 of Sophia's Go verifier (root).
 
+### Read-only release verification
+
+```sh
+sophia-integration-xtask verify-release /ABS/RELEASE --c-sdk-rev=<40 lowercase hex>
+```
+
+This is the release's bundled tool (`target/release/sophia-integration-xtask`).
+It runs with its source checkout absent.
+
+It checks the sealed contents against `SHA256SUMS`:
+- every regular file under `bin`, `share`, `target` and `tools` is listed at
+  its digest, and nothing listed is missing;
+- symlinks are refused;
+- nothing else sits at the top level except `manifest`, `SHA256SUMS` and
+  `desktop-manifest.json`.
+
+It also checks one well-formed `release_id` and the schema-7 C SDK binding,
+using the same rule as packaging (`check_release_sdk`) applied to the
+supplied revision.
+
+On success it prints exactly one record,
+`release_verification schema=1 status=pass release_id=... c_sdk_revision=... c_sdk_manifest_sha256=... sealed_files=N`.
+Any failure exits nonzero.
+
+It only reads and never executes anything from the candidate. It does not
+authorize activation and confers no activation-ledger history. Operator
+input binding, the installer's plan checks and the activation/rollback
+ledger stay with the installer.
+
 **Limitation.** These rules are enforced only by this repository's scripts
 and by releases built from them. Activation always runs from this
 repository's `tools/activate_live_session_release.sh`, but `sophia-rollback`

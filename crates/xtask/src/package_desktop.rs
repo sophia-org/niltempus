@@ -886,6 +886,30 @@ pub fn manifest(a: &Assembly) -> String {
 /// manifest is a regular file hashing to the recorded digest and naming the
 /// recorded revision.
 pub fn verify_release_sdk(release: &Path, pair: &VerifiedPair) -> Result<(), String> {
+    check_release_sdk(
+        release,
+        "the pair's",
+        &pair.hagia_c_sdk_revision,
+        Some(&pair.hagia_c_sdk_manifest_sha256),
+    )
+    .map(|_| ())
+}
+
+/// The schema-7 C SDK binding rule, shared by packaging (against the
+/// verified pair) and `xtask verify-release` (against the supplied
+/// revision). Reads only; returns the recorded revision and digest.
+///
+/// The manifest is schema 7 with `hagia_included=true`, and carries each SDK
+/// field exactly once and well formed. The revision equals `expected_revision`
+/// (and the digest `expected_digest`, when given). The sealed SDK manifest is
+/// a regular file that hashes to the recorded digest and names the recorded
+/// revision.
+pub fn check_release_sdk(
+    release: &Path,
+    expected_from: &str,
+    expected_revision: &str,
+    expected_digest: Option<&str>,
+) -> Result<(String, String), String> {
     let text = String::from_utf8(read(&release.join("manifest"))?)
         .map_err(|_| "release manifest is not UTF-8".to_owned())?;
     let values = |key: &str| {
@@ -901,6 +925,9 @@ pub fn verify_release_sdk(release: &Path, pair: &VerifiedPair) -> Result<(), Str
     if one("schema")? != RELEASE_SCHEMA {
         return Err(format!("release manifest is not schema {RELEASE_SCHEMA}"));
     }
+    if one("hagia_included")? != "true" {
+        return Err("release does not include Hagia, so it has no C SDK binding".into());
+    }
     let revision = one("hagia_c_sdk_revision")?;
     let digest = one("hagia_c_sdk_manifest_sha256")?;
     if !hex(revision, 40) {
@@ -913,16 +940,16 @@ pub fn verify_release_sdk(release: &Path, pair: &VerifiedPair) -> Result<(), Str
             "release hagia_c_sdk_manifest_sha256 is malformed: {digest:?}"
         ));
     }
-    if revision != pair.hagia_c_sdk_revision {
+    if revision != expected_revision {
         return Err(format!(
-            "release hagia_c_sdk_revision {revision} is not the pair's {}",
-            pair.hagia_c_sdk_revision
+            "release hagia_c_sdk_revision {revision} is not {expected_from} {expected_revision}"
         ));
     }
-    if digest != pair.hagia_c_sdk_manifest_sha256 {
+    if let Some(expected) = expected_digest
+        && digest != expected
+    {
         return Err(format!(
-            "release hagia_c_sdk_manifest_sha256 {digest} is not the pair's {}",
-            pair.hagia_c_sdk_manifest_sha256
+            "release hagia_c_sdk_manifest_sha256 {digest} is not {expected_from} {expected}"
         ));
     }
     let sealed = release.join(RELEASE_C_SDK_MANIFEST);
@@ -943,7 +970,7 @@ pub fn verify_release_sdk(release: &Path, pair: &VerifiedPair) -> Result<(), Str
             "sealed {RELEASE_C_SDK_MANIFEST} does not name revision {revision}"
         ));
     }
-    Ok(())
+    Ok((revision.to_owned(), digest.to_owned()))
 }
 
 fn collect_files(root: &Path, dir: &Path, files: &mut Vec<String>) -> Result<(), String> {

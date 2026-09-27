@@ -11,6 +11,7 @@ const USAGE: &str = "usage:
   xtask package-desktop --sophia-root=/ABS --sophia-rev=SHA --wm-pair=/ABS --wm-pair-commits=H,N --wm-pair-sha256=H,N --wm-pair-profile-sha256=SHA --wm-pair-c-sdk-rev=REV --build-dir=/ABS --out=/ABS/NEW
   xtask direct-scanout-gate [WIDTH HEIGHT HOLD WORKLOAD] [--overlay-proof] [--cost] [--cursor] [--atomic-cursor]
   xtask verify-archives [--legacy]
+  xtask verify-release /ABS/RELEASE-DIR --c-sdk-rev=<40 lowercase hex>   (read-only; runs without the checkout)
   xtask desktop-comparison install-reference|prepare|prepare-soak|cursor-theme|gate|status|attest|preflight|qualify|capture|finalize|replay|workload|verify|report ...
   xtask session-recipe prepare-arguments|prepare-inputs|stage-proofs|prepare-environment --name=value ... -- [session arguments]
   xtask check-pins
@@ -45,6 +46,10 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
     if arguments.first().map(String::as_str) == Some("session-recipe") {
         xtask::session::run(&arguments[1..]).map_err(|e| e.to_string())?;
         return Ok(Vec::new());
+    }
+    // Read-only release verification for the installer: no repository.
+    if arguments.first().map(String::as_str) == Some("verify-release") {
+        return xtask::release_verify::run(&arguments[1..]);
     }
     let repo = workspace_root()?;
     match arguments.first().map(String::as_str) {

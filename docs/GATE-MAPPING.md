@@ -76,7 +76,7 @@ New external tests with no Sophia predecessor: `session_preflight`,
 `profile_mode`, `wm_default`, `wm_pair`, `package_desktop`, `installed_xtask`,
 `product_artifact`, `nim_deps`, `nim_install`, `physical_inputs`,
 `physical_runner_bounds`, `verify_archives`, `pins`, `provision_script`,
-`xtask_alias`, and `quickshell-probe`'s `evaluate` and `runner`.
+`xtask_alias`, `verify_release`, and `quickshell-probe`'s `evaluate` and `runner`.
 
 ## Recipes (justfile) and xtask commands
 
