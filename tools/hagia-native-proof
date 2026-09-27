@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Provenance: moved from Sophia tools/hagia-native-proof at de776c68afdf9a133818f86917893c3362dc9fb7 (the pin) (Sophia rule 13).
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec "$ROOT_DIR/tools/run_current_hagia_native_gate_tty4.sh" "$@"

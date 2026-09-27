@@ -45,7 +45,11 @@ if [[ -f "$PREFIX/current/manifest" ]]; then
     "$VERIFY_IDENTITY" "$runtime_identity"
     install -m 600 "$runtime_identity" "$run_dir/runtime-identity.log"
 else
-    commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+    # A development run records the explicit Sophia checkout it ran, never
+    # this repository's commit.
+    # shellcheck source=tools/lib/sophia_source.sh
+    source "$ROOT_DIR/tools/lib/sophia_source.sh"
+    commit="$(git -C "$(sophia_source_repo)" rev-parse HEAD)"
 fi
 printf 'schema=1\ncommit=%s\nrecorded_at_utc=%s\n' \
     "$commit" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
