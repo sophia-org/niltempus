@@ -6,6 +6,9 @@
 // recipe entries (Sophia keeps the generic ones and their test).
 use std::{fs, path::PathBuf, process::Command};
 
+#[path = "support/shell_slice.rs"]
+mod shell_slice;
+
 struct Fixture(PathBuf);
 
 impl Fixture {
@@ -222,15 +225,12 @@ fn preparation_rejects_unknown_and_duplicate_options_without_output() {
 fn adapter_preserves_argument_boundaries_and_refuses_old_binaries() {
     let fixture = Fixture::new();
     let launcher = include_str!("../../../tools/session/run_desktop_session.sh");
-    let start = launcher.find("prepared_arguments=\"").unwrap();
-    let end = launcher[start..]
-        .find("load_recipe 'sophia_desktop_recipe_environment")
-        .unwrap()
-        + start;
-    let script = format!(
-        "{}\nprintf '%s\\0' \"${{session_args[@]}}\"",
-        &launcher[start..end]
+    let fragment = shell_slice::slice(
+        launcher,
+        "prepared_arguments=\"",
+        "load_recipe 'sophia_desktop_recipe_environment",
     );
+    let script = format!("{fragment}\nprintf '%s\\0' \"${{session_args[@]}}\"");
     let literal = "--session-app-arg=terminal=spaces 'quotes' $(touch should-not-exist)\nnext";
     for (binary, accepted) in [
         (env!("CARGO_BIN_EXE_xtask"), true),

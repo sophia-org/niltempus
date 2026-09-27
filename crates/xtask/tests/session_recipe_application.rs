@@ -11,6 +11,9 @@ use std::{
     process::{Command, Output},
 };
 
+#[path = "support/shell_slice.rs"]
+mod shell_slice;
+
 struct Fixture {
     root: PathBuf,
     terminal: PathBuf,
@@ -47,18 +50,13 @@ impl Fixture {
 
     fn assemble(&self, changes: &[(&str, Option<&str>)], extra: &[&str]) -> Output {
         let source = include_str!("../../../tools/session/run_desktop_session.sh");
-        let block = |start: &str, end: &str| {
-            assert_eq!(source.matches(start).count(), 1);
-            let a = source.find(start).unwrap();
-            let b = source[a..].find(end).unwrap() + a;
-            &source[a..b]
-        };
+        let block = |start: &str, end: &str| shell_slice::slice(source, start, end);
         let script = format!(
             "set -euo pipefail\n{}\n{}\n{}\nprintf '%s\\0' \"${{session_args[@]}}\"",
             block("recipe_vector=()", "load_recipe 'sophia_session_inputs"),
             block(
                 "load_recipe 'sophia_session_inputs",
-                "# Recipe state is this adapter's own private directory"
+                "# Recipe state is this invocation's own fresh private directory"
             ),
             block(
                 "prepared_arguments=\"",

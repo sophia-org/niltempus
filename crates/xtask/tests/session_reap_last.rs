@@ -1,13 +1,20 @@
 //! A bounded recipe child is a process group that is signalled before it is
 //! reaped (root's pattern, Sophia a6edbbcad): a successful leader must not
-//! leave a background child running, and the leader must not be reaped before
-//! the final group signal.
+//! leave a background child running. "Gone" means the child's /proc entry no
+//! longer exists (ENOENT); a zombie is not gone.
+//!
+//! This binary holds exactly this one test, so it can make itself a child
+//! subreaper: the orphaned background child re-parents to the test process,
+//! which reaps it, so the entry actually disappears within the bound instead
+//! of waiting on init.
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[test]
 fn a_successful_leader_takes_its_background_child_with_it() {
+    rustix::process::set_child_subreaper(Some(rustix::process::getpid())).unwrap();
     let pid_file: PathBuf = std::env::temp_dir().join(format!("reap-last-{}", std::process::id()));
     let _ = std::fs::remove_file(&pid_file);
     // The child holds no pipe of ours: its stdio is /dev/null.
@@ -22,12 +29,21 @@ fn a_successful_leader_takes_its_background_child_with_it() {
     xtask::session::bounded_check(&mut command, "reap-last fixture").unwrap();
     let pid = std::fs::read_to_string(&pid_file).unwrap();
     let _ = std::fs::remove_file(&pid_file);
-    for _ in 0..200 {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        // Reap whatever re-parented to us (the killed background child).
+        while let Ok(Some(_)) = rustix::process::wait(rustix::process::WaitOptions::NOHANG) {}
         match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
-            Err(_) => return,
-            Ok(stat) if stat.rsplit_once(") ").unwrap().1.starts_with('Z') => return,
-            _ => std::thread::sleep(Duration::from_millis(10)),
+            Err(error) if error.kind() == ErrorKind::NotFound => return,
+            Err(error) => panic!("unexpected error reading /proc/{pid}/stat: {error}"),
+            Ok(stat) => {
+                assert!(
+                    Instant::now() < deadline,
+                    "background child {pid} is still present (state {:?}) after its successful leader",
+                    stat.rsplit_once(") ").map(|(_, rest)| &rest[..1])
+                );
+            }
         }
+        std::thread::sleep(Duration::from_millis(10));
     }
-    panic!("background child {pid} survived its successful leader");
 }

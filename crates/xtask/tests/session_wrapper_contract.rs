@@ -27,9 +27,13 @@ impl Fixture {
             &root.join("sophia/tools/stop_sophia_session.sh"),
             "printf 'stop=%s\\n' \"$*\" > \"$RECORD\"",
         );
-        for name in ["sophia", "preflight"] {
-            Self::script(&root.join(name), "exit 0");
-        }
+        // Sophia: records every command; check-host refuses when told to.
+        Self::script(
+            &root.join("sophia-bin"),
+            "printf 'sophia=%s\\n' \"$*\" >> \"$TRACE\"\n\
+             [ \"$1 $2\" != 'session check-host' ] || [ -z \"${REFUSE_HOST:-}\" ] || exit 1",
+        );
+        Self::script(&root.join("preflight"), "exit 0");
         Self(root)
     }
     fn script(path: &Path, body: &str) {
@@ -47,11 +51,13 @@ impl Fixture {
             .env("XDG_STATE_HOME", self.0.join("state"))
             .env("TMPDIR", self.0.join("runtime"))
             .env("RECORD", self.0.join("record"))
+            .env("TRACE", self.0.join("trace"))
             .env("SOPHIA_ROOT", self.0.join("sophia"))
-            .env("SOPHIA_BIN", self.0.join("sophia"))
+            .env("SOPHIA_BIN", self.0.join("sophia-bin"))
             .env("SOPHIA_SESSION_PREFLIGHT", self.0.join("preflight"))
             .env("SOPHIA_INTEGRATION_XTASK", xtask)
             .env("SOPHIA_TTY_PROFILE", "native")
+            .env("SOPHIA_SESSION_TTY", "/dev/tty63")
             .env("SOPHIA_TERMINAL_BIN", "/bin/true")
             .env("SOPHIA_TERMINAL_KIND", "xterm")
             .envs(settings.iter().copied())
@@ -184,6 +190,180 @@ fn benchmark_records_go_to_the_adapter_log_not_to_sophia() {
     assert!(log.contains("sophia_glxgears_benchmark schema=1 duration_seconds=20 surface_width=500 surface_height=500 swap_interval=1"));
     // Nothing product-specific is handed to Sophia's wrapper for its logs.
     assert!(!f.record().iter().any(|l| l.contains("benchmark")));
+}
+
+#[test]
+fn a_host_preflight_refusal_runs_no_recipe_command() {
+    let f = Fixture::new("preflight-first");
+    // A recording recipe tool: any call at all is a failure here.
+    let recipe = f.0.join("recording-xtask");
+    Fixture::script(
+        &recipe,
+        "printf 'recipe=%s\\n' \"$*\" >> \"$TRACE\"; exit 99",
+    );
+    let output = f.run(&recipe, &[], &[("REFUSE_HOST", "1")]);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let trace = fs::read_to_string(f.0.join("trace")).unwrap();
+    assert_eq!(trace, "sophia=session check-host --tty=/dev/tty63\n");
+    assert!(f.record().is_empty(), "Sophia's wrapper was started");
+    assert_eq!(
+        fs::read_dir(f.0.join("runtime")).unwrap().count(),
+        0,
+        "recipe state was created"
+    );
+    // Accepted: check-host runs first, then the recipe commands.
+    let output = f.run(&xtask(), &[], &[]);
+    assert!(output.status.success(), "{output:?}");
+    let trace = fs::read_to_string(f.0.join("trace")).unwrap();
+    assert!(
+        trace
+            .lines()
+            .nth(1)
+            .is_some_and(|l| l == "sophia=session check-host --tty=/dev/tty63")
+    );
+}
+
+#[test]
+fn a_missing_target_tty_refuses_before_any_effect() {
+    let f = Fixture::new("no-tty");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let output = Command::new("/bin/bash")
+        .arg(repo.join("tools/session/run_desktop_session.sh"))
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("TRACE", f.0.join("trace"))
+        .env("SOPHIA_ROOT", f.0.join("sophia"))
+        .env("SOPHIA_BIN", f.0.join("sophia-bin"))
+        .env("SOPHIA_SESSION_PREFLIGHT", f.0.join("preflight"))
+        .env("SOPHIA_INTEGRATION_XTASK", xtask())
+        .env("SOPHIA_TTY_PROFILE", "native")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(!f.0.join("trace").exists());
+}
+
+/// Every file under `dir`: relative path, sha256, mode and mtime.
+fn snapshot(dir: &Path) -> Vec<(PathBuf, String, u32, i64)> {
+    use sha2::{Digest, Sha256};
+    use std::os::unix::fs::MetadataExt;
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(path) = stack.pop() {
+        for entry in fs::read_dir(&path).unwrap() {
+            let entry = entry.unwrap();
+            let meta = fs::symlink_metadata(entry.path()).unwrap();
+            if meta.is_dir() {
+                stack.push(entry.path());
+            }
+            let digest = if meta.is_file() {
+                format!("{:x}", Sha256::digest(fs::read(entry.path()).unwrap()))
+            } else {
+                String::new()
+            };
+            out.push((
+                entry.path().strip_prefix(dir).unwrap().to_path_buf(),
+                digest,
+                meta.mode(),
+                meta.mtime_nsec() + meta.mtime() * 1_000_000_000,
+            ));
+        }
+    }
+    out.sort();
+    out
+}
+
+#[test]
+fn a_second_launch_cannot_touch_an_active_sessions_proof_files() {
+    let f = Fixture::new("second-launch");
+    fs::write(f.0.join("desktop.kdl"), "schema 1\n").unwrap();
+    // Sophia's wrapper stand-in: refuses while a live wrapper.pid exists,
+    // otherwise records its pid and stays alive until released.
+    Fixture::script(
+        &f.0.join("sophia/tools/run_sophia_session.sh"),
+        "pid_file=\"$RUNNING/wrapper.pid\"\n\
+         if [ -s \"$pid_file\" ] && kill -0 \"$(cat \"$pid_file\")\" 2>/dev/null; then echo 'already running' >&2; exit 1; fi\n\
+         echo $$ > \"$pid_file\"\n\
+         while [ ! -e \"$RUNNING/release\" ]; do sleep 0.05; done",
+    );
+    fs::create_dir(f.0.join("running")).unwrap();
+    let desktop = f.0.join("desktop.kdl");
+    let settings = [
+        ("SOPHIA_TTY_PROFILE", "hagia"),
+        ("SOPHIA_TERMINAL_KIND", "kitty"),
+        ("SOPHIA_FIREFOX_BIN", "/bin/true"),
+        ("SOPHIA_DESKTOP_PROFILE", desktop.to_str().unwrap()),
+    ];
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let launch = || {
+        let mut command = Command::new("/bin/bash");
+        command
+            .arg(repo.join("tools/session/run_desktop_session.sh"))
+            .arg("--firefox-m10-proof")
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("XDG_RUNTIME_DIR", f.0.join("runtime"))
+            .env("XDG_STATE_HOME", f.0.join("state"))
+            .env("TMPDIR", f.0.join("runtime"))
+            .env("TRACE", f.0.join("trace"))
+            .env("RUNNING", f.0.join("running"))
+            .env("SOPHIA_ROOT", f.0.join("sophia"))
+            .env("SOPHIA_BIN", f.0.join("sophia-bin"))
+            .env("SOPHIA_SESSION_PREFLIGHT", f.0.join("preflight"))
+            .env("SOPHIA_INTEGRATION_XTASK", xtask())
+            .env("SOPHIA_SESSION_TTY", "/dev/tty63")
+            .envs(settings);
+        command
+    };
+    let mut first = launch().spawn().unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !f.0.join("running/wrapper.pid").exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "first launch never started its wrapper"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let active = fs::read_dir(f.0.join("runtime"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.is_dir())
+        .collect::<Vec<_>>();
+    assert_eq!(active.len(), 1, "{active:?}");
+    let active = active[0].clone();
+    assert_eq!(
+        fs::metadata(&active).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    assert!(
+        snapshot(&active)
+            .iter()
+            .any(|(p, ..)| p.ends_with("user.js"))
+    );
+    let before = snapshot(&active);
+    let second = launch().output().unwrap();
+    assert!(!second.status.success(), "{second:?}");
+    assert!(String::from_utf8_lossy(&second.stderr).contains("already running"));
+    assert_eq!(
+        snapshot(&active),
+        before,
+        "the second attempt touched the active session's files"
+    );
+    let dirs = fs::read_dir(f.0.join("runtime"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.is_dir())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        dirs,
+        [active.clone()],
+        "the second attempt left recipe state behind"
+    );
+    // The first session's files live until its wrapper ends, then go.
+    fs::write(f.0.join("running/release"), "").unwrap();
+    assert!(first.wait().unwrap().success());
+    assert!(!active.exists());
 }
 
 #[test]

@@ -108,11 +108,72 @@ fn usage_errors_exit_2_without_a_record() {
     }
 }
 
+/// Root's check-host rule for the checker's result (the contract Sophia
+/// implements): 0 with the exact record clears; 1 clears only with an
+/// explicit --allow-active; every other status, or a malformed 0, refuses.
+fn check_host_accepts(status: i32, stdout: &str, tty: &str, allow_active: bool) -> bool {
+    match status {
+        0 => stdout == format!("sophia_session_preflight schema=1 status=clear tty={tty}\n"),
+        1 => allow_active,
+        _ => false,
+    }
+}
+
 #[test]
-fn an_unreadable_process_table_refuses() {
-    let (status, stdout, _) = run(&tty(), Path::new("/nonexistent/proc"));
-    assert_eq!(status, 1);
+fn an_unreadable_process_table_exits_3_and_cannot_be_overridden() {
+    let (status, stdout, stderr) = run(&tty(), Path::new("/nonexistent/proc"));
+    assert_eq!(status, 3, "{stderr}");
     assert!(stdout.is_empty());
+    for allow_active in [false, true] {
+        assert!(!check_host_accepts(
+            status,
+            &stdout,
+            "/dev/tty3",
+            allow_active
+        ));
+    }
+    // An active session is the only overridable refusal.
+    let table = Table::new("override");
+    table.process(40, "sway", "S");
+    let (status, stdout, _) = run(&tty(), &table.0);
+    assert_eq!(status, 1);
+    assert!(!check_host_accepts(status, &stdout, "/dev/tty3", false));
+    assert!(check_host_accepts(status, &stdout, "/dev/tty3", true));
+}
+
+#[test]
+fn per_process_inspection_failures_exit_3() {
+    use std::os::unix::fs::PermissionsExt;
+    let cases: [(&str, &dyn Fn(&Table)); 5] = [
+        ("unreadable stat", &|t: &Table| {
+            t.process(50, "bash", "S");
+            fs::set_permissions(t.0.join("50/stat"), fs::Permissions::from_mode(0o000)).unwrap();
+        }),
+        ("truncated stat", &|t: &Table| t.raw(51, "51 (bas")),
+        ("garbage stat", &|t: &Table| t.raw(52, "garbage\n")),
+        ("pid mismatch", &|t: &Table| t.raw(53, "54 (bash) S 1 1\n")),
+        ("missing state", &|t: &Table| t.raw(55, "55 (bash)\n")),
+    ];
+    for (index, (what, setup)) in cases.iter().enumerate() {
+        let table = Table::new(&format!("inspect-{index}"));
+        table.process(10, "bash", "S");
+        setup(&table);
+        let (status, stdout, stderr) = run(&tty(), &table.0);
+        if *what == "unreadable stat" && fs::read_to_string(table.0.join("50/stat")).is_ok() {
+            // Running as root: the permission cannot be denied here.
+            continue;
+        }
+        assert_eq!(status, 3, "{what}: {stderr}");
+        assert!(stdout.is_empty(), "{what}");
+        assert!(
+            !check_host_accepts(status, &stdout, "/dev/tty3", true),
+            "{what}"
+        );
+    }
+    // A process that exits between the listing and the read is tolerated.
+    let table = Table::new("vanished");
+    fs::create_dir(table.0.join("60")).unwrap();
+    assert_eq!(run(&tty(), &table.0).0, 0);
 }
 
 #[test]
@@ -124,14 +185,14 @@ fn the_binary_follows_the_same_contract() {
         .arg("--tty=/dev/tty63")
         .output()
         .unwrap();
-    // On a build host a graphical session may be running; either verdict is
-    // valid, but it must be exactly one of the two contract shapes.
+    // On a build host a graphical session may be running (1), or a hardened
+    // /proc may deny inspection (3); every verdict must have a contract shape.
     match output.status.code() {
         Some(0) => assert_eq!(
             output.stdout,
             b"sophia_session_preflight schema=1 status=clear tty=/dev/tty63\n"
         ),
-        Some(1) => assert!(output.stdout.is_empty()),
+        Some(1 | 3) => assert!(output.stdout.is_empty()),
         other => panic!("unexpected status {other:?}"),
     }
 }

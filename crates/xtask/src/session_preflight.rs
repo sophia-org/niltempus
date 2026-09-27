@@ -11,34 +11,59 @@
 //!   argv: --tty=<absolute tty path>, exactly one argument
 //!   exit 0: stdout is exactly one line
 //!           `sophia_session_preflight schema=1 status=clear tty=<tty>`
-//!   exit 1: an active session was found; stderr names process:pid
+//!   exit 1: an active session was found; stderr names process:pid (the only
+//!           result an operator's explicit --allow-active may override)
 //!   exit 2: usage
+//!   exit 3: the process table could not be inspected (permission, I/O or an
+//!           invalid record); never overridable
 use std::path::Path;
 
 /// The graphical sessions whose presence refuses a takeover.
 pub const ACTIVE_SESSION_NAMES: [&str; 6] =
     ["river", "niri", "sway", "Hyprland", "kwin_wayland", "Xorg"];
 
+/// Why the process table could not be inspected (exit 3).
+#[derive(Debug)]
+pub struct InspectionError(pub String);
+
 /// `process:pid` for every live (non-zombie) process whose name is exactly
 /// one of the names, in name order then pid order, read from `proc_root`
-/// (normally /proc).
-pub fn active_sessions(proc_root: &Path) -> std::io::Result<Vec<String>> {
+/// (normally /proc). Only a process that exits between the listing and the
+/// read (NotFound) is tolerated; any other I/O error or an invalid stat
+/// record fails the whole inspection.
+pub fn active_sessions(proc_root: &Path) -> Result<Vec<String>, InspectionError> {
+    let fail = |what: String| InspectionError(what);
     let mut processes = Vec::new();
-    for entry in std::fs::read_dir(proc_root)? {
-        let entry = entry?;
+    let entries =
+        std::fs::read_dir(proc_root).map_err(|e| fail(format!("{}: {e}", proc_root.display())))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| fail(format!("{}: {e}", proc_root.display())))?;
         let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
             continue;
         };
-        // A process may exit between the listing and the read.
-        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
-            continue;
+        let path = entry.path().join("stat");
+        let stat = match std::fs::read_to_string(&path) {
+            Ok(stat) => stat,
+            // The process exited between the listing and the read.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(fail(format!("{}: {error}", path.display()))),
         };
         // pid (comm) state ...; comm may contain spaces and parentheses.
+        let invalid = || fail(format!("{}: invalid stat record", path.display()));
         let (Some(open), Some(close)) = (stat.find('('), stat.rfind(')')) else {
-            continue;
+            return Err(invalid());
         };
+        if open >= close || stat[..open].trim() != pid.to_string() {
+            return Err(invalid());
+        }
         let name = &stat[open + 1..close];
-        let state = stat[close + 1..].split_whitespace().next().unwrap_or("");
+        let state = stat[close + 1..]
+            .split_whitespace()
+            .next()
+            .ok_or_else(invalid)?;
+        if state.len() != 1 || !state.bytes().all(|b| b.is_ascii_alphabetic()) {
+            return Err(invalid());
+        }
         if state.starts_with('Z') {
             continue;
         }
@@ -80,11 +105,11 @@ pub fn run(args: &[String], proc_root: &Path) -> (i32, String, String) {
                 active.join(" ")
             ),
         ),
-        // Unreadable process table: refuse rather than clear.
-        Err(error) => (
-            1,
+        // Inspection failure: a distinct status no override may accept.
+        Err(InspectionError(error)) => (
+            3,
             String::new(),
-            format!("cannot read the process table: {error}\n"),
+            format!("cannot inspect the process table: {error}\n"),
         ),
     }
 }

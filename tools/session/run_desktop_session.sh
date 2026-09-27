@@ -55,6 +55,23 @@ session_label() {
 }
 SESSION_LABEL="$(session_label "$SESSION_PROFILE")"
 
+# The host preflight comes before any recipe effect: no discovery, staging,
+# argument preparation or session start happens on a host that refuses.
+# Sophia's generic wrapper checks again before the guard and takeover. The
+# target TTY is explicit (SOPHIA_SESSION_TTY) or this controlling terminal.
+target_tty="${SOPHIA_SESSION_TTY:-}"
+if [[ -z "$target_tty" ]]; then
+    target_tty="$(tty 2>/dev/null || true)"
+fi
+[[ "$target_tty" == /dev/* ]] || {
+    echo "No target TTY: run from a local TTY or set SOPHIA_SESSION_TTY." >&2
+    exit 2
+}
+timeout --kill-after=2s 20s "$SOPHIA_BIN" session check-host "--tty=$target_tty" || {
+    echo "Sophia's host preflight refused this session (see above)." >&2
+    exit 1
+}
+
 # Load one NUL vector from the recipe tool without evaluating its text.
 recipe_vector=()
 load_recipe() {
@@ -84,15 +101,17 @@ standalone_bin="${recipe_vector[4]}"
 SOPHIA_HAGIA_BIN="${recipe_vector[5]}"
 session_benchmark="${recipe_vector[6]}"
 
-# Recipe state is this adapter's own private directory; Sophia's wrapper keeps
-# its generic state directory separately.
+# Recipe state is this invocation's own fresh private directory (mkdtemp,
+# 0700), never shared with another launch: a second attempt can neither stage
+# over nor clean up an active session's proof files. It is removed only after
+# this invocation's wrapper has ended, so the files stay valid for the whole
+# session, recovery included. Sophia's wrapper keeps its generic state apart.
 runtime_root="${XDG_RUNTIME_DIR:-/tmp}"
-STATE_DIR="$runtime_root/sophia-desktop-${SESSION_PROFILE}-${UID}"
-mkdir -p "$STATE_DIR"
+STATE_DIR="$(mktemp -d "$runtime_root/sophia-desktop-${SESSION_PROFILE}.XXXXXXXXXX")"
 chmod 700 "$STATE_DIR"
 firefox_m10_probe_dir=""
 cleanup_recipe_state() {
-    [[ -z "$firefox_m10_probe_dir" ]] || rm -rf -- "$firefox_m10_probe_dir"
+    rm -rf -- "$STATE_DIR"
 }
 trap cleanup_recipe_state EXIT
 
