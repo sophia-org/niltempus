@@ -110,8 +110,7 @@ fi
 wm_profile="${SOPHIA_DESKTOP_PROFILE:-}"
 if [[ -z "$wm_profile" ]]; then
     config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
-    for candidate in "$config_home/sophia/desktop.kdl" "$config_home/hagia/config.kdl" \
-        /etc/sophia/desktop.kdl /etc/hagia/config.kdl; do
+    for candidate in "$config_home/sophia/desktop.kdl" /etc/sophia/desktop.kdl; do
         if [[ -e "$candidate" || -L "$candidate" ]]; then
             wm_profile="$candidate"
             break

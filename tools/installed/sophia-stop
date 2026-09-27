@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Provenance: moved from Sophia tools/installed/sophia-stop at a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (original copy; source unchanged at the pin de776c68) (Sophia rule 13).
+set -euo pipefail
+
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+RELEASE_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
+STOP="$RELEASE_DIR/tools/stop_sophia_session.sh"
+
+# Sophia's stop primitive takes the same opaque label the adapter gave its
+# wrapper; product names never reach it.
+session_label() {
+    case "$1" in
+        hagia) echo managed ;;
+        native) echo native ;;
+        kitty) echo terminal ;;
+        standalone) echo standalone ;;
+        *) return 1 ;;
+    esac
+}
+if (( $# == 1 )); then
+    label="$(session_label "$1")" || {
+        echo "usage: sophia-stop [hagia|kitty|native|standalone]" >&2
+        exit 2
+    }
+    exec "$STOP" "$label"
+fi
+(( $# == 0 )) || {
+    echo "usage: sophia-stop [hagia|kitty|native|standalone]" >&2
+    exit 2
+}
+
+runtime_root="${XDG_RUNTIME_DIR:-}"
+if [[ -z "$runtime_root" ]]; then
+    user_runtime="/run/user/$UID"
+    if [[ -d "$user_runtime" && "$(stat -c %u "$user_runtime")" == "$UID" ]]; then
+        runtime_root="$user_runtime"
+    else
+        runtime_root=/tmp
+    fi
+fi
+active_profiles=()
+for profile in hagia native kitty standalone; do
+    pid_file="$runtime_root/sophia-$(session_label "$profile")-session-${UID}/wrapper.pid"
+    [[ -s "$pid_file" ]] || continue
+    wrapper_pid="$(<"$pid_file")"
+    if [[ "$wrapper_pid" =~ ^[0-9]+$ ]] && kill -0 "$wrapper_pid" 2>/dev/null; then
+        active_profiles+=("$profile")
+    fi
+done
+(( ${#active_profiles[@]} <= 1 )) || {
+    echo "More than one Sophia wrapper is active: ${active_profiles[*]}" >&2
+    echo "Select one explicitly with: sophia-stop PROFILE" >&2
+    exit 1
+}
+if (( ${#active_profiles[@]} == 1 )); then
+    exec "$STOP" "$(session_label "${active_profiles[0]}")"
+fi
+
+echo "No active Sophia session is recorded."
