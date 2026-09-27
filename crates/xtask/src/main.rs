@@ -5,7 +5,7 @@ const USAGE: &str = "usage:
   xtask prepare-bemenu-artifact SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR
   xtask prepare-product-artifact lom|provlita|hagia SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR
   xtask prepare-wm-pair --hagia REPO COMMIT --narthex REPO COMMIT NEW-OUTPUT-DIR
-  xtask package-desktop --sophia-root=/ABS --sophia-rev=SHA --wm-pair=/ABS --wm-pair-commits=H,N --wm-pair-sha256=H,N --build-dir=/ABS --out=/ABS/NEW
+  xtask package-desktop --sophia-root=/ABS --sophia-rev=SHA --wm-pair=/ABS --wm-pair-commits=H,N --wm-pair-sha256=H,N --wm-pair-profile-sha256=SHA --build-dir=/ABS --out=/ABS/NEW
   xtask session-recipe prepare-arguments|prepare-inputs|stage-proofs|prepare-environment --name=value ... -- [session arguments]
   xtask check-pins
   xtask check-provision
@@ -30,6 +30,13 @@ fn main() -> std::process::ExitCode {
 }
 
 fn run(arguments: &[String]) -> Result<Vec<String>, String> {
+    // Commands an installed release runs come first and never look up this
+    // repository: the packaged binary must work with its build checkout gone
+    // (tests/installed_xtask.rs runs it with the checkout hidden).
+    if arguments.first().map(String::as_str) == Some("session-recipe") {
+        xtask::session::run(&arguments[1..]).map_err(|e| e.to_string())?;
+        return Ok(Vec::new());
+    }
     let repo = workspace_root()?;
     match arguments.first().map(String::as_str) {
         Some("prepare-bemenu-artifact") => xtask::bemenu_artifact::run(&repo, &arguments[1..]),
@@ -57,10 +64,6 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
                     .into(),
             ),
         },
-        Some("session-recipe") => {
-            xtask::session::run(&arguments[1..]).map_err(|e| e.to_string())?;
-            Ok(Vec::new())
-        }
         Some("check-pins") if arguments.len() == 1 => xtask::pins::check(&repo),
         Some("check-provision") if arguments.len() == 1 => xtask::pins::check_provision(&repo),
         Some("audit-pins") => match &arguments[1..] {
