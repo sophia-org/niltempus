@@ -68,6 +68,9 @@ SOPHIA_BIN="$SOPHIA_TARGET/release/sophia"
 } > "$EVIDENCE_DIR/identity.manifest"
 
 echo "Evidence: $EVIDENCE_DIR"
+# SOPHIA_SHELL_GPU_EXPECTED_DEVICE ("MAJ:MIN@PCI" or "none", for example
+# 226:128@0000:03:00.0) is supplied by the operator when wanted; this script
+# never derives or defaults it, and it reaches Sophia through the environment.
 # SEAM D (approved names; bound when the seams commit is pinned). Lom's
 # expectations: one 256x24 top-edge panel on a 256x64 output, presented then
 # renderer-failed, the client exits on its own, discrete input granted.

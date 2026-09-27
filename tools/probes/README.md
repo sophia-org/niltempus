@@ -23,6 +23,10 @@ SOPHIA_LOM_SHA256=BINARY-SHA256 SOPHIA_LOM_CONFIG_SHA256=CONFIG-SHA256 \
     tools/lom_gpu_content_hardware_proof.sh
 ```
 
+The operator may also supply `SOPHIA_SHELL_GPU_EXPECTED_DEVICE` (`MAJ:MIN@PCI`
+or `none`, for example `226:128@0000:03:00.0`); the scripts never derive or
+default it.
+
 Waiting on seam D: at the pinned Sophia revision the proof command is
 Lom-named. Until Sophia's generic `shell-gpu-content-proof` command is approved
 the script refuses (exit 3) before building anything.
