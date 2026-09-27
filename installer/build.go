@@ -74,6 +74,14 @@ func buildRelease(plan Plan, loc Locations) (string, error) {
 	if plan.Niltempus == nil || plan.Integration != nil {
 		return "", fmt.Errorf("new builds require the single niltempus source; the external integration packager setting is retired; rerun plan")
 	}
+	// Missing, malformed or mismatched helper inputs stop here, before any
+	// directory is created or source staged.
+	if plan.Schema != currentPlanSchema {
+		return "", fmt.Errorf("new builds require plan schema %d (9P-only); rerun plan", currentPlanSchema)
+	}
+	if err := validateInputs(plan.Inputs, plan.Sources); err != nil {
+		return "", err
+	}
 	profile, err := os.ReadFile(plan.Profile)
 	if err != nil {
 		return "", err
@@ -138,45 +146,40 @@ func buildRelease(plan Plan, loc Locations) (string, error) {
 			return "", err
 		}
 	}
-	for _, name := range []string{"install_live_session.sh", "activate_live_session_release.sh", "lib/live_session_surface.sh"} {
-		if err := copyFile(filepath.Join(roots["integration"], "tools", name), filepath.Join(stage, "tools", name), 0755); err != nil {
+	// The activator and its ledger library come from the selected niltempus
+	// revision; the activator sources both libraries.
+	for _, tool := range []struct {
+		name string
+		mode os.FileMode
+	}{{"install_live_session.sh", 0755}, {"activate_live_session_release.sh", 0755}, {"lib/live_session_surface.sh", 0755}, {"lib/activation_ledger.sh", 0644}} {
+		if err := copyFile(filepath.Join(roots["integration"], "tools", tool.name), filepath.Join(stage, "tools", tool.name), tool.mode); err != nil {
 			return "", err
 		}
 	}
+	// One 9P-only profile and one login entry; no current-IPC variant.
 	installed := filepath.Join(prefix, "releases", plan.ReleaseID)
-	for _, variant := range []struct {
-		name   string
-		render func(string, string) (string, error)
-	}{{"desktop", renderProfile}, {"desktop-ipc", renderIPCProfile}} {
-		finalProfile, err := variant.render(string(profile), filepath.Join(installed, "target/release"))
-		if err != nil {
-			return "", err
-		}
-		if err := writeFile(filepath.Join(stage, "share/sophia-niltempus-desktop", variant.name+".kdl"), []byte(finalProfile), 0644); err != nil {
-			return "", err
-		}
-		validation, err := variant.render(string(profile), filepath.Join(stage, "target/release"))
-		if err != nil {
-			return "", err
-		}
-		validationPath := filepath.Join(work, variant.name+"-validation.kdl")
-		if err := writeFile(validationPath, []byte(validation), 0600); err != nil {
-			return "", err
-		}
-		if err := preflightProfile(stage, work, variant.name, filepath.Join(stage, "target/release/sophia"), filepath.Join(stage, "target/release/hagia"), validationPath); err != nil {
-			return "", err
-		}
+	finalProfile, err := renderProfile(string(profile), filepath.Join(installed, "target/release"))
+	if err != nil {
+		return "", err
+	}
+	if err := writeFile(filepath.Join(stage, "share/sophia-niltempus-desktop/desktop.kdl"), []byte(finalProfile), 0644); err != nil {
+		return "", err
+	}
+	validation, err := renderProfile(string(profile), filepath.Join(stage, "target/release"))
+	if err != nil {
+		return "", err
+	}
+	validationPath := filepath.Join(work, "desktop-validation.kdl")
+	if err := writeFile(validationPath, []byte(validation), 0600); err != nil {
+		return "", err
+	}
+	if err := preflightProfile(stage, work, "desktop", filepath.Join(stage, "target/release/sophia"), filepath.Join(stage, "target/release/hagia"), validationPath); err != nil {
+		return "", err
 	}
 	if err := writeFile(filepath.Join(stage, "bin/sophia-niltempus-desktop-session"), []byte(sessionLauncher()), 0755); err != nil {
 		return "", err
 	}
 	if err := writeFile(filepath.Join(stage, "share/wayland-sessions", desktopFile), []byte(desktopEntry()), 0644); err != nil {
-		return "", err
-	}
-	if err := writeFile(filepath.Join(stage, ipcLauncher), []byte(ipcSessionLauncher()), 0755); err != nil {
-		return "", err
-	}
-	if err := writeFile(filepath.Join(stage, "share/wayland-sessions", ipcDesktopFile), []byte(ipcDesktopEntry()), 0644); err != nil {
 		return "", err
 	}
 	metadataPath := filepath.Join(stage, "manifest")

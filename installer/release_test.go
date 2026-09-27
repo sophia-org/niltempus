@@ -7,7 +7,14 @@ import (
 	"testing"
 )
 
-func fixtureRelease(t *testing.T) (string, Plan) {
+// Legacy (plan schema 2) launcher and entry contents, as installed releases
+// carry them. New releases never generate these.
+const legacyIPCLauncher = "#!/bin/bash\nexec \"$release/bin/sophia-hagia-session\" --wm-transport=current-ipc # share/sophia-niltempus-desktop/desktop-ipc.kdl\n"
+const legacyIPCEntry = "[Desktop Entry]\nName=Sophia niltempus Desktop (current IPC)\nExec=" + prefix + "/current/" + ipcLauncher + "\nType=Application\n"
+
+// legacyFixtureRelease is an installed plan-schema-2 release (external
+// manifest schema 6) with its current-IPC entry.
+func legacyFixtureRelease(t *testing.T) (string, Plan) {
 	t.Helper()
 	root := t.TempDir()
 	plan := Plan{Schema: 2, ProfileSHA256: digest([]byte("profile")), InstallerSHA256: digest([]byte("installer"))}
@@ -17,12 +24,15 @@ func fixtureRelease(t *testing.T) (string, Plan) {
 			t.Fatal(err)
 		}
 	}
-	for _, path := range []string{"bin/sophia-niltempus-desktop-session", ipcLauncher, "bin/sophia-hagia-session", "tools/install_live_session.sh", "tools/activate_live_session_release.sh", "tools/verify_packaged_policy.sh"} {
+	for _, path := range []string{"bin/sophia-niltempus-desktop-session", "bin/sophia-hagia-session", "tools/install_live_session.sh", "tools/activate_live_session_release.sh", "tools/verify_packaged_policy.sh"} {
 		if err := writeFile(filepath.Join(root, path), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for path, data := range map[string]string{"manifest": "schema=6\nrelease_id=" + plan.ReleaseID + "\n", "share/sophia-niltempus-desktop/desktop.kdl": fixtureProfile, "share/wayland-sessions/" + desktopFile: desktopEntry(), "share/wayland-sessions/" + ipcDesktopFile: ipcDesktopEntry()} {
+	if err := writeFile(filepath.Join(root, ipcLauncher), []byte(legacyIPCLauncher), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for path, data := range map[string]string{"manifest": "schema=6\nrelease_id=" + plan.ReleaseID + "\n", "share/sophia-niltempus-desktop/desktop.kdl": fixtureProfile, "share/wayland-sessions/" + desktopFile: desktopEntry(), "share/wayland-sessions/" + ipcDesktopFile: legacyIPCEntry} {
 		if err := writeFile(filepath.Join(root, path), []byte(data), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -36,10 +46,95 @@ func fixtureRelease(t *testing.T) (string, Plan) {
 	return root, plan
 }
 
+const fixtureSDKRevision = "841563d614ed8540472f0edfa7f4cddaafe3fdde"
+
+func fixtureSDKManifest(revision string) string {
+	return `{"schema":1,"repository":"https://github.com/sophia-org/sophia-desktop-sdk-c","revision":"` + revision + `","files":{}}` + "\n"
+}
+
+// fixtureRelease is a plan-schema-3 (9P-only) release with an external
+// schema-7 manifest bound to Hagia's vendored C SDK.
+func fixtureRelease(t *testing.T) (string, Plan) {
+	t.Helper()
+	root := t.TempDir()
+	plan := Plan{
+		Schema:          currentPlanSchema,
+		Sources:         map[string]Source{"sophia": {Commit: strings.Repeat("1", 40)}, "hagia": {Commit: strings.Repeat("2", 40)}, "narthex": {Commit: strings.Repeat("3", 40)}},
+		ProfileSHA256:   digest([]byte("profile")),
+		InstallerSHA256: digest([]byte("installer")),
+		Niltempus:       &IntegrationPlan{Source: Source{Commit: strings.Repeat("4", 40)}, CargoHome: "/cache", CargoLockSHA256: "lock"},
+		Inputs: &PlanInputs{
+			HagiaNimDeps:      NimDepsInput{"/reviewed/hagia.nim-deps", strings.Repeat("a", 64)},
+			NarthexNimDeps:    NimDepsInput{"/reviewed/narthex.nim-deps", strings.Repeat("b", 64)},
+			HagiaCSDKRevision: fixtureSDKRevision,
+		},
+	}
+	plan.ReleaseID = releaseID(plan)
+	for _, path := range []string{"target/release/sophia", "target/release/hagia", "target/release/narthex", "target/release/lom", "target/release/bemenu-sophia", "target/release/sophia-integration-xtask", "target/release/active-session-preflight", "bin/sophia-hagia-session", "bin/sophia-session", "tools/install_live_session.sh", "tools/activate_live_session_release.sh", "tools/verify_packaged_policy.sh", "tools/session/run_desktop_session.sh", "tools/lib/live_session_surface.sh"} {
+		if err := writeFile(filepath.Join(root, path), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	profile, err := renderProfile(fixtureProfile, filepath.Join(prefix, "releases", plan.ReleaseID, "target/release"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, data := range map[string]string{
+		"bin/sophia-niltempus-desktop-session":       sessionLauncher(),
+		"tools/lib/activation_ledger.sh":             "# ledger\n",
+		"share/sophia-niltempus-desktop/desktop.kdl": profile,
+		"share/wayland-sessions/" + desktopFile:      desktopEntry(),
+		"share/sophia-policy/hagia/default.kdl":      "profile",
+		sealedCSDKManifest:                           fixtureSDKManifest(fixtureSDKRevision),
+	} {
+		mode := os.FileMode(0644)
+		if strings.HasPrefix(path, "bin/") {
+			mode = 0755
+		}
+		if err := writeFile(filepath.Join(root, path), []byte(data), mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeSchema7Metadata(t, root, plan, nil)
+	return root, plan
+}
+
+// writeSchema7Metadata writes the external manifest the packager would, then
+// reseals. mutate may alter the text first.
+func writeSchema7Metadata(t *testing.T, root string, plan Plan, mutate func(string) string) {
+	t.Helper()
+	hash := func(path string) string {
+		h, err := fileDigest(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	metadata := "schema=7\nversion=0.1.0\ncommit=" + plan.Sources["sophia"].Commit + "\nrelease_id=" + plan.ReleaseID +
+		"\nbuilt_at_utc=2026-09-27T00:00:00Z\nhagia_included=true\nhagia_source_commit=" + plan.Sources["hagia"].Commit +
+		"\nhagia_default_profile_sha256=" + hash("share/sophia-policy/hagia/default.kdl") +
+		"\nhagia_binary_sha256=" + hash("target/release/hagia") + "\nhagia_shell_binary_sha256=" + hash("target/release/narthex") +
+		"\nnarthex_source_commit=" + plan.Sources["narthex"].Commit + "\nintegration_commit=" + plan.Niltempus.Source.Commit +
+		"\nhagia_c_sdk_revision=" + plan.Inputs.HagiaCSDKRevision + "\nhagia_c_sdk_manifest_sha256=" + hash(sealedCSDKManifest) + "\n"
+	if mutate != nil {
+		metadata = mutate(metadata)
+	}
+	if err := writeFile(filepath.Join(root, "manifest"), []byte(metadata), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := sealRelease(root, plan); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestVerifyReleaseAndCurrentLink(t *testing.T) {
 	root, _ := fixtureRelease(t)
 	if _, err := verifyRelease(root); err != nil {
 		t.Fatal(err)
+	}
+	legacy, _ := legacyFixtureRelease(t)
+	if _, err := verifyRelease(legacy); err != nil {
+		t.Fatalf("installed legacy release: %v", err)
 	}
 	link := filepath.Join(t.TempDir(), "current")
 	if err := os.Symlink(root, link); err != nil {
@@ -86,8 +181,41 @@ func TestVerifyRefusesReleaseDamage(t *testing.T) {
 			}
 			return sealRelease(root, p)
 		},
-		"resealed missing IPC profile": func(root string, p Plan) error {
-			if err := os.Remove(filepath.Join(root, "share/sophia-niltempus-desktop/desktop-ipc.kdl")); err != nil {
+		"resealed IPC profile": func(root string, p Plan) error {
+			if err := writeFile(filepath.Join(root, "share/sophia-niltempus-desktop/desktop-ipc.kdl"), []byte(fixtureProfile), 0644); err != nil {
+				return err
+			}
+			return sealRelease(root, p)
+		},
+		"resealed IPC login entry": func(root string, p Plan) error {
+			if err := writeFile(filepath.Join(root, "share/wayland-sessions/"+ipcDesktopFile), []byte(legacyIPCEntry), 0644); err != nil {
+				return err
+			}
+			return sealRelease(root, p)
+		},
+		"resealed IPC bar": func(root string, p Plan) error {
+			path := filepath.Join(root, "share/sophia-niltempus-desktop/desktop.kdl")
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			changed := strings.Replace(string(data), `transport "9p2000.L"`, `transport "current-ipc"`, 1)
+			if changed == string(data) {
+				return os.ErrInvalid
+			}
+			if err := os.WriteFile(path, []byte(changed), 0644); err != nil {
+				return err
+			}
+			return sealRelease(root, p)
+		},
+		"resealed IPC launcher": func(root string, p Plan) error {
+			if err := writeFile(filepath.Join(root, "bin/sophia-niltempus-desktop-session"), []byte(strings.ReplaceAll(sessionLauncher(), "9p2000.L", "current-ipc")), 0755); err != nil {
+				return err
+			}
+			return sealRelease(root, p)
+		},
+		"resealed missing ledger library": func(root string, p Plan) error {
+			if err := os.Remove(filepath.Join(root, "tools/lib/activation_ledger.sh")); err != nil {
 				return err
 			}
 			return sealRelease(root, p)
@@ -113,7 +241,7 @@ func TestVerifyRefusesReleaseDamage(t *testing.T) {
 }
 
 func TestLegacyReleaseWithoutIPCEntryRemainsAvailableForRollback(t *testing.T) {
-	root, plan := fixtureRelease(t)
+	root, plan := legacyFixtureRelease(t)
 	plan.Schema = 1
 	plan.ReleaseID = releaseID(plan)
 	if err := writeFile(filepath.Join(root, "manifest"), []byte("schema=6\nrelease_id="+plan.ReleaseID+"\n"), 0644); err != nil {
@@ -131,7 +259,7 @@ func TestLegacyReleaseWithoutIPCEntryRemainsAvailableForRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A half-present IPC entry is malformed even in the older format.
-	if err := installRelease(root, Locations{}); err == nil || !strings.Contains(err.Error(), "new installations require release schema 2") {
+	if err := installRelease(root, Locations{}); err == nil || !strings.Contains(err.Error(), "new installations require plan schema 3") {
 		t.Fatalf("fresh schema-1 install must stop before sudo: %v", err)
 	}
 	if err := writeFile(filepath.Join(root, ipcLauncher), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
@@ -143,10 +271,10 @@ func TestLegacyReleaseWithoutIPCEntryRemainsAvailableForRollback(t *testing.T) {
 	if _, err := verifyRelease(root); err == nil {
 		t.Fatal("accepted incomplete IPC pair")
 	}
-	if err := writeFile(filepath.Join(root, "share/wayland-sessions/"+ipcDesktopFile), []byte(ipcDesktopEntry()), 0644); err != nil {
+	if err := writeFile(filepath.Join(root, "share/wayland-sessions/"+ipcDesktopFile), []byte(legacyIPCEntry), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeFile(filepath.Join(root, ipcLauncher), []byte(ipcSessionLauncher()), 0755); err != nil {
+	if err := writeFile(filepath.Join(root, ipcLauncher), []byte(legacyIPCLauncher), 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := sealRelease(root, plan); err != nil {

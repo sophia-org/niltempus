@@ -43,6 +43,10 @@ func createPlan(loc Locations) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
+	// Every helper input is explicit and checked before anything is staged.
+	if err := validateInputs(config.Inputs, plan.Sources); err != nil {
+		return Plan{}, err
+	}
 	repo, err := niltempusRepository(config)
 	if err != nil {
 		return Plan{}, err
@@ -59,6 +63,8 @@ func createPlan(loc Locations) (Plan, error) {
 		return Plan{}, err
 	}
 	plan.Niltempus = &integration
+	inputs := *config.Inputs
+	plan.Inputs = &inputs
 	plan.ReleaseID = releaseID(plan)
 	return plan, nil
 }
@@ -114,7 +120,7 @@ func createSourcePlan(config Config) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	plan := Plan{Schema: 2, Sources: map[string]Source{}, Profile: profile, ProfileSHA256: digest(data), InstallerSHA256: installerHash}
+	plan := Plan{Schema: currentPlanSchema, Sources: map[string]Source{}, Profile: profile, ProfileSHA256: digest(data), InstallerSHA256: installerHash}
 	for _, name := range components {
 		repo, ok := config.Repositories[name]
 		if !ok {

@@ -42,15 +42,12 @@ func renderDevelopmentProfile(source, binary string) (string, error) {
 	return kdl.EmitToString(doc, kdl.WithVersion(kdl.Version2), kdl.WithIndent("    "))
 }
 
+// The only wire a plan-schema-3 profile selects, for the WM (through the
+// launcher), the bar and the application launcher. No current-IPC profile
+// is generated.
+const nineP = "9p2000.L"
+
 func renderProfile(source, binaries string) (string, error) {
-	return renderTransportProfile(source, binaries, "9p2000.L")
-}
-
-func renderIPCProfile(source, binaries string) (string, error) {
-	return renderTransportProfile(source, binaries, "current-ipc")
-}
-
-func renderTransportProfile(source, binaries, launcherTransport string) (string, error) {
 	doc, err := kdl.ParseString(source, kdl.WithVersion(kdl.Version2), kdl.WithDuplicateProperties(kdl.DupError))
 	if err != nil {
 		return "", err
@@ -93,10 +90,7 @@ func renderTransportProfile(source, binaries, launcherTransport string) (string,
 		if err := setExecutable(component.Children(), "executable", filepath.Join(binaries, binary)); err != nil {
 			return "", err
 		}
-		wire := "current-ipc" // Lom has not adopted the file SDK yet.
-		if role == "application-launcher" {
-			wire = launcherTransport
-		}
+		wire := nineP
 		transports := component.Children().GetNodes("transport")
 		if len(transports) > 1 {
 			return "", fmt.Errorf("duplicate transport for %s", role)
@@ -134,4 +128,36 @@ func renderTransportProfile(source, binaries, launcherTransport string) (string,
 		shortcuts.AddChild(kdl.NewNode("bind", kdl.NewString("Super+o"), kdl.NewString("policy:toggle-overview")))
 	}
 	return kdl.EmitToString(doc, kdl.WithVersion(kdl.Version2), kdl.WithIndent("    "))
+}
+
+// requireNinePProfile checks a sealed plan-schema-3 profile: one bar and one
+// application launcher, each with exactly one transport, 9P2000.L.
+func requireNinePProfile(source string) error {
+	doc, err := kdl.ParseString(source, kdl.WithVersion(kdl.Version2), kdl.WithDuplicateProperties(kdl.DupError))
+	if err != nil {
+		return err
+	}
+	session, err := uniqueNode(doc, "session")
+	if err != nil {
+		return err
+	}
+	roles := map[string]bool{}
+	for _, component := range session.Children().GetNodes("shell-component") {
+		if len(component.Arguments()) != 2 || component.Arg(1).Kind() != kdl.String {
+			return fmt.Errorf("shell-component requires name and role")
+		}
+		role := component.Arg(1).String()
+		transports := component.Children().GetNodes("transport")
+		if len(transports) != 1 || len(transports[0].Arguments()) != 1 || transports[0].Arg(0).Kind() != kdl.String || transports[0].Arg(0).String() != nineP {
+			return fmt.Errorf("9P-only profile: %s must use exactly one transport %s", role, nineP)
+		}
+		if roles[role] {
+			return fmt.Errorf("9P-only profile repeats the %s role", role)
+		}
+		roles[role] = true
+	}
+	if !roles["bar"] || !roles["application-launcher"] || len(roles) != 2 {
+		return fmt.Errorf("9P-only profile requires one bar and one application-launcher")
+	}
+	return nil
 }

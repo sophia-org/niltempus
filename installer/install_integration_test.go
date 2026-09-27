@@ -29,7 +29,7 @@ func TestInstallAndRollbackInPrivateMounts(t *testing.T) {
 	plan := manifest.Plan
 	plan.InstallerSHA256 = digest([]byte("alternate installer integration fixture"))
 	plan.ReleaseID = releaseID(plan)
-	for _, path := range []string{"manifest", "share/sophia-niltempus-desktop/desktop.kdl", "share/sophia-niltempus-desktop/desktop-ipc.kdl"} {
+	for _, path := range []string{"manifest", "share/sophia-niltempus-desktop/desktop.kdl"} {
 		file := filepath.Join(second, path)
 		data, err := os.ReadFile(file)
 		if err != nil {
@@ -75,9 +75,11 @@ cmp "$(dirname "$wm")/hagia.json" /tmp/fixture/personal-wm.json
 test "$(stat -c '%i:%a:%Y' "$wm")" = "$wm_identity"
 "$1" status
 test -f /usr/share/wayland-sessions/sophia-niltempus-desktop.desktop
-test -f /usr/share/wayland-sessions/sophia-niltempus-desktop-ipc.desktop
-test -f /opt/sophia-niltempus-desktop/current/share/sophia-niltempus-desktop/desktop-ipc.kdl
-test "$(find /usr/share/wayland-sessions -type f | wc -l)" = 2
+test ! -e /usr/share/wayland-sessions/sophia-niltempus-desktop-ipc.desktop
+test ! -e /opt/sophia-niltempus-desktop/current/share/sophia-niltempus-desktop/desktop-ipc.kdl
+test "$(find /usr/share/wayland-sessions -type f | wc -l)" = 1
+awk 'NF == 3' /opt/sophia-niltempus-desktop/activated-releases | grep -q "^$3 "
+awk 'NF == 3' /opt/sophia-niltempus-desktop/activated-releases | grep -q "^$4 "
 test ! -e /opt/sophia
 `
 	args := []string{"--die-with-parent", "--unshare-pid", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", "/run/user", "--tmpfs", "/opt", "--tmpfs", "/usr/share/wayland-sessions", "--bind", fixture, "/tmp/fixture", "--dir", "/tmp/home", "--chdir", "/tmp/fixture", "--setenv", "HOME", "/tmp/home", "--setenv", "XDG_STATE_HOME", "/tmp/home/.local/state", "--setenv", "XDG_CACHE_HOME", "/tmp/home/.cache", "--setenv", "PATH", "/tmp/fixture/fakebin:/usr/bin", "--", "bash", "-c", script, "fixture", binary, artifact, manifest.Plan.ReleaseID, plan.ReleaseID}

@@ -117,13 +117,12 @@ func TestPersonalProfileEnablesPreviouslyDisabledControl(t *testing.T) {
 	}
 }
 
-func TestProfilesSelectNinePLauncherAndCompleteIPCRollback(t *testing.T) {
-	for _, ipc := range []bool{false, true} {
-		render := renderProfile
-		if ipc {
-			render = renderIPCProfile
-		}
-		result, err := render(fixtureProfile, "/release/bin")
+func TestProfileSelectsNinePForBarAndLauncher(t *testing.T) {
+	// A source that still names current-ipc is rewritten: new profiles are
+	// 9P-only.
+	source := strings.Replace(fixtureProfile, `gpu direct;`, `transport "current-ipc"; gpu direct;`, 1)
+	for _, input := range []string{fixtureProfile, source} {
+		result, err := renderProfile(input, "/release/bin")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -132,15 +131,14 @@ func TestProfilesSelectNinePLauncherAndCompleteIPCRollback(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, component := range doc.GetNode("session").Children().GetNodes("shell-component") {
-			want := "current-ipc"
-			if !ipc && component.Arg(1).String() == "application-launcher" {
-				want = "9p2000.L"
-			}
-			if got := component.Children().GetNode("transport").Arg(0).String(); got != want {
-				t.Fatalf("wire %s, want %s", got, want)
+			if got := component.Children().GetNode("transport").Arg(0).String(); got != "9p2000.L" {
+				t.Fatalf("%s wire %s, want 9p2000.L", component.Arg(1).String(), got)
 			}
 		}
-		again, err := render(result, "/release/bin")
+		if err := requireNinePProfile(result); err != nil {
+			t.Fatal(err)
+		}
+		again, err := renderProfile(result, "/release/bin")
 		if err != nil || again != result {
 			t.Fatalf("profile not idempotent: %v", err)
 		}
@@ -149,6 +147,22 @@ func TestProfilesSelectNinePLauncherAndCompleteIPCRollback(t *testing.T) {
 		bad := strings.Replace(fixtureProfile, `gpu denied;`, value+` gpu denied;`, 1)
 		if _, err := renderProfile(bad, "/release/bin"); err == nil {
 			t.Fatalf("accepted %s", value)
+		}
+	}
+}
+
+func TestSealedProfileMustBeNinePOnly(t *testing.T) {
+	good, err := renderProfile(fixtureProfile, "/release/bin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, profile := range map[string]string{
+		"current-ipc bar":   strings.Replace(good, `transport "9p2000.L"`, `transport "current-ipc"`, 1),
+		"missing transport": fixtureProfile,
+		"missing launcher":  strings.Replace(fixtureProfile, `shell-component "menu"`, `/- shell-component "menu"`, 1),
+	} {
+		if err := requireNinePProfile(profile); err == nil {
+			t.Fatalf("accepted %s", name)
 		}
 	}
 }
