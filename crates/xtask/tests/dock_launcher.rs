@@ -148,13 +148,14 @@ impl Fixture {
             "tools/fixtures",
             "tools/lib",
             "tools/probes/lom_workload",
+            "tools/session",
             "pins/c-desktop-sdk",
             ".provision",
         ] {
             fs::create_dir_all(root.join(name)).unwrap();
         }
-        // The dock branch builds xtask only from an accepted private
-        // CARGO_HOME; the fixture's cargo is a stub.
+        // Every branch builds xtask and the host checker only from an
+        // accepted private CARGO_HOME; the fixture's cargo is a stub.
         fs::write(
             root.join(".provision/accepted"),
             "url=fixture\nrev=fixture\ncargo_lock_sha256=fixture\ncargo_home=/nonexistent/fixture-cargo-home\n",
@@ -162,6 +163,7 @@ impl Fixture {
         .unwrap();
         for name in [
             "tools/run_current_lom_panel_gate_tty4.sh",
+            "tools/session/run_desktop_session.sh",
             "tools/lib/artifacts.sh",
             "tools/fixtures/lom_panel_desktop.kdl",
             "tools/fixtures/lom_workload_budgets.json",
@@ -176,6 +178,11 @@ impl Fixture {
         fs::copy(
             env!("CARGO_BIN_EXE_xtask"),
             build.join("integration-target/release/xtask"),
+        )
+        .unwrap();
+        fs::copy(
+            env!("CARGO_BIN_EXE_active-session-preflight"),
+            build.join("integration-target/release/active-session-preflight"),
         )
         .unwrap();
         let sdk = root.join("pins/c-desktop-sdk/manifest.json");
@@ -217,7 +224,12 @@ exec {git} "$@""#,
         script(&directory.join("bin/cargo"), "echo build >> \"$TRACE\"");
         script(
             &build.join("sophia-target/release/sophia"),
-            r#"case "$2" in print-effective) cat "$SOPHIA_DESKTOP_PROFILE" ;; check) test -f "${3#--desktop-profile=}" ;; *) exit 99 ;; esac"#,
+            r#"case "$1 $2" in
+    "config print-effective") cat "$SOPHIA_DESKTOP_PROFILE" ;;
+    "config check") test -f "${3#--desktop-profile=}" ;;
+    "session check-host") [[ "$#" == 3 && "$3" == --tty=/dev/tty4 ]] && echo host >> "$TRACE" ;;
+    *) exit 99 ;;
+esac"#,
         );
         script(
             &build.join("sophia-target/release/examples/desktop_profile_probe"),
@@ -234,7 +246,17 @@ tail -n +2 "$2""#,
             &sophia.join("tools/run_sophia_session.sh"),
             r#"
 echo session >> "$TRACE"
-[[ "$#" == 2 && "$1" == --max-runtime-ms=90000 && "$2" == --wm-process=* ]]
+# Reached through the external launcher: `-- session run <arguments>`, the
+# opaque label, and the host checker supplied as an absolute path.
+[[ "$1 $2 $3" == "-- session run" && "$SOPHIA_TTY_PROFILE" == managed ]]
+[[ "$SOPHIA_SESSION_PREFLIGHT" == /*/integration-target/release/active-session-preflight ]]
+shift 3
+selectors=0
+for argument in "$@"; do
+    case "$argument" in --input-seat=*|--input-devices=*) selectors=$((selectors + 1)) ;; esac
+done
+[[ "$selectors" == 1 ]]
+[[ "${@: -2:1}" == --max-runtime-ms=90000 && "${@: -1}" == --wm-process=* ]]
 [[ "$SOPHIA_SESSION_STARTUP" == none && "$SOPHIA_REQUIRE_LOCAL_VT" == true ]]
 [[ "$SOPHIA_MANAGE_KEYD" == true && "$SOPHIA_SESSION_WATCHDOG_SECONDS" == 110 ]]
 mkdir -p "$SOPHIA_DIAGNOSTIC_DIR"
@@ -330,7 +352,7 @@ fn dock_launcher_uses_three_component_profile_and_refuses_failed_or_missing_evid
         "{}",
         String::from_utf8_lossy(&failed_proof.stderr)
     );
-    assert!(!trace.contains("session"));
+    assert!(!trace.contains("session") && !trace.contains("host"));
     fs::remove_file(f.directory.join("trace")).unwrap();
     let failed_session = f.run("watchdog", "0", "124");
     assert!(!failed_session.status.success());

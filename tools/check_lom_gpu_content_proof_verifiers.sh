@@ -166,7 +166,7 @@ done
 
 runner="$ROOT_DIR/tools/run_current_lom_panel_gate_tty4.sh"
 preflight_line=$(grep -n 'lom_gpu_content_hardware_proof.sh' "$runner" | cut -d: -f1)
-takeover_line=$(grep -n 'run_sophia_session.sh' "$runner" | cut -d: -f1)
+takeover_line=$(grep -nF '"$ROOT_DIR/tools/session/run_desktop_session.sh" --max-runtime-ms' "$runner" | cut -d: -f1)
 [[ -n "$preflight_line" && -n "$takeover_line" && "$preflight_line" -lt "$takeover_line" ]] || {
     echo "native runner does not prove GPU/content before graphics takeover" >&2
     exit 1

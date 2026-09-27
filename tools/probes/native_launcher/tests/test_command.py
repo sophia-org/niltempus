@@ -27,7 +27,7 @@ tail -n +2 "$2"
         self.use_artifact('bemenu', self.artifacts / 'bemenu', self.bemenu)
         # Keep the panel path exactly as the inherited controls require.
         prior = (self.sophia / 'tools/run_sophia_session.sh').read_text().splitlines()[2:]
-        self.script(self.sophia / 'tools/run_sophia_session.sh', '''
+        self.script(self.sophia / 'tools/run_sophia_session.sh', panel_tests.WRAPPER_PROLOGUE + '''
 if [[ "$#" == 2 ]]; then
     [[ "$1" == --max-runtime-ms=90000 && "$2" == --wm-process="$SOPHIA_HAGIA_BIN" ]]
     [[ "$SOPHIA_SESSION_STARTUP" == none ]]

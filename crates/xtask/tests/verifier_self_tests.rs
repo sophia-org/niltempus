@@ -14,6 +14,13 @@ fn lom_gpu_content_and_workload_verifier_self_tests_pass() {
         .args(["-s", "KILL", "600", "bash"])
         .arg(repo.join("tools/check_lom_gpu_content_proof_verifiers.sh"))
         .env("PYTHONDONTWRITEBYTECODE", "1")
+        // The runner-control tests drive the real external launcher, whose
+        // recipe tool and host checker are this package's binaries.
+        .env("INTEGRATION_TEST_XTASK", env!("CARGO_BIN_EXE_xtask"))
+        .env(
+            "INTEGRATION_TEST_PREFLIGHT",
+            env!("CARGO_BIN_EXE_active-session-preflight"),
+        )
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);

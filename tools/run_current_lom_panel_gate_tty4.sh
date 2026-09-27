@@ -8,7 +8,10 @@
 # prepare-product-artifact / prepare-bemenu-artifact) bound to the operator's
 # SOPHIA_<PRODUCT>_COMMIT and SOPHIA_<PRODUCT>_SHA256 (and _CONFIG_SHA256).
 # Every build writes only below SOPHIA_GATE_BUILD_DIR; no source checkout,
-# /home default or sibling path is built or read.
+# /home default or sibling path is built or read. The session starts through
+# this repository's external launcher (tools/session/run_desktop_session.sh)
+# with absolute SOPHIA_BIN and SOPHIA_SESSION_PREFLIGHT; Sophia's retained
+# wrapper receives only `-- session run <arguments>` and an opaque label.
 set -euo pipefail
 
 # Generated profiles must satisfy the configuration reader's ownership policy,
@@ -88,16 +91,19 @@ if [[ "$GATE_MODE" == launcher ]]; then
         --lom "$LOM_BIN" --config "$LOM_CONFIG" --bemenu "$BEMENU_BIN" \
         > "$EVIDENCE_DIR/probe-overrides.kdl"
 fi
+# This repository's recipe tool and host checker drive the session through
+# the external launcher (tools/session/run_desktop_session.sh). They build
+# offline from the accepted private CARGO_HOME, which the marker names
+# (outside every source tree).
 XTASK_BIN="$INTEGRATION_TARGET/release/xtask"
+PREFLIGHT_BIN="$INTEGRATION_TARGET/release/active-session-preflight"
+[[ -f "$ROOT_DIR/.provision/accepted" ]] || { echo "Run tools/provision.sh first" >&2; exit 2; }
+provisioned_home=$(sed -n 's/^cargo_home=\(\/.*\)$/\1/p' "$ROOT_DIR/.provision/accepted")
+[[ -n "$provisioned_home" ]] || { echo "Re-run tools/provision.sh (marker has no cargo_home)" >&2; exit 2; }
+(export CARGO_HOME="$provisioned_home"
+    CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR="$INTEGRATION_TARGET" nice -n 19 cargo build --locked --offline \
+        --release -p xtask --bins --manifest-path "$ROOT_DIR/Cargo.toml")
 if [[ "$GATE_MODE" == dock ]]; then
-    # This repository builds offline from its accepted private CARGO_HOME,
-    # which the marker names (outside every source tree).
-    [[ -f "$ROOT_DIR/.provision/accepted" ]] || { echo "Run tools/provision.sh first" >&2; exit 2; }
-    provisioned_home=$(sed -n 's/^cargo_home=\(\/.*\)$/\1/p' "$ROOT_DIR/.provision/accepted")
-    [[ -n "$provisioned_home" ]] || { echo "Re-run tools/provision.sh (marker has no cargo_home)" >&2; exit 2; }
-    (export CARGO_HOME="$provisioned_home"
-        CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR="$INTEGRATION_TARGET" nice -n 19 cargo build --locked --offline \
-            --release -p xtask --manifest-path "$ROOT_DIR/Cargo.toml")
     "$XTASK_BIN" dock profile "$LOM_BIN" "$LOM_CONFIG" "$BEMENU_BIN" "$PROVLITA_BIN" "$PROVLITA_CONFIG" \
         > "$EVIDENCE_DIR/probe-overrides.kdl"
 fi
@@ -143,6 +149,8 @@ probe_args=()
     printf 'integration_commit=%s\n' "$INTEGRATION_COMMIT"
     printf 'sophia_commit=%s\n' "$SOPHIA_COMMIT"
     printf 'sophia_binary_sha256=%s\n' "$(sha256sum "$SOPHIA_BIN" | cut -d' ' -f1)"
+    printf 'integration_xtask_sha256=%s\n' "$(sha256sum "$XTASK_BIN" | cut -d' ' -f1)"
+    printf 'session_preflight_sha256=%s\n' "$(sha256sum "$PREFLIGHT_BIN" | cut -d' ' -f1)"
     printf 'lom_commit=%s\n' "$SOPHIA_LOM_COMMIT"
     printf 'lom_binary_sha256=%s\n' "$(sha256sum "$LOM_BIN" | cut -d' ' -f1)"
     printf 'lom_config_sha256=%s\n' "$(sha256sum "$LOM_CONFIG" | cut -d' ' -f1)"
@@ -157,9 +165,10 @@ probe_args=()
 } > "$EVIDENCE_DIR/identity.manifest"
 sha256sum "$SOPHIA_BIN" "$LOM_BIN" "$HAGIA_BIN" "$LOM_CONFIG" "$LOM_CORE_CONFIG" \
     "$EVIDENCE_DIR/desktop.kdl" "$EVIDENCE_DIR/wm-profile.kdl" \
-    "$EVIDENCE_DIR/probe-overrides.kdl" "$EVIDENCE_DIR/workload-budgets.json" > "$EVIDENCE_DIR/inputs.sha256"
+    "$EVIDENCE_DIR/probe-overrides.kdl" "$EVIDENCE_DIR/workload-budgets.json" \
+    "$XTASK_BIN" "$PREFLIGHT_BIN" > "$EVIDENCE_DIR/inputs.sha256"
 if [[ "$GATE_MODE" != panel ]]; then sha256sum "$BEMENU_BIN" >> "$EVIDENCE_DIR/inputs.sha256"; fi
-if [[ "$GATE_MODE" == dock ]]; then sha256sum "$PROVLITA_BIN" "$PROVLITA_CONFIG" "$XTASK_BIN" >> "$EVIDENCE_DIR/inputs.sha256"; fi
+if [[ "$GATE_MODE" == dock ]]; then sha256sum "$PROVLITA_BIN" "$PROVLITA_CONFIG" >> "$EVIDENCE_DIR/inputs.sha256"; fi
 verify_candidate_inputs() {
     sha256sum --check --status "$EVIDENCE_DIR/inputs.sha256"
     [[ "integration_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)" == "$(sed -n '/^integration_commit=/p' "$EVIDENCE_DIR/identity.manifest")" ]]
@@ -224,7 +233,16 @@ fi
 shell_args=()
 [[ "$GATE_MODE" != panel ]] || shell_args+=("--shell-process=$LOM_BIN")
 set +e
+# The external launcher (rule d): absolute SOPHIA_BIN and SOPHIA_SESSION_PREFLIGHT,
+# the staged pinned tree as SOPHIA_ROOT, and the explicit target TTY. It maps
+# the hagia profile to Sophia's opaque label and hands Sophia's retained
+# wrapper `-- session run <arguments>`.
+SOPHIA_ROOT="$SOPHIA_TREE" \
 SOPHIA_BIN="$SOPHIA_BIN" \
+SOPHIA_SESSION_PREFLIGHT="$PREFLIGHT_BIN" \
+SOPHIA_INTEGRATION_XTASK="$XTASK_BIN" \
+SOPHIA_SESSION_TTY=/dev/tty4 \
+SOPHIA_DESKTOP_ADAPTER_LOG="$EVIDENCE_DIR/adapter.log" \
 SOPHIA_HAGIA_BIN="$HAGIA_BIN" \
 SOPHIA_HAGIA_SHELL_BIN="$LOM_BIN" \
 SOPHIA_SHELL_CONFIG="$LOM_CONFIG" \
@@ -238,7 +256,7 @@ SOPHIA_SESSION_STARTUP=none \
 SOPHIA_SESSION_WATCHDOG_SECONDS=110 \
 SOPHIA_DIAGNOSTIC_DIR="$EVIDENCE_DIR/session" \
 SOPHIA_UNTRUSTED_SESSION_OUTPUT_LOG="$EVIDENCE_DIR/session/untrusted-session-output.log" \
-    "$SOPHIA_TREE/tools/run_sophia_session.sh" --max-runtime-ms=90000 "${shell_args[@]}" --wm-process="$HAGIA_BIN"
+    "$ROOT_DIR/tools/session/run_desktop_session.sh" --max-runtime-ms=90000 "${shell_args[@]}" --wm-process="$HAGIA_BIN"
 native_status=$?
 set -e
 printf 'native_exit_status=%s\n' "$native_status" > "$EVIDENCE_DIR/native-outcome.txt"

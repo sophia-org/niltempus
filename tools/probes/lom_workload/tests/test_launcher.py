@@ -21,6 +21,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fixture import transcript, encode
 
 REAL_GIT = shutil.which("git")
+# Sophia's retained wrapper is reached only through the external launcher
+# (tools/session/run_desktop_session.sh): `-- session run <prepared
+# arguments>` under the opaque label, with the host checker supplied as an
+# absolute path and exactly one input selector. The stub checks that once,
+# then reduces its arguments to the runner's own trailing ones, which the
+# recipe appends last, so the controls below keep asserting exactly those.
+WRAPPER_PROLOGUE = '''
+if [[ "${1:-}" == -- ]]; then
+    [[ "$2 $3" == "session run" && "$SOPHIA_TTY_PROFILE" == managed ]]
+    [[ "$SOPHIA_SESSION_PREFLIGHT" == */integration-target/release/active-session-preflight ]]
+    selectors=0
+    for argument in "$@"; do
+        case "$argument" in --input-seat=*|--input-devices=*) selectors=$((selectors + 1)) ;; esac
+    done
+    [[ "$selectors" == 1 ]]
+    [[ " $* " == *" --wm-process-default=$SOPHIA_HAGIA_BIN "* ]]
+    while [[ "$#" -gt 0 && "$1" != --max-runtime-ms=* ]]; do shift; done
+    export TEST_VIA_LAUNCHER=1
+fi
+[[ "${TEST_VIA_LAUNCHER:-}" == 1 ]]
+'''
 PRODUCT_KEYS = ("schema", "product", "binary", "binary_sha256", "source_commit", "source_tree",
                 "signature_status", "signer_fingerprint", "config", "config_sha256")
 
@@ -92,6 +113,14 @@ class LauncherTests(unittest.TestCase):
         shutil.copyfile(repo / "tools/verify_lom_panel_native_gate.sh", self.tools / "verify_lom_panel_native_gate.sh")
         (self.tools / "verify_lom_panel_native_gate.sh").chmod(0o700)
         shutil.copytree(repo / "tools/lib", self.tools / "lib")
+        (self.tools / "session").mkdir()
+        shutil.copy2(repo / "tools/session/run_desktop_session.sh", self.tools / "session/run_desktop_session.sh")
+        # The runner builds the recipe tool and host checker from an accepted
+        # private CARGO_HOME (the fixture's cargo is a stub) and runs the real
+        # binaries, which the gate supplies from its own build.
+        (self.root / ".provision").mkdir()
+        (self.root / ".provision/accepted").write_text(
+            "url=fixture\nrev=fixture\ncargo_lock_sha256=fixture\ncargo_home=/nonexistent/fixture-cargo-home\n")
         shutil.copytree(repo / "tools/probes/lom_workload", self.tools / "probes/lom_workload",
                         ignore=shutil.ignore_patterns("__pycache__"))
         (self.tools / "fixtures").mkdir()
@@ -105,6 +134,14 @@ class LauncherTests(unittest.TestCase):
         self.build = self.base / "build"
         release = self.build / "sophia-target/release"
         (release / "examples").mkdir(parents=True)
+        integration = self.build / "integration-target/release"
+        integration.mkdir(parents=True)
+        for name, variable in (("xtask", "INTEGRATION_TEST_XTASK"),
+                               ("active-session-preflight", "INTEGRATION_TEST_PREFLIGHT")):
+            built = os.environ.get(variable, "")
+            if not built.startswith("/") or not os.access(built, os.X_OK):
+                raise RuntimeError(f"{variable} must name this repository's built {name} (absolute)")
+            shutil.copy2(built, integration / name)
         # The explicit Sophia checkout: a real Git repository whose HEAD the
         # fixture pins (commit_sophia). The gate stages its exact tree.
         self.sophia = self.base / "sophia"
@@ -137,6 +174,11 @@ exec {REAL_GIT} "$@"''')
         # Configuration executables are supplied effects in this launcher test.
         # Rust desktop_probe controls cover the real parser/composition policy.
         self.script(release / "sophia", '''
+if [[ "$1 $2" == "session check-host" ]]; then
+    [[ "$#" == 3 && "$3" == --tty=/dev/tty4 ]]
+    echo host >> "$TEST_TRACE"
+    exit 0
+fi
 [[ "$1" == config ]]
 case "$2" in
   print-effective) [[ "$3" == --desktop-profile="$SOPHIA_DESKTOP_PROFILE" ]]; cat "$SOPHIA_DESKTOP_PROFILE" ;;
@@ -153,7 +195,7 @@ echo proof >> "$TEST_TRACE"
 [[ "$SOPHIA_SOURCE" == /* && "$SOPHIA_GATE_BUILD_DIR" == /* && "$SOPHIA_LOM_ARTIFACT" == /* ]]
 [[ -n "$SOPHIA_LOM_COMMIT" && -n "$SOPHIA_LOM_SHA256" && -n "$SOPHIA_LOM_CONFIG_SHA256" ]]
 exit "${TEST_PROOF_STATUS:-0}"''')
-        self.script(self.sophia / "tools/run_sophia_session.sh", '''
+        self.script(self.sophia / "tools/run_sophia_session.sh", WRAPPER_PROLOGUE + '''
 echo session >> "$TEST_TRACE"
 # Staged, never the operator's checkout: an input missing from the pinned
 # tree (TEST_SOURCE_UNTRACKED) is unavailable here.
@@ -186,7 +228,10 @@ exit "${TEST_SESSION_STATUS:-0}"''')
         (self.base / "host.log").write_text(native + encode(host))
         (self.base / "client.log").write_text(encode(client))
         self.evidence = self.base / "evidence"
-        self.env = {**os.environ, "PATH": str(self.fakebin) + ":/usr/bin:/bin",
+        # Hermetic: no ambient SOPHIA_* (an operator's session variables would
+        # otherwise reach the recipes).
+        ambient = {k: v for k, v in os.environ.items() if not k.startswith("SOPHIA_")}
+        self.env = {**ambient, "PATH": str(self.fakebin) + ":/usr/bin:/bin",
                     "TEST_INTEGRATION_ROOT": str(self.root),
                     "SOPHIA_SOURCE": str(self.sophia), "SOPHIA_GATE_BUILD_DIR": str(self.build),
                     "SOPHIA_LOM_NATIVE_GATE_ARM": "1",
@@ -248,7 +293,7 @@ exit "${TEST_SESSION_STATUS:-0}"''')
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["memory"]["slot_bound"], 4)
         self.assertEqual((self.evidence / "native-outcome.txt").read_text(), "native_exit_status=0\n")
-        self.assertEqual((self.base / "trace").read_text().splitlines(), ["build", "build", "proof", "session"])
+        self.assertEqual((self.base / "trace").read_text().splitlines(), ["build", "build", "build", "proof", "host", "session"])
         self.assertEqual((self.evidence / "wm-profile.kdl").read_bytes(), self.wm_profile.read_bytes())
         self.assertIn('bind "Super+4" "policy:focus-workspace" "7"', (self.evidence / "desktop.kdl").read_text())
         manifest = (self.evidence / "identity.manifest").read_text()
