@@ -9,7 +9,7 @@
 //! cargo xtask package-desktop --sophia-root=/ABS --sophia-rev=<pin> \
 //!     --wm-pair=/ABS --wm-pair-commits=<hagia>,<narthex> \
 //!     --wm-pair-sha256=<hagia>,<narthex> --wm-pair-profile-sha256=<sha> \
-//!     --build-dir=/ABS --out=/ABS/NEW
+//!     --wm-pair-c-sdk-rev=<rev> --build-dir=/ABS --out=/ABS/NEW
 //! ```
 //!
 //! Custody:
@@ -19,7 +19,9 @@
 //!   build directory; the release's retained generic session files come from
 //!   that staged tree, never from a checkout.
 //! - The Hagia/Narthex pair is a `prepare-wm-pair` directory bound to the
-//!   operator's expected commits, binary digests and default-profile digest.
+//!   operator's expected commits, binary digests and default-profile digest,
+//!   and its recorded Hagia C SDK revision must equal the operator's
+//!   `--wm-pair-c-sdk-rev` (no default).
 //! - The provisioning marker is validated in full (canonical URL, pinned
 //!   revision, Cargo.lock digest, and CARGO_HOME equal to the provisioned
 //!   home) before anything is staged or built.
@@ -54,14 +56,15 @@ use crate::{hex, pins, read, sha256};
 const USAGE: &str = "usage: cargo xtask package-desktop --sophia-root=/ABS --sophia-rev=SHA \
                      --wm-pair=/ABS --wm-pair-commits=HAGIA,NARTHEX \
                      --wm-pair-sha256=HAGIA,NARTHEX --wm-pair-profile-sha256=SHA \
-                     --build-dir=/ABS --out=/ABS/NEW";
-const OPTIONS: [&str; 8] = [
+                     --wm-pair-c-sdk-rev=REV --build-dir=/ABS --out=/ABS/NEW";
+const OPTIONS: [&str; 9] = [
     "sophia-root",
     "sophia-rev",
     "wm-pair",
     "wm-pair-commits",
     "wm-pair-sha256",
     "wm-pair-profile-sha256",
+    "wm-pair-c-sdk-rev",
     "build-dir",
     "out",
 ];
@@ -362,6 +365,12 @@ pub fn run_with(
             pins::SOPHIA_REV
         ));
     }
+    let sdk_rev = get("wm-pair-c-sdk-rev");
+    if !hex(sdk_rev, 40) {
+        return Err(format!(
+            "--wm-pair-c-sdk-rev must be 40 lowercase hex: {sdk_rev:?}"
+        ));
+    }
     let sophia_root = canonical(get("sophia-root"))?;
     let repo = canonical(&repo.to_string_lossy())?;
     let build_dir = PathBuf::from(get("build-dir"));
@@ -396,6 +405,12 @@ pub fn run_with(
         pair_values(get("wm-pair-sha256"), "--wm-pair-sha256")?,
         get("wm-pair-profile-sha256"),
     )?;
+    if pair.hagia_c_sdk_revision != sdk_rev {
+        return Err(format!(
+            "WM pair Hagia C SDK revision {} is not --wm-pair-c-sdk-rev {sdk_rev}",
+            pair.hagia_c_sdk_revision
+        ));
+    }
     // The full provisioning marker (URL, pin, lock digest, home) before any
     // staging or build.
     let (cargo_home, lock_sha256) = provisioned(&repo, cargo_home)?;

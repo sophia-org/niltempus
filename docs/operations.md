@@ -40,6 +40,7 @@ cargo xtask prepare-wm-pair --hagia /ABS/hagia <commit> --narthex /ABS/narthex <
 cargo xtask package-desktop --sophia-root=/ABS/sophia --sophia-rev=<pinned rev> \
     --wm-pair=/ABS/wm-pair --wm-pair-commits=<hagia>,<narthex> \
     --wm-pair-sha256=<hagia>,<narthex> --wm-pair-profile-sha256=<default.kdl> \
+    --wm-pair-c-sdk-rev=<the same C SDK revision> \
     --build-dir=/ABS/private-build --out=/ABS/release
 tools/install_live_session.sh /ABS/release
 ```

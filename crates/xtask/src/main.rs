@@ -8,7 +8,7 @@ const USAGE: &str = "usage:
   xtask prepare-physical-inputs --sophia-root=/ABS --build-dir=/ABS --out=/ABS/NEW --sophia-features=F [--sophia-packages=P] [--hagia=... --narthex=...] [--profile=OWNER:PATH ...]
   xtask prepare-physical-inputs verify --out=/ABS --manifest-sha256=SHA
   xtask nim-deps draft --store=/ABS --source=/ABS --commit=SHA --product=hagia|narthex --nim=/ABS --nim-lib=/ABS --gcc=/ABS --bwrap=/ABS --build-dir=/ABS --pin=NAME=VERSION ... --out=/ABS/NEW
-  xtask package-desktop --sophia-root=/ABS --sophia-rev=SHA --wm-pair=/ABS --wm-pair-commits=H,N --wm-pair-sha256=H,N --wm-pair-profile-sha256=SHA --build-dir=/ABS --out=/ABS/NEW
+  xtask package-desktop --sophia-root=/ABS --sophia-rev=SHA --wm-pair=/ABS --wm-pair-commits=H,N --wm-pair-sha256=H,N --wm-pair-profile-sha256=SHA --wm-pair-c-sdk-rev=REV --build-dir=/ABS --out=/ABS/NEW
   xtask direct-scanout-gate [WIDTH HEIGHT HOLD WORKLOAD] [--overlay-proof] [--cost] [--cursor] [--atomic-cursor]
   xtask verify-archives [--legacy]
   xtask desktop-comparison install-reference|prepare|prepare-soak|cursor-theme|gate|status|attest|preflight|qualify|capture|finalize|replay|workload|verify|report ...

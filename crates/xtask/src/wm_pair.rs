@@ -60,10 +60,9 @@ const NARTHEX_COMMIT: &str = "narthex.commit";
 const HAGIA_DEPS: &str = "hagia-nim-deps.manifest";
 const NARTHEX_DEPS: &str = "narthex-nim-deps.manifest";
 /// Where Hagia's signed tree vendors the C desktop SDK snapshot
-/// (manifest.json, upstream.commit, source/).
-// TODO(root): confirm the exact vendor path when the Hagia hagia-9p-only
-// commit lands. This single constant is the only place it is named.
-pub const HAGIA_C_SDK_VENDOR: &str = "vendor/c-desktop-sdk";
+/// (manifest.json schema 1 with the canonical SDK URL, a raw upstream.commit
+/// object, and source/), per the director's ruling. The only place it is named.
+pub const HAGIA_C_SDK_VENDOR: &str = "vendor/sophia-desktop-sdk";
 /// The vendored SDK manifest, copied into the pair byte for byte.
 pub const HAGIA_C_SDK_MANIFEST: &str = "hagia-c-sdk.manifest.json";
 pub const SCHEMA: &str = "3";

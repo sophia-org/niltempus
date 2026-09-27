@@ -69,6 +69,7 @@ impl Inputs {
             ("wm-pair-commits", self.commits.clone()),
             ("wm-pair-sha256", self.digests.clone()),
             ("wm-pair-profile-sha256", self.profile.clone()),
+            ("wm-pair-c-sdk-rev", fixture::HAGIA_C_SDK_REV.to_owned()),
             ("build-dir", d.join("build").display().to_string()),
             ("out", d.join("release").display().to_string()),
         ];
@@ -203,6 +204,22 @@ fn a_pair_or_digest_mismatch_is_refused() {
     f.refused(
         &[("wm-pair-profile-sha256", "")],
         "--wm-pair-profile-sha256 is required",
+    );
+    // The Hagia C SDK revision: required, well formed, and the pair's own.
+    let f = inputs("sdk-rev");
+    f.refused(
+        &[("wm-pair-c-sdk-rev", "")],
+        "--wm-pair-c-sdk-rev is required",
+    );
+    for bad in ["841563d", "HEAD", &"G".repeat(40)] {
+        f.refused(
+            &[("wm-pair-c-sdk-rev", bad)],
+            "--wm-pair-c-sdk-rev must be 40 lowercase hex",
+        );
+    }
+    f.refused(
+        &[("wm-pair-c-sdk-rev", &"0".repeat(40))],
+        "is not --wm-pair-c-sdk-rev",
     );
     // A manifest that disagrees with the files it describes.
     let f = inputs("manifest");
