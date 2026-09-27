@@ -98,7 +98,7 @@ run_session() {
     fi
     env SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 "${diagnostic_env[@]}" \
         timeout --foreground 45s "${session[@]}" >"$evidence" 2>&1
-    "$ROOT_DIR/tools/verify_live_session_persistent_evidence.sh" "$evidence"
+    "$SOPHIA_ROOT/tools/verify_live_session_persistent_evidence.sh" "$evidence"
 }
 
 case "$MODE" in
@@ -123,7 +123,7 @@ case "$MODE" in
             echo "X11 live-session diagnostic failed; GDB evidence: $gdb_log" >&2
             exit "$status"
         fi
-        "$ROOT_DIR/tools/verify_live_session_persistent_evidence.sh" "$gdb_log"
+        "$SOPHIA_ROOT/tools/verify_live_session_persistent_evidence.sh" "$gdb_log"
         ;;
     trace)
         evidence="$EVIDENCE_DIR/x11-live-session-trace.log"
@@ -154,7 +154,7 @@ case "$MODE" in
             fi
             exit "$status"
         fi
-        "$ROOT_DIR/tools/verify_live_session_persistent_evidence.sh" "$evidence"
+        "$SOPHIA_ROOT/tools/verify_live_session_persistent_evidence.sh" "$evidence"
         ;;
     normal)
         for (( run = 1; run <= RUNS; run += 1 )); do

@@ -100,7 +100,7 @@ fi
 set -e
 
 if (( proof_status == 0 )); then
-    "$ROOT_DIR/tools/verify_live_session_milestone4_evidence.sh" "$GPU_EVIDENCE"
+    "$SOPHIA_ROOT/tools/verify_live_session_milestone4_evidence.sh" "$GPU_EVIDENCE"
 fi
 
 exit "$proof_status"

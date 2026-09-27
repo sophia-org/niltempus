@@ -65,7 +65,7 @@ proof_status="${PIPESTATUS[0]}"
 set -e
 
 if [[ "$proof_status" -eq 0 && "$VERIFY_MODE" == generic ]]; then
-    "$ROOT_DIR/tools/verify_live_session_persistent_evidence.sh" "$EVIDENCE_FILE"
+    "$sophia_root/tools/verify_live_session_persistent_evidence.sh" "$EVIDENCE_FILE"
 fi
 
 exit "$proof_status"

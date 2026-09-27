@@ -2,7 +2,14 @@
 # Provenance: moved from Sophia tools/check_live_session_milestone5_verifier.sh at de776c68afdf9a133818f86917893c3362dc9fb7 (the pin) (Sophia rule 13).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-verify="$root/tools/verify_live_session_milestone5_gtk_evidence.sh"
+# The GTK evidence verifier stays in Sophia (kept by ruling): it is read from
+# the staged pinned tree; its fixtures and the TTY-recovery verifier are here.
+tree="${SOPHIA_TEST_TREE:-}"
+[[ "$tree" == /* && -d "$tree/tools" ]] || {
+    echo "SOPHIA_TEST_TREE must name the absolute staged pinned tree." >&2
+    exit 2
+}
+verify="$tree/tools/verify_live_session_milestone5_gtk_evidence.sh"
 classic="$root/tools/fixtures/live_session_milestone5_gtk_classic_pass.log"
 confined="$root/tools/fixtures/live_session_milestone5_gtk_confined_pass.log"
 bad="$root/tools/fixtures/live_session_milestone5_gtk_protocol_error.log"

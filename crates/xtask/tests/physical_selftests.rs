@@ -76,9 +76,6 @@ self_test!(check_installed_watchdog_recovery);
 self_test!(check_installed_xterm_verifier);
 self_test!(check_keyboard_independence_session_verifier);
 self_test!(check_keyboard_independence_verifier);
-self_test!(check_live_session_milestone4_verifier);
-self_test!(check_live_session_milestone5_verifier);
-self_test!(check_retired_milestone_launchers);
 self_test!(check_sophia_firefox_dialog_verifier);
 self_test!(check_sophia_firefox_lifecycle_verifier);
 self_test!(check_sophia_firefox_physical_verifier);
@@ -96,7 +93,9 @@ self_test!(check_xserver_rendering_performance_reporter);
 pinned_self_test!(check_frame_fed_output_verifier);
 pinned_self_test!(check_hagia_native_matchers);
 pinned_self_test!(check_hagia_physical_matchers);
+pinned_self_test!(check_live_session_milestone5_verifier);
 pinned_self_test!(check_mirror_group_physical_verifier);
+pinned_self_test!(check_retired_milestone_launchers);
 pinned_self_test!(test_verify_mixed_output_evidence);
 
 /// The production preflights and the native dry run of the Hagia gates

@@ -327,7 +327,7 @@ case "$mode" in
 esac
 cleanup 0
 if [[ "$mode" == paired ]]; then
-    "$root/tools/verify_live_session_milestone5_gtk_evidence.sh" "$classic" "$confined"
+    "$sophia_root/tools/verify_live_session_milestone5_gtk_evidence.sh" "$classic" "$confined"
 else
     echo "Milestone 5 GTK diagnostic profile completed: $mode"
 fi
