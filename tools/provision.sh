@@ -83,6 +83,8 @@ done
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 cd "$repo"
+# Git-ignored; a fresh checkout or worktree has none.
+mkdir -p "$repo/.provision"
 
 pin() {
     value=$(sed -n "s/^$1 = \"\\([^\"]*\\)\"\$/\\1/p" pins/sophia.toml)
