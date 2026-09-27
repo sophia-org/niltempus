@@ -40,6 +40,17 @@ fn release(root: &Path) -> PathBuf {
         )
         .unwrap();
     }
+    // The system profile is an explicit fixture path, never the host's /etc:
+    // the copy under test reads it from `root` (production keeps its default).
+    let launcher = release.join("bin/sophia-hagia-session");
+    let text = fs::read_to_string(&launcher).unwrap();
+    assert_eq!(text.matches("/etc/sophia/desktop.kdl").count(), 2);
+    let system = root.join("etc/sophia/desktop.kdl");
+    fs::write(
+        &launcher,
+        text.replace("/etc/sophia/desktop.kdl", system.to_str().unwrap()),
+    )
+    .unwrap();
     fs::write(
         release.join("tools/lib/session_lifecycle.sh"),
         "sophia_session_rotate_log() { :; }\n",
@@ -106,20 +117,26 @@ fn the_resolved_mode_and_digest_reach_the_session_unchanged() {
     let packaged = release.join("share/sophia-policy/hagia/default.kdl");
     let packaged_sha = sha256(&fs::read(packaged).unwrap());
 
-    // No user or explicit profile: the host's system profile when it has
-    // one, otherwise the packaged default, through the supervisor.
+    // No user, system or explicit profile: the packaged default, through
+    // the supervisor.
     let (ok, seen, stderr) = launch(root, "sophia-hagia-session", &[]);
     assert!(ok, "{stderr}");
-    let system = Path::new("/etc/sophia/desktop.kdl");
-    let expected = if system.exists() {
-        format!(
-            "mode=system sha={} via=supervisor\n",
-            sha256(&fs::read(system).unwrap())
-        )
-    } else {
+    assert_eq!(
+        seen,
         format!("mode=packaged-fallback sha={packaged_sha} via=supervisor\n")
-    };
-    assert_eq!(seen, expected);
+    );
+
+    // A system profile (the fixture's, never the host's) wins over it.
+    let system = root.join("etc/sophia/desktop.kdl");
+    fs::create_dir_all(system.parent().unwrap()).unwrap();
+    fs::write(&system, "schema 1\n// system\n").unwrap();
+    let system_sha = sha256(&fs::read(system).unwrap());
+    let (ok, seen, stderr) = launch(root, "sophia-hagia-session", &[]);
+    assert!(ok, "{stderr}");
+    assert_eq!(
+        seen,
+        format!("mode=system sha={system_sha} via=supervisor\n")
+    );
 
     // The user's desktop.kdl.
     let user = root.join("config/sophia/desktop.kdl");

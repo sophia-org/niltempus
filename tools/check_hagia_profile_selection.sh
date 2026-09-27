@@ -12,6 +12,12 @@ retired_dir="$config_home/hagia"
 install -d -m 755 "$release/bin" "$release/share/sophia-policy/hagia" "$retired_dir"
 install -m 755 "$ROOT_DIR/tools/installed/sophia-hagia-session" \
     "$release/bin/sophia-hagia-session"
+# The system profile is an explicit fixture path, never the host's /etc: the
+# copy under test reads it from the fixture (the production default is kept).
+system_profile="$fixture/etc/sophia/desktop.kdl"
+[[ "$(grep -c '/etc/sophia/desktop.kdl' "$release/bin/sophia-hagia-session")" == 2 ]]
+sed -i "s#/etc/sophia/desktop.kdl#$system_profile#g" "$release/bin/sophia-hagia-session"
+! grep -q '/etc/sophia/desktop.kdl' "$release/bin/sophia-hagia-session"
 install -m 755 "$ROOT_DIR/tools/installed/sophia-hagia-promotion-session" \
     "$release/bin/sophia-hagia-promotion-session"
 printf 'schema 1\n' >"$release/share/sophia-policy/hagia/default.kdl"
@@ -34,6 +40,12 @@ observed="$(run_session "$release/bin/sophia-hagia-session")"
 printf 'schema 1\n' >"$retired_dir/config.kdl"
 observed="$(run_session "$release/bin/sophia-hagia-session")"
 [[ "$observed" == "packaged-fallback|$release/share/sophia-policy/hagia/default.kdl|hagia" ]]
+
+# A system profile is chosen over the packaged default.
+install -d -m 755 "$(dirname "$system_profile")"
+printf 'schema 1\n' >"$system_profile"
+observed="$(run_session "$release/bin/sophia-hagia-session")"
+[[ "$observed" == "system|$system_profile|hagia" ]]
 
 install -d -m 700 "$config_home/sophia"
 printf 'schema 1\n' >"$config_home/sophia/desktop.kdl"
