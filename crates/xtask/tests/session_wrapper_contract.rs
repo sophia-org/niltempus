@@ -357,7 +357,7 @@ fn a_second_launch_cannot_touch_an_active_sessions_proof_files() {
         .collect::<Vec<_>>();
     assert_eq!(
         dirs,
-        [active.clone()],
+        std::slice::from_ref(&active),
         "the second attempt left recipe state behind"
     );
     // The first session's files live until its wrapper ends, then go.
