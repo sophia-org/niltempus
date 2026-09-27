@@ -39,6 +39,9 @@ impl Drop for Table {
     }
 }
 
+/// A named per-process inspection failure and the table setup that makes it.
+type InspectionCase<'a> = (&'a str, &'a dyn Fn(&Table));
+
 fn tty() -> Vec<String> {
     vec!["--tty=/dev/tty3".to_owned()]
 }
@@ -151,7 +154,7 @@ fn an_unreadable_process_table_exits_3_and_cannot_be_overridden() {
 #[test]
 fn per_process_inspection_failures_exit_3() {
     use std::os::unix::fs::PermissionsExt;
-    let cases: [(&str, &dyn Fn(&Table)); 5] = [
+    let cases: [InspectionCase; 5] = [
         ("unreadable stat", &|t: &Table| {
             t.process(50, "bash", "S");
             fs::set_permissions(t.0.join("50/stat"), fs::Permissions::from_mode(0o000)).unwrap();
