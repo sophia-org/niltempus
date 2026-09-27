@@ -250,11 +250,7 @@ fn git(repo: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
 /// Run in a private process group to completion within `limit`, capturing at
 /// most OUTPUT_CAP per stream. Output collection is bounded too: a descendant
 /// still holding a pipe after the direct child exits ends the run and its group.
-pub fn bounded(
-    command: &mut Command,
-    limit: Duration,
-    what: &str,
-) -> Result<Vec<u8>, String> {
+pub fn bounded(command: &mut Command, limit: Duration, what: &str) -> Result<Vec<u8>, String> {
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

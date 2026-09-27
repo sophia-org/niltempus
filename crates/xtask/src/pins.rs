@@ -33,7 +33,11 @@ const MANIFESTS: [&str; 4] = [
 /// Files copied byte for byte from Sophia at SOPHIA_REV:
 /// (path here, path in Sophia, sha256).
 const COPIES: [(&str, &str, &str); 3] = [
-    (FONT, "assets/fonts/JetBrainsMonoNL-Regular.ttf", FONT_SHA256),
+    (
+        FONT,
+        "assets/fonts/JetBrainsMonoNL-Regular.ttf",
+        FONT_SHA256,
+    ),
     (
         "assets/fonts/JetBrainsMono-OFL.txt",
         "assets/fonts/JetBrainsMono-OFL.txt",
@@ -150,9 +154,8 @@ pub fn parse_contracts(text: &str) -> Result<Vec<Contract>, String> {
 
 /// Local, offline consistency of every pin; see the module comment.
 pub fn check(repo: &Path) -> Result<Vec<String>, String> {
-    let text = |name: &str| {
-        String::from_utf8(read(&repo.join(name))?).map_err(|e| format!("{name}: {e}"))
-    };
+    let text =
+        |name: &str| String::from_utf8(read(&repo.join(name))?).map_err(|e| format!("{name}: {e}"));
     check_pin_file(&text(SOPHIA_PIN)?)?;
     for name in MANIFESTS {
         check_manifest(name, &text(name)?, name == "Cargo.toml")?;
@@ -224,9 +227,7 @@ pub fn check_manifest(name: &str, text: &str, root: bool) -> Result<(), String> 
         }
         let key = line.split(['=', '.', ' ']).next().unwrap_or("");
         let compact = line.replace(' ', "");
-        if compact.starts_with("paths=")
-            || compact.contains("branch=")
-            || compact.contains("tag=")
+        if compact.starts_with("paths=") || compact.contains("branch=") || compact.contains("tag=")
         {
             return Err(format!("{name}: unpinned source {line:?}"));
         }

@@ -87,9 +87,7 @@ fn manifest_revision_or_redirection_drift_is_refused() {
         "{good}\n[patch.\"{SOPHIA_URL}\"]\nsophia-runtime = {{ path = \"../sophia/crates/sophia-runtime\" }}\n"
     );
     let other_git = format!("{good}\nother = {{ git = \"https://example.org/x.git\" }}\n");
-    let duplicate = format!(
-        "{good}\nsophia-runtime = {{ git = \"{SOPHIA_URL}\", {pinned} }}\n"
-    );
+    let duplicate = format!("{good}\nsophia-runtime = {{ git = \"{SOPHIA_URL}\", {pinned} }}\n");
     for (what, bad) in [
         ("rev", bad_rev),
         ("url", bad_url),
