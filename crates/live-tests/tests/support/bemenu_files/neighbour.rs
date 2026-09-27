@@ -46,9 +46,12 @@ impl Bar {
                 roles: [ProtectionDomainRole::MetadataShell].into_iter().collect(),
             })
             .unwrap();
+        // Content-grant epochs are issued in increasing order by the shared
+        // registry; the launcher already holds epoch 1, so the neighbour takes
+        // the next one.
         let grant = ContentGrant {
             connection_epoch: BAR_EPOCH,
-            content_grant_epoch: 1,
+            content_grant_epoch: 2,
         };
         transport
             .reserve_content(registry, ContentLimits::prototype(grant))
