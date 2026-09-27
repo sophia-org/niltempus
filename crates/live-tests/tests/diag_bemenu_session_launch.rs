@@ -115,6 +115,10 @@ fn diag_session_launch_plan_for_real_bemenu_over_ipc() {
         .clone()
         .expect("production plan is protected")
         .path(ProtectionPath::read_write(&capture))
+        .unwrap()
+        // Production binds the spec's program itself (outside /usr); the
+        // wrapper is /usr/bin/sh, so bind the real program as production does.
+        .path(ProtectionPath::read_only(&spec_program))
         .unwrap();
     let mut wrapped = ProcessLaunchSpec::new("/usr/bin/sh")
         .arg("-c")
