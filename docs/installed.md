@@ -39,8 +39,17 @@ refuses before staging anything unless it equals the verified pair's
 Packaging requires this repository clean with a signed HEAD, the pinned signed
 Sophia checkout, the full provisioning marker and the operator's expected
 pair commits and digests. Every source is staged as its exact signed tree and
-built in the private build directory; the release (schema 6, `SHA256SUMS`)
-records exact digests and Git identities. Installation verifies the artifact
+built in the private build directory; the release (schema 7, `SHA256SUMS`)
+records exact digests and Git identities. Schema 7 requires
+`hagia_c_sdk_revision` and `hagia_c_sdk_manifest_sha256` and seals Hagia's
+vendored SDK manifest as `share/sophia-policy/hagia/c-sdk.manifest.json`.
+`package-desktop` cross-checks both fields against the verified pair and the
+sealed file, and the packaged policy verifier (`tools/verify_packaged_policy.sh`,
+run by packaging, installation, activation and rollback) re-checks them. Both
+refuse, with no defaults, a missing, repeated, malformed or mismatched field
+or sealed file. A schema-6 release is refused as a candidate. Historical
+schema-6 releases are readable only through the legacy path of Sophia's Go
+verifier (root). Installation verifies the artifact
 before an atomic `/opt/sophia/current` switch and keeps the former release as
 `previous`. No package contains an X11 WM bridge, an embedded legacy WM or
 bridge-specific configuration. Local installation does not require pushing or

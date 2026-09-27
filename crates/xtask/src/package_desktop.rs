@@ -1,7 +1,9 @@
 // Provenance: ported from Sophia tools/package_live_session.sh at
 // a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (original copy; source unchanged at
-// the pin de776c68) (Sophia rule 13). The release layout, schema-6 manifest
-// fields and SHA256SUMS are kept; every input is now explicit.
+// the pin de776c68) (Sophia rule 13). The release layout, the schema-6
+// manifest fields and SHA256SUMS are kept; every input is now explicit.
+// Schema 7 (the director's release ruling) adds Hagia's vendored C SDK
+// revision and manifest digest, with the manifest sealed in the release.
 //! Package an immutable desktop release (`cargo xtask package-desktop`), the
 //! E4 entry point:
 //!
@@ -68,6 +70,11 @@ const OPTIONS: [&str; 9] = [
     "build-dir",
     "out",
 ];
+/// The release manifest schema. 7 requires Hagia's vendored C SDK revision
+/// and manifest digest; a schema-6 release is not a candidate here.
+pub const RELEASE_SCHEMA: &str = "7";
+/// Hagia's vendored C SDK manifest, sealed in the release (SHA256SUMS).
+pub const RELEASE_C_SDK_MANIFEST: &str = "share/sophia-policy/hagia/c-sdk.manifest.json";
 const BUILD_TIMEOUT: Duration = Duration::from_secs(5400);
 const GIT_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -715,7 +722,7 @@ pub fn release_id(assembly: &Assembly) -> String {
     )
 }
 
-/// Lay out the schema-6 release in the new `out` directory, check it with
+/// Lay out the schema-7 release in the new `out` directory, check it with
 /// the packaged policy verifier and seal it with SHA256SUMS. On any failure
 /// the partial output is removed.
 pub fn assemble(assembly: &Assembly) -> Result<Vec<String>, String> {
@@ -802,6 +809,11 @@ fn lay_out(a: &Assembly) -> Result<(), String> {
         &out.join("share/sophia-policy/hagia/default.kdl"),
         0o644,
     )?;
+    install(
+        &a.pair.hagia_c_sdk_manifest,
+        &out.join(RELEASE_C_SDK_MANIFEST),
+        0o644,
+    )?;
     for (stem, name, comment, command) in SESSIONS {
         let entry = format!(
             "[Desktop Entry]\nName={name}\nComment={comment}\n\
@@ -816,6 +828,7 @@ fn lay_out(a: &Assembly) -> Result<(), String> {
     let manifest = manifest(a);
     std::fs::write(out.join("manifest"), manifest).map_err(|e| e.to_string())?;
     set_mode(&out.join("manifest"), 0o644)?;
+    verify_release_sdk(out, &a.pair)?;
 
     let verifier = bounded(
         Command::new(out.join("tools/verify_packaged_policy.sh")).arg(out),
@@ -840,11 +853,11 @@ fn lay_out(a: &Assembly) -> Result<(), String> {
     set_mode(&out.join("SHA256SUMS"), 0o644)
 }
 
-/// The schema-6 manifest: the retained release fields, then the integration
-/// and WM-pair identities.
+/// The schema-7 manifest: the retained release fields, then the integration
+/// and WM-pair identities, then Hagia's vendored C SDK.
 pub fn manifest(a: &Assembly) -> String {
     [
-        "schema=6".to_owned(),
+        format!("schema={RELEASE_SCHEMA}"),
         format!("version={}", a.sophia_version),
         format!("commit={}", a.sophia_rev),
         format!("release_id={}", release_id(a)),
@@ -856,9 +869,80 @@ pub fn manifest(a: &Assembly) -> String {
         format!("hagia_shell_binary_sha256={}", a.pair.narthex_sha256),
         format!("narthex_source_commit={}", a.pair.narthex_commit),
         format!("integration_commit={}", a.integration_commit),
+        format!("hagia_c_sdk_revision={}", a.pair.hagia_c_sdk_revision),
+        format!(
+            "hagia_c_sdk_manifest_sha256={}",
+            a.pair.hagia_c_sdk_manifest_sha256
+        ),
     ]
     .join("\n")
         + "\n"
+}
+
+/// Cross-check a laid-out release's Hagia C SDK binding against the verified
+/// pair, with no defaults: the manifest is schema 7 and carries each field
+/// exactly once and well formed, equal to the pair's value; the sealed SDK
+/// manifest is a regular file hashing to the recorded digest and naming the
+/// recorded revision.
+pub fn verify_release_sdk(release: &Path, pair: &VerifiedPair) -> Result<(), String> {
+    let text = String::from_utf8(read(&release.join("manifest"))?)
+        .map_err(|_| "release manifest is not UTF-8".to_owned())?;
+    let values = |key: &str| {
+        text.lines()
+            .filter_map(|line| line.strip_prefix(key)?.strip_prefix('='))
+            .collect::<Vec<_>>()
+    };
+    let one = |key: &str| match values(key)[..] {
+        [value] => Ok(value),
+        [] => Err(format!("release manifest has no {key}")),
+        _ => Err(format!("release manifest repeats {key}")),
+    };
+    if one("schema")? != RELEASE_SCHEMA {
+        return Err(format!("release manifest is not schema {RELEASE_SCHEMA}"));
+    }
+    let revision = one("hagia_c_sdk_revision")?;
+    let digest = one("hagia_c_sdk_manifest_sha256")?;
+    if !hex(revision, 40) {
+        return Err(format!(
+            "release hagia_c_sdk_revision is malformed: {revision:?}"
+        ));
+    }
+    if !hex(digest, 64) {
+        return Err(format!(
+            "release hagia_c_sdk_manifest_sha256 is malformed: {digest:?}"
+        ));
+    }
+    if revision != pair.hagia_c_sdk_revision {
+        return Err(format!(
+            "release hagia_c_sdk_revision {revision} is not the pair's {}",
+            pair.hagia_c_sdk_revision
+        ));
+    }
+    if digest != pair.hagia_c_sdk_manifest_sha256 {
+        return Err(format!(
+            "release hagia_c_sdk_manifest_sha256 {digest} is not the pair's {}",
+            pair.hagia_c_sdk_manifest_sha256
+        ));
+    }
+    let sealed = release.join(RELEASE_C_SDK_MANIFEST);
+    if !std::fs::symlink_metadata(&sealed).is_ok_and(|m| m.is_file()) {
+        return Err(format!("release has no regular {RELEASE_C_SDK_MANIFEST}"));
+    }
+    let bytes = read(&sealed)?;
+    if sha256(&bytes) != digest {
+        return Err(format!(
+            "sealed {RELEASE_C_SDK_MANIFEST} does not hash to hagia_c_sdk_manifest_sha256"
+        ));
+    }
+    let named = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .and_then(|value| value["revision"].as_str().map(str::to_owned));
+    if named.as_deref() != Some(revision) {
+        return Err(format!(
+            "sealed {RELEASE_C_SDK_MANIFEST} does not name revision {revision}"
+        ));
+    }
+    Ok(())
 }
 
 fn collect_files(root: &Path, dir: &Path, files: &mut Vec<String>) -> Result<(), String> {

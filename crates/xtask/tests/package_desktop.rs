@@ -8,8 +8,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 use xtask::package_desktop::{
-    COMMANDS, OPERATIONS_DOC, SESSIONS, SOPHIA_RETAINED, StagedTree, TOOLS, assemble, manifest,
-    release_id, run, run_with,
+    COMMANDS, OPERATIONS_DOC, RELEASE_C_SDK_MANIFEST, SESSIONS, SOPHIA_RETAINED, StagedTree, TOOLS,
+    assemble, manifest, release_id, run, run_with, verify_release_sdk,
 };
 use xtask::pins::{SOPHIA_REV, SOPHIA_URL};
 
@@ -428,6 +428,7 @@ fn the_release_layout_manifest_and_sums_are_exact() {
     }
     expected.insert("share/doc/sophia/operations.md".into());
     expected.insert("share/sophia-policy/hagia/default.kdl".into());
+    expected.insert(RELEASE_C_SDK_MANIFEST.into());
     let sealed = expected.clone();
     expected.insert("manifest".into());
     expected.insert("SHA256SUMS".into());
@@ -449,14 +450,15 @@ fn the_release_layout_manifest_and_sums_are_exact() {
         .unwrap();
     assert!(check.status.success(), "{check:?}");
 
-    // The manifest is the schema-6 release manifest plus the pair and
-    // integration identities, byte for byte.
+    // The manifest is the schema-7 release manifest: the pair and
+    // integration identities and Hagia's vendored C SDK, byte for byte.
     let pair = &assembly.pair;
     let expected_manifest = format!(
-        "schema=6\nversion=0.1.0\ncommit={rev}\nrelease_id=0.1.0-{short}-{int_short}\n\
+        "schema=7\nversion=0.1.0\ncommit={rev}\nrelease_id=0.1.0-{short}-{int_short}\n\
          built_at_utc=2026-09-27T00:00:00Z\nhagia_included=true\nhagia_source_commit={hc}\n\
          hagia_default_profile_sha256={ps}\nhagia_binary_sha256={hs}\n\
-         hagia_shell_binary_sha256={ns}\nnarthex_source_commit={nc}\nintegration_commit={int}\n",
+         hagia_shell_binary_sha256={ns}\nnarthex_source_commit={nc}\nintegration_commit={int}\n\
+         hagia_c_sdk_revision={sr}\nhagia_c_sdk_manifest_sha256={sm}\n",
         rev = assembly.sophia_rev,
         short = &assembly.sophia_rev[..12],
         int = assembly.integration_commit,
@@ -466,6 +468,8 @@ fn the_release_layout_manifest_and_sums_are_exact() {
         hs = pair.hagia_sha256,
         ns = pair.narthex_sha256,
         nc = pair.narthex_commit,
+        sr = fixture::HAGIA_C_SDK_REV,
+        sm = pair.hagia_c_sdk_manifest_sha256,
     );
     assert_eq!(
         fs::read_to_string(out.join("manifest")).unwrap(),
@@ -491,6 +495,12 @@ fn the_release_layout_manifest_and_sums_are_exact() {
     }
     assert_eq!(mode("manifest"), 0o644);
     assert_eq!(mode("share/sophia-policy/hagia/default.kdl"), 0o644);
+    assert_eq!(mode(RELEASE_C_SDK_MANIFEST), 0o644);
+    // The sealed SDK manifest is the pair's, byte for byte.
+    assert_eq!(
+        fs::read(out.join(RELEASE_C_SDK_MANIFEST)).unwrap(),
+        fs::read(&pair.hagia_c_sdk_manifest).unwrap()
+    );
     let entry =
         fs::read_to_string(out.join("share/wayland-sessions/sophia-hagia.desktop")).unwrap();
     assert!(entry.contains("Exec=@SOPHIA_INSTALL_PREFIX@/current/bin/sophia-hagia-session\n"));
@@ -517,5 +527,87 @@ fn a_missing_input_removes_the_partial_release() {
     fs::remove_file(assembly.sophia_tree.join("tools/stop_sophia_session.sh")).unwrap();
     let error = assemble(&assembly).unwrap_err();
     assert!(error.contains("stop_sophia_session.sh"), "{error}");
+    assert!(!assembly.out.exists());
+}
+
+#[test]
+fn the_release_c_sdk_binding_is_cross_checked_against_the_pair() {
+    let dir = Dir::new("release-sdk");
+    let assembly = fixture::assembly(&dir.0);
+    assemble(&assembly).unwrap();
+    let out = &assembly.out;
+    let pair = &assembly.pair;
+    verify_release_sdk(out, pair).unwrap();
+    let manifest_path = out.join("manifest");
+    let original = fs::read_to_string(&manifest_path).unwrap();
+    let revision_line = format!("hagia_c_sdk_revision={}", pair.hagia_c_sdk_revision);
+    let digest_line = format!(
+        "hagia_c_sdk_manifest_sha256={}",
+        pair.hagia_c_sdk_manifest_sha256
+    );
+    let refused = |text: String, message: &str| {
+        fs::write(&manifest_path, text).unwrap();
+        let error = verify_release_sdk(out, pair).unwrap_err();
+        assert!(error.contains(message), "{message}: {error}");
+        fs::write(&manifest_path, &original).unwrap();
+    };
+    // Missing or repeated: no defaults.
+    refused(
+        original.replace(&format!("{revision_line}\n"), ""),
+        "no hagia_c_sdk_revision",
+    );
+    refused(
+        original.replace(&format!("{digest_line}\n"), ""),
+        "no hagia_c_sdk_manifest_sha256",
+    );
+    refused(
+        format!("{original}{revision_line}\n"),
+        "repeats hagia_c_sdk_revision",
+    );
+    // Malformed.
+    refused(
+        original.replace(&revision_line, "hagia_c_sdk_revision=HEAD"),
+        "hagia_c_sdk_revision is malformed",
+    );
+    refused(
+        original.replace(&digest_line, "hagia_c_sdk_manifest_sha256=abc"),
+        "hagia_c_sdk_manifest_sha256 is malformed",
+    );
+    // Well formed but not the pair's.
+    refused(
+        original.replace(
+            &revision_line,
+            &format!("hagia_c_sdk_revision={}", "0".repeat(40)),
+        ),
+        "is not the pair's",
+    );
+    refused(
+        original.replace(
+            &digest_line,
+            &format!("hagia_c_sdk_manifest_sha256={}", "0".repeat(64)),
+        ),
+        "is not the pair's",
+    );
+    // A schema-6 release is not a candidate.
+    refused(original.replace("schema=7", "schema=6"), "is not schema 7");
+    // The sealed file changed or gone.
+    let sealed = out.join(RELEASE_C_SDK_MANIFEST);
+    let bytes = fs::read(&sealed).unwrap();
+    fs::write(&sealed, [bytes.as_slice(), b" "].concat()).unwrap();
+    let error = verify_release_sdk(out, pair).unwrap_err();
+    assert!(error.contains("does not hash to"), "{error}");
+    fs::remove_file(&sealed).unwrap();
+    let error = verify_release_sdk(out, pair).unwrap_err();
+    assert!(error.contains("no regular"), "{error}");
+    fs::write(&sealed, &bytes).unwrap();
+    verify_release_sdk(out, pair).unwrap();
+
+    // Packaging itself refuses a pair whose carried manifest does not name
+    // the pair's recorded revision, and removes the partial release.
+    let dir = Dir::new("release-sdk-pair");
+    let mut assembly = fixture::assembly(&dir.0);
+    assembly.pair.hagia_c_sdk_revision = "0".repeat(40);
+    let error = assemble(&assembly).unwrap_err();
+    assert!(error.contains("does not name revision"), "{error}");
     assert!(!assembly.out.exists());
 }

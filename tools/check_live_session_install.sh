@@ -26,6 +26,8 @@ trap cleanup EXIT
 # shellcheck source=tools/lib/live_session_surface.sh
 source "$ROOT_DIR/tools/lib/live_session_surface.sh"
 
+SDK_REVISION=841563d614ed8540472f0edfa7f4cddaafe3fdde
+
 make_executable() {
     local path="$1"
     printf '#!/usr/bin/env bash\nexit 0\n' >"$path"
@@ -59,11 +61,14 @@ make_artifact() {
         hagia_digest="$(sha256sum "$artifact/target/release/hagia" | awk '{print $1}')"
         narthex_digest="$(sha256sum "$artifact/target/release/narthex" | awk '{print $1}')"
         profile_digest="$(sha256sum "$artifact/share/sophia-policy/hagia/default.kdl" | awk '{print $1}')"
-        printf 'schema=6\nversion=0.1.0\ncommit=%040d\nrelease_id=%s\nbuilt_at_utc=2026-09-04T00:00:00Z\nhagia_included=true\nhagia_source_commit=%040d\nhagia_default_profile_sha256=%s\nhagia_binary_sha256=%s\nhagia_shell_binary_sha256=%s\n' \
+        printf '{"schema":1,"repository":"https://github.com/sophia-org/sophia-desktop-sdk-c","revision":"%s","files":{}}\n' \
+            "$SDK_REVISION" >"$artifact/share/sophia-policy/hagia/c-sdk.manifest.json"
+        sdk_digest="$(sha256sum "$artifact/share/sophia-policy/hagia/c-sdk.manifest.json" | awk '{print $1}')"
+        printf 'schema=7\nversion=0.1.0\ncommit=%040d\nrelease_id=%s\nbuilt_at_utc=2026-09-04T00:00:00Z\nhagia_included=true\nhagia_source_commit=%040d\nhagia_default_profile_sha256=%s\nhagia_binary_sha256=%s\nhagia_shell_binary_sha256=%s\nhagia_c_sdk_revision=%s\nhagia_c_sdk_manifest_sha256=%s\n' \
             "$release_id" "$release_id" 1 "$profile_digest" "$hagia_digest" \
-            "$narthex_digest" >"$artifact/manifest"
+            "$narthex_digest" "$SDK_REVISION" "$sdk_digest" >"$artifact/manifest"
     else
-        printf 'schema=6\nversion=0.1.0\ncommit=%040d\nrelease_id=%s\nbuilt_at_utc=2026-09-04T00:00:00Z\nhagia_included=false\n' \
+        printf 'schema=7\nversion=0.1.0\ncommit=%040d\nrelease_id=%s\nbuilt_at_utc=2026-09-04T00:00:00Z\nhagia_included=false\n' \
             "$release_id" "$release_id" >"$artifact/manifest"
     fi
 
@@ -140,6 +145,36 @@ invalid_narthex="$TEMP_DIR/invalid-narthex"
 cp -a "$hagia_artifact" "$invalid_narthex"
 chmod 644 "$invalid_narthex/target/release/narthex"
 expect_policy_rejection "$invalid_narthex" "a non-executable Narthex binary"
+
+# Schema 7 binds Hagia's vendored C SDK; schema 6 is not a candidate.
+schema6="$TEMP_DIR/invalid-schema6"
+cp -a "$hagia_artifact" "$schema6"
+sed -i -e 's/^schema=7$/schema=6/' -e '/^hagia_c_sdk_/d' "$schema6/manifest"
+rm "$schema6/share/sophia-policy/hagia/c-sdk.manifest.json"
+expect_policy_rejection "$schema6" "a schema-6 release"
+for sdk_field in hagia_c_sdk_revision hagia_c_sdk_manifest_sha256; do
+    missing="$TEMP_DIR/invalid-missing-$sdk_field"
+    cp -a "$hagia_artifact" "$missing"
+    sed -i "/^$sdk_field=/d" "$missing/manifest"
+    expect_policy_rejection "$missing" "a release without $sdk_field"
+    malformed="$TEMP_DIR/invalid-malformed-$sdk_field"
+    cp -a "$hagia_artifact" "$malformed"
+    sed -i "s/^$sdk_field=.*/$sdk_field=HEAD/" "$malformed/manifest"
+    expect_policy_rejection "$malformed" "a malformed $sdk_field"
+done
+sdk_other="$TEMP_DIR/invalid-sdk-revision"
+cp -a "$hagia_artifact" "$sdk_other"
+sed -i "s/^hagia_c_sdk_revision=.*/hagia_c_sdk_revision=$(printf '%040d' 0)/" "$sdk_other/manifest"
+expect_policy_rejection "$sdk_other" "a revision the sealed SDK manifest does not name"
+sdk_tampered="$TEMP_DIR/invalid-sdk-manifest"
+cp -a "$hagia_artifact" "$sdk_tampered"
+chmod u+w "$sdk_tampered/share/sophia-policy/hagia/c-sdk.manifest.json"
+printf ' \n' >>"$sdk_tampered/share/sophia-policy/hagia/c-sdk.manifest.json"
+expect_policy_rejection "$sdk_tampered" "a changed sealed SDK manifest"
+sdk_absent="$TEMP_DIR/invalid-sdk-absent"
+cp -a "$hagia_artifact" "$sdk_absent"
+rm "$sdk_absent/share/sophia-policy/hagia/c-sdk.manifest.json"
+expect_policy_rejection "$sdk_absent" "a missing sealed SDK manifest"
 
 PREFIX="$TEMP_DIR/install/prefix"
 SESSION_DIR="$TEMP_DIR/share/wayland-sessions"
@@ -257,6 +292,24 @@ done
 grep -Fqx 'Exec=/foreign-recovery' "$proof_sessions/sophia-recovery-proof.desktop"
 [[ -f "$proof_sessions/sophia-hagia.desktop" ]]
 [[ -f "$proof_sessions/sophia-kitty.desktop" ]]
+
+# A schema-6 candidate carrying an older verifier that accepts it is still
+# refused: the installer also runs its own verifier.
+old_candidate="$TEMP_DIR/old-candidate"
+cp -a "$schema6" "$old_candidate"
+sed -i 's/^release_id=.*/release_id=0006/' "$old_candidate/manifest"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$old_candidate/tools/verify_packaged_policy.sh"
+(
+    cd "$old_candidate"
+    find bin share target tools -type f -print0 | sort -z | \
+        xargs -0 sha256sum >SHA256SUMS
+)
+if env "${proof_env[@]}" "$ROOT_DIR/tools/install_live_session.sh" \
+    "$old_candidate" >/dev/null 2>&1; then
+    echo "installer accepted a schema-6 candidate" >&2
+    exit 1
+fi
+[[ ! -e "$proof_prefix/releases/0006" ]]
 
 if env "${hagia_env[@]}" "$ROOT_DIR/tools/activate_live_session_release.sh" \
     "$hagia_artifact" >/dev/null 2>&1; then

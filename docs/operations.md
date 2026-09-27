@@ -46,7 +46,8 @@ tools/install_live_session.sh /ABS/release
 ```
 
 Hagia and Narthex build only from REVIEWED Nim dependency manifests (below);
-the pair records both manifests and their digests (pair schema 2).
+the pair records both manifests and their digests, plus Hagia's vendored C SDK
+revision and manifest (pair schema 3).
 
 Packaging never switches or overwrites your own default window manager
 (`$XDG_STATE_HOME/sophia/bin/hagia` and its reload workflow); an installed
@@ -57,9 +58,12 @@ updates `current` while retaining the former release as `previous`. Activation
 and rollback validate the complete target surface before changing command links
 or greetd entries.
 
-A native-only schema-6 artifact records the Sophia commit and whether Hagia is
+A native-only schema-7 artifact records the Sophia commit and whether Hagia is
 included. A Hagia artifact additionally records its signed source commit, the
-canonical default-profile digest, and Hagia and Narthex executable digests.
+canonical default-profile digest, Hagia and Narthex executable digests, and
+Hagia's vendored C SDK revision and manifest digest. The SDK manifest itself is
+sealed at `share/sophia-policy/hagia/c-sdk.manifest.json`. A schema-6 artifact
+is not accepted as a candidate.
 Installation rejects missing, non-executable, or mismatched artifacts. Legacy
 WM executables, compatibility configuration, and bridge fields are forbidden.
 

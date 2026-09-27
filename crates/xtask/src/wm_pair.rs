@@ -278,7 +278,9 @@ pub struct VerifiedPair {
     /// The reviewed dependency manifests the halves were built from.
     pub hagia_nim_deps_sha256: String,
     pub narthex_nim_deps_sha256: String,
-    /// Hagia's vendored C SDK revision and manifest digest, as prepared.
+    /// Hagia's vendored C SDK manifest (carried in the pair), its revision
+    /// and digest, as prepared.
+    pub hagia_c_sdk_manifest: PathBuf,
     pub hagia_c_sdk_revision: String,
     pub hagia_c_sdk_manifest_sha256: String,
 }
@@ -415,7 +417,8 @@ pub fn verify(
     }
     // Hagia's vendored SDK: the carried manifest hashes to the bound digest
     // and names the bound revision.
-    let sdk_bytes = read(&regular(HAGIA_C_SDK_MANIFEST)?)?;
+    let hagia_c_sdk_manifest = regular(HAGIA_C_SDK_MANIFEST)?;
+    let sdk_bytes = read(&hagia_c_sdk_manifest)?;
     let hagia_c_sdk_manifest_sha256 = sha256(&sdk_bytes);
     if manifest.get("hagia_c_sdk_manifest_sha256") != Some(&hagia_c_sdk_manifest_sha256) {
         return Err("WM pair manifest hagia_c_sdk_manifest_sha256 is not the bound value".into());
@@ -446,6 +449,7 @@ pub fn verify(
         profile_sha256,
         hagia_nim_deps_sha256,
         narthex_nim_deps_sha256,
+        hagia_c_sdk_manifest,
         hagia_c_sdk_revision,
         hagia_c_sdk_manifest_sha256,
     })
