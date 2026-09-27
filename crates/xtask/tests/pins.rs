@@ -22,9 +22,7 @@ fn lock(runtime: &str, protocol: &str, extra: &str) -> String {
          [[package]]\nname = \"sophia-runtime\"\nversion = \"0.1.0\"\nsource = \"{runtime}\"\n\n\
          [[package]]\nname = \"sophia-conformance\"\nversion = \"0.1.0\"\nsource = \"{conformance}\"\n\n\
          [[package]]\nname = \"sophia-config\"\nversion = \"0.1.0\"\nsource = \"{conformance}\"\n\n\
-         [[package]]\nname = \"sophia-backend-live\"\nversion = \"0.1.0\"\nsource = \"{conformance}\"\n\n\
          [[package]]\nname = \"sophia-engine\"\nversion = \"0.1.0\"\nsource = \"{conformance}\"\n\n\
-         [[package]]\nname = \"sophia-session\"\nversion = \"0.1.0\"\nsource = \"{conformance}\"\n\n\
          [[package]]\nname = \"sophia-shell-client\"\nversion = \"0.1.0\"\nsource = \"{conformance}\"\n{extra}"
     )
 }

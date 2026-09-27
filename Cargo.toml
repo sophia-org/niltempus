@@ -36,10 +36,7 @@ sophia-config = { git = "https://github.com/sophia-org/sophia.git", rev = "de776
 sophia-protocol = { git = "https://github.com/sophia-org/sophia.git", rev = "de776c68afdf9a133818f86917893c3362dc9fb7" }
 sophia-runtime = { git = "https://github.com/sophia-org/sophia.git", rev = "de776c68afdf9a133818f86917893c3362dc9fb7" }
 # The Rust desktop SDK's shell client, as vendored by Sophia at the same pin:
-# the neighbour bar in the live Bemenu gates (both wires).
+# the neighbour bar in the live Bemenu gate (9P).
 sophia-shell-client = { git = "https://github.com/sophia-org/sophia.git", rev = "de776c68afdf9a133818f86917893c3362dc9fb7" }
-# Sophia's Session-layer owners, for the bemenu_session_ipc smoke (G2 U1-U3),
-# at the same pin.
-sophia-backend-live = { git = "https://github.com/sophia-org/sophia.git", rev = "de776c68afdf9a133818f86917893c3362dc9fb7" }
+# The Engine's public types, for the desktop comparison, at the same pin.
 sophia-engine = { git = "https://github.com/sophia-org/sophia.git", rev = "de776c68afdf9a133818f86917893c3362dc9fb7" }
-sophia-session = { git = "https://github.com/sophia-org/sophia.git", rev = "de776c68afdf9a133818f86917893c3362dc9fb7" }

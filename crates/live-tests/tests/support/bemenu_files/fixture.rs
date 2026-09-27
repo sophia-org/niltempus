@@ -1,7 +1,7 @@
 // Provenance: moved from Sophia
 // crates/sophia-runtime/tests/support/shell_bemenu_files/fixture.rs at
 // 9fcaec782ce4fe9978568c0466ee17a78b3d4571 (Sophia rule 13). Extended (G2):
-// wire-parametrised (9P file export or the current IPC socket), a neighbour
+// the 9P file export only (the IPC twin is retired with product IPC), a neighbour
 // bar on a second transport in the same registry, allocation/candidate shape
 // assertions, and an optional held renderer lease across close.
 //! Real ShellComponentTransport (native launcher profile) and its real content,
@@ -25,23 +25,22 @@ use sophia_runtime::*;
 use std::path::Path;
 use std::time::Duration;
 
-/// The component wire under test. Both run the same owners and assertions;
-/// only negotiation and the endpoint variable differ.
+/// The component wire under test: only the 9P file export. Product IPC is
+/// removed from Bemenu; its IPC coverage is retired with it, not moved.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[allow(dead_code)] // Each test binary constructs only its own wire.
 pub enum Wire {
     /// `sophia_shell_fs_v1` over 9P2000.L.
     Files,
-    /// The current `sophia_shell_v1` socket wire (today's rollback path).
-    Ipc,
 }
+
+/// The retired IPC endpoint variable, which must never reach Bemenu.
+pub const RETIRED_IPC_ENV: &str = "SOPHIA_SHELL_SOCKET";
 
 impl Wire {
     /// The only endpoint variable the application may see.
     pub fn socket_env(self) -> &'static str {
         match self {
             Self::Files => "SOPHIA_SHELL_9P_SOCKET",
-            Self::Ipc => "SOPHIA_SHELL_SOCKET",
         }
     }
 
@@ -49,7 +48,6 @@ impl Wire {
     pub fn negotiated_suffix(self) -> &'static str {
         match self {
             Self::Files => " wire=9p",
-            Self::Ipc => "",
         }
     }
 }
@@ -235,9 +233,6 @@ impl Fixture {
                 self.transport
                     .begin_file_negotiation(&self.registry, EPOCH, timeout, policy)
             }
-            Wire::Ipc => self
-                .transport
-                .begin_negotiation(&self.registry, EPOCH, timeout, policy),
         }
         .unwrap();
     }

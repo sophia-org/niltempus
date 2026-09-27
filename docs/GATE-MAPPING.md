@@ -57,8 +57,13 @@ and `check_live_session_milestone5_verifier.sh` (`physical_selftests`).
 | `sophia-cli/tests/launcher_safety.rs` remaining sections | S (on the reduced `run_sophia_session.sh`) |
 | `session_launcher_recovery.rs` `tty_adapter_refuses_controls_before_queries_or_privileged_handoff` | E `session_tty3_launcher.rs`; S keeps the generic recovery tests |
 | `xtask` `bemenu_artifact` tests | E `xtask/tests/bemenu_artifact.rs` |
-| `sophia-runtime/tests/shell_bemenu_files.rs` | E `live-tests/tests/bemenu_files.rs` (9P); in the Bemenu lockstep it also asserts no `SOPHIA_SHELL_SOCKET` in Bemenu's environment and `wire=9p` on the negotiated line |
-| `sophia-session/tests/shell_component_processes.rs` Bemenu tests (3) | Retired with product IPC. The interim external twins `bemenu_ipc` and `bemenu_session_ipc` are removed in the Bemenu lockstep; generic shell-component coverage stays S |
+| `sophia-runtime/tests/shell_bemenu_files.rs` | E `live-tests/tests/bemenu_files.rs` (9P only; asserts no `SOPHIA_SHELL_SOCKET` in Bemenu's environment and `wire=9p` on the negotiated line) |
+| `sophia-session/tests/shell_component_processes.rs` Bemenu tests (3) | Retired with product IPC (Bemenu 536d6b2), together with the interim external twins `bemenu_ipc`, `bemenu_session_ipc` and the IPC launch diagnostic `diag_bemenu_session_launch`; generic shell-component coverage stays S |
+
+The live tests' Session-layer pins (`sophia-session`, `sophia-backend-live`)
+and the shell client's `ipc-compat` feature went with the IPC twins; the
+remaining pinned Sophia crates are `sophia-config`, `sophia-conformance`,
+`sophia-engine`, `sophia-protocol`, `sophia-runtime` and `sophia-shell-client`.
 
 New external tests with no Sophia predecessor: `session_preflight`,
 `session_host_paths`, `session_reap_last`, `session_wrapper_contract`,
@@ -101,5 +106,5 @@ family; generic shell-component, policy-host and content-lifecycle tests.
 
 - Lom: the panel, launcher and dock gates, the GPU content proof and the
   content-proof step, pending the Sophia 9P seams ([Lom content](lom-content.md)).
-- Bemenu: the 9P-only lockstep at Bemenu `536d6b25`, including a new signed
-  artifact preparation.
+- Bemenu: the new signed artifact preparation at Bemenu `536d6b25` (a slot and
+  the operator's confirmation of the binary SHA before any live run).

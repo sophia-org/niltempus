@@ -1,9 +1,10 @@
 // Provenance: the body of Sophia crates/sophia-runtime/tests/shell_bemenu_files.rs
-// at 9fcaec782ce4fe9978568c0466ee17a78b3d4571 (Sophia rule 13), made
-// wire-parametrised and extended (G2) with a neighbour bar, allocation and
-// candidate shape assertions and a held-lease retirement phase.
-//! The live Bemenu gate body shared by bemenu_files (9P) and bemenu_ipc
-//! (the current socket wire). See bemenu_files.rs for scope.
+// at 9fcaec782ce4fe9978568c0466ee17a78b3d4571 (Sophia rule 13), extended (G2)
+// with a neighbour bar, allocation and candidate shape assertions and a
+// held-lease retirement phase. 9P-only: the IPC twin is retired with product
+// IPC.
+//! The live Bemenu gate body of bemenu_files (the 9P file export only). See
+//! bemenu_files.rs for scope.
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -53,11 +54,10 @@ fn until(
     }
 }
 
-/// The whole gate on one wire. Every assertion runs on both wires.
+/// The whole gate on the 9P file wire.
 pub fn run(wire: Wire) {
     let label = match wire {
         Wire::Files => "files",
-        Wire::Ipc => "ipc",
     };
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let root = std::env::temp_dir().join(format!("sophia-bemenu-{label}-{}", std::process::id()));
@@ -211,12 +211,11 @@ pub fn run(wire: Wire) {
         .collect::<Vec<_>>();
     assert_eq!(announced, [negotiated.as_str()], "{stderr}");
     assert!(!stderr.contains("status=failed"), "{stderr}");
-    if wire == Wire::Ipc {
-        assert!(
-            !stderr.contains("wire=9p"),
-            "IPC gate reached the file wire: {stderr}"
-        );
-    }
+    // Bemenu is 9P-only: the negotiated line names the file wire.
+    assert!(
+        negotiated.ends_with(" wire=9p"),
+        "the negotiated record must carry wire=9p: {negotiated}"
+    );
     assert_eq!(
         lines.last(),
         Some(&"bemenu_native status=stopped result=0"),
