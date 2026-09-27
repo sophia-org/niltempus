@@ -48,47 +48,6 @@ const USAGE: &str = "usage: cargo xtask nim-deps draft --store=/ABS --source=/AB
                      --commit=<40 hex> --product=hagia|narthex --nim=/ABS --nim-lib=/ABS \
                      --gcc=/ABS --bwrap=/ABS --build-dir=/ABS --pin=NAME=VERSION ... --out=/ABS/NEW-FILE";
 
-/// How the Nim installation's own configuration (nim.cfg, config.nims in
-/// its config directory) takes part in a build. The user, parent and
-/// project configurations and every nimble path are always skipped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SystemCfg {
-    /// Read, and its directory inventory is part of the recorded toolchain.
-    KeptHashed,
-    /// Skipped (`--skipCfg`); the standard-library search paths it would
-    /// add are passed explicitly (STDLIB_PATHS).
-    Skipped,
-}
-
-/// The one setting (pending the director's ruling); every artifact records it.
-pub const NIM_SYSTEM_CFG: SystemCfg = SystemCfg::KeptHashed;
-
-impl SystemCfg {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::KeptHashed => "kept-hashed",
-            Self::Skipped => "skipped",
-        }
-    }
-}
-
-/// The standard-library directories the installation config adds on Unix,
-/// relative to the explicit `--lib`.
-pub const STDLIB_PATHS: [&str; 12] = [
-    "deprecated/core",
-    "deprecated/pure",
-    "pure/collections",
-    "pure/concurrency",
-    "impure",
-    "wrappers",
-    "wrappers/linenoise",
-    "posix",
-    "arch",
-    "core",
-    "pure",
-    "pure/unidecode",
-];
-
 // ---------------------------------------------------------------- versions
 
 fn version(value: &str) -> Option<Vec<u64>> {

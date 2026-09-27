@@ -36,7 +36,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::bemenu_artifact::{SignedTree, authorize, set_mode, signed_tree_under};
-use crate::nim_deps::{FileEntry, NIM_SYSTEM_CFG, NOTE, inventory, writable_again};
+use crate::nim_deps::{FileEntry, Manifest, NOTE, inventory, writable_again};
 use crate::package_desktop::{
     cargo, clean_checkout, git_text, private_dir, provisioned, resolve_lexically,
 };
@@ -68,6 +68,18 @@ const OPTIONS: [&str; 13] = [
     "narthex-commit",
     "narthex-nim-deps",
     "narthex-nim-deps-sha256",
+];
+/// A product record's fields, in order.
+const PRODUCT_KEYS: [&str; 9] = [
+    "name",
+    "commit",
+    "tree",
+    "signer",
+    "nim_deps_sha256",
+    "nim_config_sha256",
+    "nim_config_read",
+    "nim_stdlib_sha256",
+    "nim_command",
 ];
 pub const FEATURES: [&str; 2] = ["native-session", "atomic-scanout-live"];
 pub const PACKAGES: [&str; 2] = ["sophia-cli", "sophia-cli,sophia-wm-demo"];
@@ -474,32 +486,32 @@ impl Assembly<'_> {
                 .with("packages", &self.packages),
         ];
         for (name, built) in self.built {
-            let deps = built
+            let nim = built
                 .nim_deps
                 .as_ref()
                 .ok_or("a Nim half without reviewed dependencies")?;
             let file = out.join("nim-deps").join(format!("{name}.manifest"));
-            std::fs::write(&file, &deps.text).map_err(|e| e.to_string())?;
+            std::fs::write(&file, &nim.reviewed.text).map_err(|e| e.to_string())?;
             set_mode(&file, 0o444)?;
             header.push(
                 Record::of("product")
                     .with("name", name)
-                    .with("commit", &deps.manifest.source_commit)
+                    .with("commit", &nim.reviewed.manifest.source_commit)
                     .with("tree", &built.tree.tree)
                     .with("signer", &built.tree.signer)
-                    .with("nim_deps_sha256", &deps.sha256),
+                    .with("nim_deps_sha256", &nim.reviewed.sha256)
+                    .with("nim_config_sha256", &nim.config_inventory_sha256)
+                    .with("nim_config_read", nim.config_read())
+                    .with("nim_stdlib_sha256", &nim.stdlib_inventory_sha256)
+                    .with("nim_command", nim.command_line()),
             );
         }
-        let nim = if self.built.is_empty() {
-            ("none", "none")
+        let identity = if self.built.is_empty() {
+            "none"
         } else {
-            (NIM_SYSTEM_CFG.as_str(), TOOLCHAIN_NOTE)
+            TOOLCHAIN_NOTE
         };
-        header.push(
-            Record::of("build")
-                .with("nim_system_cfg", nim.0)
-                .with("toolchain_identity", nim.1),
-        );
+        header.push(Record::of("build").with("toolchain_identity", identity));
         header.push(Record::of("note").with("text", NOTE));
         header.push(
             Record::of("sophia-tree")
@@ -729,11 +741,13 @@ pub fn verify(out: &Path, expected: &str) -> Result<Sealed, String> {
     }
     let mut names = Vec::new();
     for record in &header[3..3 + products] {
-        let v = record.expect(&["name", "commit", "tree", "signer", "nim_deps_sha256"])?;
+        let v = record.expect(&PRODUCT_KEYS)?;
         if !["hagia", "narthex"].contains(&v[0])
             || names.contains(&v[0])
             || !hex(v[1], 40)
             || !hex(v[4], 64)
+            || v[6].is_empty()
+            || v[8].is_empty()
         {
             return Err(format!("{MANIFEST} has a malformed product record"));
         }
@@ -744,6 +758,24 @@ pub fn verify(out: &Path, expected: &str) -> Result<Sealed, String> {
                 v[0]
             ));
         }
+        // The staged installation the product was built from is the
+        // reviewed one: configuration and stdlib identities agree.
+        let deps = Manifest::parse(
+            &String::from_utf8(deps).map_err(|_| "a dependency manifest is not UTF-8")?,
+        )?;
+        for (value, role) in [(v[5], "nim-config"), (v[7], "nim-lib")] {
+            let reviewed = deps
+                .toolchain
+                .iter()
+                .find(|r| r.kind == "tree" && r.fields[0].1 == role)
+                .map(|r| r.fields[3].1.as_str());
+            if reviewed != Some(value) || deps.product != v[0] || deps.source_commit != v[1] {
+                return Err(format!(
+                    "the {} build does not name its reviewed {role}",
+                    v[0]
+                ));
+            }
+        }
         names.push(v[0]);
     }
     let mut sorted = names.clone();
@@ -751,7 +783,7 @@ pub fn verify(out: &Path, expected: &str) -> Result<Sealed, String> {
     if sorted != names {
         return Err(format!("{MANIFEST} products are not sorted"));
     }
-    header[3 + products].expect(&["nim_system_cfg", "toolchain_identity"])?;
+    header[3 + products].expect(&["toolchain_identity"])?;
     if header[4 + products].expect(&["text"])?[0] != NOTE {
         return Err(format!("{MANIFEST} note is not the toolchain statement"));
     }
@@ -801,7 +833,7 @@ pub const ENV_KEYS: [&str; 11] = [
 pub fn header_for_tests(
     integration: &str,
     sophia_tree: &str,
-    products: &[(&str, &str, &str)],
+    products: &[(&str, &str, &str, &str, &str)],
 ) -> Vec<Record> {
     let mut header = vec![
         Record::of("physical-inputs").with("schema", SCHEMA),
@@ -815,26 +847,26 @@ pub fn header_for_tests(
             .with("features", "native-session")
             .with("packages", "sophia-cli"),
     ];
-    for (name, commit, deps) in products {
+    for (name, commit, deps, config, stdlib) in products {
         header.push(
             Record::of("product")
                 .with("name", name)
                 .with("commit", commit)
                 .with("tree", "1".repeat(40))
                 .with("signer", "ABCDEF")
-                .with("nim_deps_sha256", deps),
+                .with("nim_deps_sha256", deps)
+                .with("nim_config_sha256", config)
+                .with("nim_config_read", "config/nim.cfg:x")
+                .with("nim_stdlib_sha256", stdlib)
+                .with("nim_command", "/b/nim/bin/nim c"),
         );
     }
-    let nim = if products.is_empty() {
-        ("none", "none")
+    let identity = if products.is_empty() {
+        "none"
     } else {
-        (NIM_SYSTEM_CFG.as_str(), TOOLCHAIN_NOTE)
+        TOOLCHAIN_NOTE
     };
-    header.push(
-        Record::of("build")
-            .with("nim_system_cfg", nim.0)
-            .with("toolchain_identity", nim.1),
-    );
+    header.push(Record::of("build").with("toolchain_identity", identity));
     header.push(Record::of("note").with("text", NOTE));
     header.push(
         Record::of("sophia-tree")

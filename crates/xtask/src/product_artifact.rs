@@ -21,11 +21,15 @@
 //! products build only from a REVIEWED dependency manifest whose sha256 is
 //! supplied separately (crate::nim_deps): the closure is staged read-only and
 //! verified before and after, the host toolchain must be the reviewed one
-//! before and after, and the compiler runs in bwrap with no network and with
-//! /home and /opt hidden, skipping nimble paths and the user, parent and
-//! project configurations (the installation config per NIM_SYSTEM_CFG,
-//! recorded). After every build the staged source tree must still hash to
-//! the signed commit's tree.
+//! before and after, and the compiler is a verified, read-only STAGED copy
+//! of the reviewed installation (binary, installation configuration and
+//! stdlib; crate::nim_install) whose configuration is traced and refused if
+//! it reaches anything ambient. It runs in bwrap with no network and with
+//! /home, /opt, /root and the live Nim installation hidden, skipping nimble
+//! paths and the user, parent and project configurations. The effective nim
+//! command and the configuration identity are recorded in the artifact.
+//! After every build the staged source tree must still hash to the signed
+//! commit's tree.
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::os::unix::process::CommandExt;
@@ -34,7 +38,8 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use crate::bemenu_artifact::{SignedTree, inputs, set_mode, signed_tree_under, tail, wait_logged};
-use crate::nim_deps::{NIM_SYSTEM_CFG, Reviewed, STDLIB_PATHS, SystemCfg, load_reviewed};
+use crate::nim_deps::{Reviewed, Toolchain, load_reviewed};
+use crate::records::encode_value;
 use crate::{read, sha256};
 
 const USAGE: &str = "usage: cargo xtask prepare-product-artifact <lom|provlita|hagia> \
@@ -204,17 +209,20 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
     std::fs::create_dir(&output).map_err(|e| format!("{}: {e}", output.display()))?;
     let written = write_output(product, &output, binary, raw, config.as_deref())
         .and_then(|digests| {
-            if let Some(deps) = &built.nim_deps {
-                std::fs::write(output.join(NIM_DEPS), &deps.text).map_err(|e| e.to_string())?;
+            if let Some(nim) = &built.nim_deps {
+                std::fs::write(output.join(NIM_DEPS), &nim.reviewed.text)
+                    .map_err(|e| e.to_string())?;
                 set_mode(&output.join(NIM_DEPS), 0o444)?;
             }
             Ok(digests)
         })
         .map(|(binary_sha256, config_sha256)| {
-            let (deps, cfg, note) = match &built.nim_deps {
-                Some(deps) => (deps.sha256.clone(), NIM_SYSTEM_CFG.as_str(), TOOLCHAIN_NOTE),
-                None => ("none".to_owned(), "none", "none"),
+            let nim = built.nim_deps.as_ref();
+            let (deps, note) = match nim {
+                Some(nim) => (nim.reviewed.sha256.clone(), TOOLCHAIN_NOTE),
+                None => ("none".to_owned(), "none"),
             };
+            let field = |f: fn(&NimBuild) -> String| nim.map_or_else(|| "none".to_owned(), f);
             [
                 "schema=2".to_owned(),
                 format!("product={}", product.name),
@@ -227,8 +235,17 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
                 format!("config={}", if config.is_some() { CONFIG } else { "none" }),
                 format!("config_sha256={config_sha256}"),
                 format!("nim_deps_sha256={deps}"),
-                format!("nim_system_cfg={cfg}"),
                 format!("toolchain_identity={note}"),
+                format!(
+                    "nim_config_sha256={}",
+                    field(|n| n.config_inventory_sha256.clone())
+                ),
+                format!("nim_config_read={}", field(NimBuild::config_read)),
+                format!(
+                    "nim_stdlib_sha256={}",
+                    field(|n| n.stdlib_inventory_sha256.clone())
+                ),
+                format!("nim_command={}", field(NimBuild::command_line)),
             ]
             .join("\n")
                 + "\n"
@@ -271,8 +288,43 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
 pub struct Built {
     pub(crate) tree: SignedTree,
     pub binary: std::path::PathBuf,
-    /// The reviewed dependency manifest (Nim products).
-    pub nim_deps: Option<Reviewed>,
+    /// How a Nim product was built (None for Cargo products).
+    pub nim_deps: Option<NimBuild>,
+}
+
+/// A Nim product's bound build: the reviewed closure, the effective
+/// compiler command and the staged installation configuration's identity.
+#[derive(Debug, Clone)]
+pub struct NimBuild {
+    pub reviewed: Reviewed,
+    /// The effective nim argv, the staged compiler first.
+    pub command: Vec<String>,
+    pub config_inventory_sha256: String,
+    pub stdlib_inventory_sha256: String,
+    /// Every configuration file the compiler reads (relative to the staged
+    /// prefix) with its sha256.
+    pub config_files: Vec<(String, String)>,
+}
+
+impl NimBuild {
+    /// The argv, each argument in the records encoding, space-joined: one
+    /// unambiguous line.
+    pub fn command_line(&self) -> String {
+        self.command
+            .iter()
+            .map(|a| encode_value(a).unwrap_or_else(|_| "\"<control>\"".into()))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// `path:sha256` for every configuration file read, space-joined.
+    pub fn config_read(&self) -> String {
+        self.config_files
+            .iter()
+            .map(|(path, sha)| format!("{path}:{sha}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
 }
 
 /// Signer authorization and the exact signed tree, staged in a private
@@ -318,6 +370,8 @@ pub(crate) fn build(
         )?),
     };
     let mut staged = None;
+    let mut install = None;
+    let mut record = None;
     // Low-priority, two-job build inside the scratch tree only.
     let log = scratch.join("build.log");
     let log_file = File::create(&log).map_err(|e| e.to_string())?;
@@ -343,48 +397,31 @@ pub(crate) fn build(
                 .expect("Nim products have a reviewed manifest");
             let toolchain = reviewed.check_toolchain()?;
             let deps = reviewed.stage(&scratch.join("nim-deps"))?;
+            let prefix = crate::nim_install::stage(&toolchain, &scratch.join("nim"))?;
             let binary = out.join(product.binary);
-            let gcc = toolchain.tool("gcc")?;
             let home = scratch.join("home");
             std::fs::create_dir(&home).map_err(|e| e.to_string())?;
-            let mut command = Command::new("nice");
-            command
-                .env_clear()
-                .env("PATH", gcc.parent().ok_or("gcc has no directory")?)
-                .env("HOME", &home)
-                .env("LC_ALL", "C")
-                .args(["-n", "19"])
-                .arg(toolchain.tool("bwrap")?)
-                .args(["--unshare-net", "--die-with-parent", "--ro-bind", "/", "/"])
-                .args(["--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"]);
-            // No ambient package lookup: every home and /opt (nimble's
-            // default stores) is hidden; only the private scratch returns.
-            for hidden in ["/home", "/opt", "/root"] {
-                if Path::new(hidden).is_dir() {
-                    command.args(["--tmpfs", hidden]);
-                }
-            }
-            command
-                .arg("--bind")
-                .args([&scratch, &scratch])
-                .arg("--ro-bind")
-                .args([&deps.root, &deps.root])
-                .arg("--chdir")
-                .arg(&tree_dir)
-                .arg("--")
-                .arg(toolchain.tool("nim")?)
-                .args(["c", "-d:release", "--hints:off"])
-                .args(nim_flags(
-                    NIM_SYSTEM_CFG,
-                    &toolchain.tree("nim-lib")?,
-                    &gcc,
-                    &deps.dirs,
-                ))
-                .args(["--path:src", "--parallelBuild:2"])
-                .arg(format!("--nimcache:{}", scratch.join("nimcache").display()))
-                .arg(format!("-o:{}", binary.display()))
-                .arg(main);
+            let (command, argv) = nim_command(
+                &toolchain,
+                &prefix,
+                &NimPaths {
+                    scratch: &scratch,
+                    home: &home,
+                    tree: &tree_dir,
+                    deps: &deps.root,
+                    dep_dirs: &deps.dirs,
+                    binary: &binary,
+                },
+                main,
+            )?;
+            record = Some((
+                argv,
+                prefix.config_inventory_sha256.clone(),
+                prefix.stdlib_inventory_sha256.clone(),
+                prefix.trace.files.clone(),
+            ));
             staged = Some(deps);
+            install = Some(prefix);
             (command, binary, NIM_TIMEOUT)
         }
     };
@@ -416,15 +453,121 @@ pub(crate) fn build(
         reviewed.verify(deps)?;
         reviewed.check_toolchain()?;
     }
+    if let Some(prefix) = &install {
+        prefix.verify()?;
+    }
+    let nim_deps = match (reviewed, record) {
+        (Some(reviewed), Some((command, config, stdlib, files))) => Some(NimBuild {
+            reviewed,
+            command,
+            config_inventory_sha256: config,
+            stdlib_inventory_sha256: stdlib,
+            config_files: files,
+        }),
+        _ => None,
+    };
     Ok(Built {
         tree,
         binary,
-        nim_deps: reviewed,
+        nim_deps,
     })
 }
 
-/// The Nim flags that make the dependency set and configuration explicit.
-pub fn nim_flags(cfg: SystemCfg, lib: &Path, gcc: &Path, deps: &[PathBuf]) -> Vec<String> {
+/// The private paths one Nim build uses.
+pub struct NimPaths<'a> {
+    pub scratch: &'a Path,
+    pub home: &'a Path,
+    pub tree: &'a Path,
+    pub deps: &'a Path,
+    pub dep_dirs: &'a [PathBuf],
+    pub binary: &'a Path,
+}
+
+/// The bounded, network-less, sandboxed command for one Nim build from the
+/// staged installation, and the effective nim argv it runs.
+pub fn nim_command(
+    toolchain: &Toolchain,
+    prefix: &crate::nim_install::Staged,
+    paths: &NimPaths,
+    main: &str,
+) -> Result<(Command, Vec<String>), String> {
+    let gcc = toolchain.tool("gcc")?;
+    let mut argv = vec![
+        prefix.nim.display().to_string(),
+        "c".into(),
+        "-d:release".into(),
+        "--hints:off".into(),
+    ];
+    argv.extend(nim_flags(&prefix.lib, &gcc, paths.dep_dirs));
+    argv.extend([
+        "--path:src".to_owned(),
+        "--parallelBuild:2".to_owned(),
+        format!("--nimcache:{}", paths.scratch.join("nimcache").display()),
+        format!("-o:{}", paths.binary.display()),
+        main.to_owned(),
+    ]);
+    let command = sandboxed(toolchain, &prefix.root, paths, &argv)?;
+    Ok((command, argv))
+}
+
+/// `argv` at nice 19 in bwrap: no network, a private /tmp, every home,
+/// /opt, /root and the LIVE Nim installation (the reviewed compiler's
+/// prefix, and /etc/nim) hidden, and only the private scratch (read-write),
+/// the staged dependencies and the staged installation (read-only) bound
+/// back. Only the staged copies can be read.
+pub fn sandboxed(
+    toolchain: &Toolchain,
+    prefix: &Path,
+    paths: &NimPaths,
+    argv: &[String],
+) -> Result<Command, String> {
+    let gcc = toolchain.tool("gcc")?;
+    let live_prefix = toolchain
+        .tool("nim")?
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .ok_or("the reviewed nim has no installation prefix")?;
+    let mut command = Command::new("nice");
+    command
+        .env_clear()
+        .env("PATH", gcc.parent().ok_or("gcc has no directory")?)
+        .env("HOME", paths.home)
+        .env("LC_ALL", "C")
+        .args(["-n", "19"])
+        .arg(toolchain.tool("bwrap")?)
+        .args(["--unshare-net", "--die-with-parent", "--ro-bind", "/", "/"])
+        .args(["--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"]);
+    let hidden = [
+        Path::new("/home"),
+        Path::new("/opt"),
+        Path::new("/root"),
+        Path::new("/etc/nim"),
+        live_prefix.as_path(),
+    ];
+    for dir in hidden {
+        if dir.is_dir() {
+            command.arg("--tmpfs").arg(dir);
+        }
+    }
+    command
+        .arg("--bind")
+        .args([paths.scratch, paths.scratch])
+        .arg("--ro-bind")
+        .args([paths.deps, paths.deps])
+        .arg("--ro-bind")
+        .args([prefix, prefix])
+        .arg("--chdir")
+        .arg(paths.tree)
+        .arg("--")
+        .args(argv);
+    Ok(command)
+}
+
+/// The Nim flags that make the dependency set and configuration explicit:
+/// no nimble path, no user, parent or project configuration, the staged
+/// stdlib, the reviewed gcc, and each staged dependency directory.
+pub fn nim_flags(lib: &Path, gcc: &Path, deps: &[PathBuf]) -> Vec<String> {
     let mut flags = [
         "--noNimblePath",
         "--clearNimblePath",
@@ -434,12 +577,6 @@ pub fn nim_flags(cfg: SystemCfg, lib: &Path, gcc: &Path, deps: &[PathBuf]) -> Ve
     ]
     .map(str::to_owned)
     .to_vec();
-    if cfg == SystemCfg::Skipped {
-        flags.push("--skipCfg:on".into());
-        for path in STDLIB_PATHS {
-            flags.push(format!("--path:{}", lib.join(path).display()));
-        }
-    }
     flags.push(format!("--lib:{}", lib.display()));
     flags.push("--cc:gcc".into());
     flags.push(format!("--gcc.exe:{}", gcc.display()));

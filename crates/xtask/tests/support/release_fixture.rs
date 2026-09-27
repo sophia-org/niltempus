@@ -88,16 +88,33 @@ pub struct PairIds {
     pub profile: String,
 }
 
+/// The fixture's reviewed installation-config and stdlib digests.
+pub const NIM_CONFIG_SHA256: &str =
+    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+pub const NIM_STDLIB_SHA256: &str =
+    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+
 /// A reviewed dependency manifest for a fixture half (no packages; the
-/// toolchain is not probed by the pair verifier).
+/// toolchain is not probed by the pair verifier, which only cross-checks the
+/// installation-config and stdlib identities).
 pub fn reviewed_deps(product: &str, commit: &str) -> String {
+    let tree = |role: &str, path: &str, digest: &str| {
+        xtask::records::Record::of("tree")
+            .with("role", role)
+            .with("path", path)
+            .with("files", "1")
+            .with("inventory_sha256", digest)
+    };
     xtask::nim_deps::Manifest {
         status: "reviewed".into(),
         product: product.into(),
         source_commit: commit.into(),
         source_tree: "1".repeat(40),
         store: PathBuf::from("/nonexistent-fixture-store"),
-        toolchain: Vec::new(),
+        toolchain: vec![
+            tree("nim-config", "/usr/lib/nim/config", NIM_CONFIG_SHA256),
+            tree("nim-lib", "/usr/lib/nim/lib", NIM_STDLIB_SHA256),
+        ],
         packages: Vec::new(),
     }
     .render()
@@ -143,9 +160,18 @@ pub fn write_pair(dir: &Path) -> PairIds {
         format!("default_profile_sha256={}", sha256(profile)),
         format!("hagia_nim_deps_sha256={}", deps[0]),
         format!("narthex_nim_deps_sha256={}", deps[1]),
-        "nim_system_cfg=kept-hashed".to_owned(),
         "toolchain_identity=recorded-not-a-reproducible-closure".to_owned(),
     ]
+    .into_iter()
+    .chain(["hagia", "narthex"].into_iter().flat_map(|name| {
+        [
+            format!("{name}_nim_config_sha256={NIM_CONFIG_SHA256}"),
+            format!("{name}_nim_config_read=config/nim.cfg:{}", "e".repeat(64)),
+            format!("{name}_nim_stdlib_sha256={NIM_STDLIB_SHA256}"),
+            format!("{name}_nim_command=/b/nim/bin/nim c -d:release src/{name}.nim"),
+        ]
+    }))
+    .collect::<Vec<_>>()
     .join("\n")
         + "\n";
     fs::write(dir.join("wm-pair.manifest"), manifest).unwrap();

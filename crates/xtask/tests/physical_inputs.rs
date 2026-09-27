@@ -13,7 +13,7 @@ use xtask::physical_inputs::{
 
 #[path = "support/release_fixture.rs"]
 mod fixture;
-use fixture::{Dir, repo, sha256};
+use fixture::{Dir, NIM_CONFIG_SHA256, NIM_STDLIB_SHA256, repo, reviewed_deps, sha256};
 
 fn args(values: &[String]) -> Vec<String> {
     values.to_vec()
@@ -192,14 +192,14 @@ fn prepared(root: &Path, products: &[(&str, &str)]) -> (std::path::PathBuf, Stri
         .tree;
     let mut named = Vec::new();
     for (name, commit) in products {
-        let text = format!("reviewed {name}\n");
+        let text = reviewed_deps(name, commit);
         fs::write(out.join("nim-deps").join(format!("{name}.manifest")), &text).unwrap();
         fs::write(out.join("bin").join(name), "#!/bin/sh\n").unwrap();
         named.push((*name, *commit, sha256(text.as_bytes())));
     }
     let products = named
         .iter()
-        .map(|(n, c, d)| (*n, *c, d.as_str()))
+        .map(|(n, c, d)| (*n, *c, d.as_str(), NIM_CONFIG_SHA256, NIM_STDLIB_SHA256))
         .collect::<Vec<_>>();
     let header = header_for_tests(&"2".repeat(40), &tree, &products);
     write_env_for_tests(&out, &header).unwrap();
@@ -263,6 +263,23 @@ fn verify_binds_every_file_to_the_expected_manifest() {
     std::os::unix::fs::symlink("/etc/hostname", out.join("profiles/sophia/link.kdl")).unwrap();
     assert!(verify(&out, &digest).is_err());
     fs::remove_file(out.join("profiles/sophia/link.kdl")).unwrap();
+    verify(&out, &digest).unwrap();
+    // A product record naming another installation config than the one its
+    // reviewed dependency manifest records, even under a matching digest.
+    let manifest_path = out.join("physical-inputs.manifest");
+    let manifest = fs::read_to_string(&manifest_path).unwrap();
+    let forged = manifest.replace(
+        &format!("nim_config_sha256={NIM_CONFIG_SHA256}"),
+        &format!("nim_config_sha256={}", "f".repeat(64)),
+    );
+    assert_ne!(forged, manifest);
+    fs::write(&manifest_path, &forged).unwrap();
+    let error = verify(&out, &sha256(forged.as_bytes())).unwrap_err();
+    assert!(
+        error.contains("does not name its reviewed nim-config"),
+        "{error}"
+    );
+    fs::write(&manifest_path, &manifest).unwrap();
     verify(&out, &digest).unwrap();
     // A relocated output no longer matches its own inputs.env.
     let moved = dir.0.join("moved");

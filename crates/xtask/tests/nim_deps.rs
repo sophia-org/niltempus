@@ -9,8 +9,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use xtask::nim_deps::{
-    Manifest, NIM_SYSTEM_CFG, SystemCfg, inventory, load_reviewed, nimble_requires,
-    parse_requirement, resolve,
+    Manifest, inventory, load_reviewed, nimble_requires, parse_requirement, resolve,
 };
 use xtask::product_artifact::nim_flags;
 use xtask::records::{Record, parse_line, parse_text, relative_path};
@@ -365,26 +364,23 @@ fn only_a_reviewed_manifest_under_its_supplied_digest_builds() {
 #[test]
 fn the_compiler_sees_only_explicit_paths() {
     let deps = [PathBuf::from("/b/deps/a-1"), PathBuf::from("/b/deps/b-1")];
-    let lib = Path::new("/usr/lib/nim/lib");
+    let lib = Path::new("/b/nim/lib");
     let gcc = Path::new("/usr/bin/gcc");
-    let kept = nim_flags(SystemCfg::KeptHashed, lib, gcc, &deps);
+    let flags = nim_flags(lib, gcc, &deps);
     for flag in [
         "--noNimblePath",
         "--clearNimblePath",
         "--skipUserCfg:on",
         "--skipParentCfg:on",
         "--skipProjCfg:on",
-        "--lib:/usr/lib/nim/lib",
+        "--lib:/b/nim/lib",
         "--gcc.exe:/usr/bin/gcc",
         "--path:/b/deps/a-1",
         "--path:/b/deps/b-1",
     ] {
-        assert!(kept.iter().any(|f| f == flag), "{flag}");
+        assert!(flags.iter().any(|f| f == flag), "{flag}");
     }
-    assert!(!kept.iter().any(|f| f.starts_with("--skipCfg")));
-    let skipped = nim_flags(SystemCfg::Skipped, lib, gcc, &deps);
-    assert!(skipped.iter().any(|f| f == "--skipCfg:on"));
-    assert!(skipped.iter().any(|f| f == "--path:/usr/lib/nim/lib/pure"));
-    // Pending the director's ruling; every artifact records the mode.
-    assert_eq!(NIM_SYSTEM_CFG.as_str(), "kept-hashed");
+    // The installation configuration is kept (one approach): it is staged,
+    // traced and recorded, never skipped.
+    assert!(!flags.iter().any(|f| f.starts_with("--skipCfg")));
 }

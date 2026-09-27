@@ -85,14 +85,26 @@ separately; nothing picks a version or looks packages up implicitly.
    `status=reviewed`, and supplies the final file's sha256 separately.
 3. The builder refuses a draft, a digest mismatch, or a manifest reviewed for
    another commit. It stages the closure read-only in a private scratch under
-   `--build-dir` and verifies it before and after the build, requires the
-   host toolchain to be the reviewed one before and after, and runs `nim` in
-   bwrap with no network and /home, /opt and /root hidden, with
-   `--noNimblePath --clearNimblePath --skipUserCfg --skipParentCfg
-   --skipProjCfg` and an explicit `--lib`. The Nim installation's own
-   configuration is kept and hashed (`nim_system_cfg=kept-hashed`, recorded in
-   every artifact) pending the director's ruling; `skipped` is the one-line
-   alternative.
+   `--build-dir` and verifies it before and after the build, and requires the
+   host toolchain to be the reviewed one before and after.
+4. The compiler is a verified, read-only STAGED copy of the reviewed Nim
+   installation (`bin/nim`, its installation configuration `config/` and its
+   stdlib `lib/`) in that scratch; nothing reads the live installation, which
+   is hidden inside bwrap together with /home, /opt, /root and /etc/nim, with
+   no network. The installation configuration is kept (one approach): before
+   the build, `config/nim.cfg` (and every file it `@include`s, which must lie
+   inside the staged configuration) and `config/config.nims` are traced as
+   data, and any directive that applies, or cannot be shown not to apply, to
+   this build and names an ambient or unresolved input (a host path, `$HOME`
+   or another environment expansion, `@putenv`, a tool or compiler path, an
+   implicit import, or in config.nims any file, process or environment call
+   or path switch) is refused. `path="$lib/..."` resolves inside the staged
+   stdlib; `nimblepath` entries are recorded as disabled (`--noNimblePath`).
+   User, parent and project configurations stay skipped
+   (`--skipUserCfg --skipParentCfg --skipProjCfg --clearNimblePath`).
+5. Every artifact records the effective nim command line, the staged
+   configuration and stdlib inventory digests (checked against the reviewed
+   manifest) and each configuration file read, with its sha256.
 
 Host-toolchain identity (nim, its standard library and installation config,
 gcc, cc1, as, ld, bwrap, and the owning host packages) is recorded and

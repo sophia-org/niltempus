@@ -24,7 +24,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::bemenu_artifact::{commit_tree, inputs, set_mode};
-use crate::nim_deps::{Manifest, NIM_SYSTEM_CFG};
+use crate::nim_deps::Manifest;
 use crate::product_artifact::{
     Built, TOOLCHAIN_NOTE, build, build_dir, nim_deps_option, options, product,
 };
@@ -52,7 +52,7 @@ const NARTHEX_COMMIT: &str = "narthex.commit";
 const HAGIA_DEPS: &str = "hagia-nim-deps.manifest";
 const NARTHEX_DEPS: &str = "narthex-nim-deps.manifest";
 pub const SCHEMA: &str = "2";
-const KEYS: [&str; 16] = [
+const KEYS: [&str; 23] = [
     "schema",
     "hagia_source_commit",
     "hagia_source_tree",
@@ -67,8 +67,15 @@ const KEYS: [&str; 16] = [
     "default_profile_sha256",
     "hagia_nim_deps_sha256",
     "narthex_nim_deps_sha256",
-    "nim_system_cfg",
     "toolchain_identity",
+    "hagia_nim_config_sha256",
+    "hagia_nim_config_read",
+    "hagia_nim_stdlib_sha256",
+    "hagia_nim_command",
+    "narthex_nim_config_sha256",
+    "narthex_nim_config_read",
+    "narthex_nim_stdlib_sha256",
+    "narthex_nim_command",
 ];
 
 pub fn run(args: &[String]) -> Result<Vec<String>, String> {
@@ -155,6 +162,7 @@ fn write_pair(
 ) -> Result<String, String> {
     let mut digests = Vec::new();
     let mut deps = Vec::new();
+    let mut nim_lines = Vec::new();
     for (name, built, commit_file, deps_file) in [
         (HAGIA, hagia, HAGIA_COMMIT, HAGIA_DEPS),
         (NARTHEX, narthex, NARTHEX_COMMIT, NARTHEX_DEPS),
@@ -165,13 +173,19 @@ fn write_pair(
         std::fs::write(output.join(commit_file), &built.tree.raw).map_err(|e| e.to_string())?;
         set_mode(&copy, 0o555)?;
         set_mode(&output.join(commit_file), 0o444)?;
-        let reviewed = built
+        let nim = built
             .nim_deps
             .as_ref()
             .ok_or_else(|| format!("{name} was built without its reviewed dependencies"))?;
-        std::fs::write(output.join(deps_file), &reviewed.text).map_err(|e| e.to_string())?;
+        std::fs::write(output.join(deps_file), &nim.reviewed.text).map_err(|e| e.to_string())?;
         set_mode(&output.join(deps_file), 0o444)?;
-        deps.push(reviewed.sha256.clone());
+        deps.push(nim.reviewed.sha256.clone());
+        nim_lines.extend([
+            format!("{name}_nim_config_sha256={}", nim.config_inventory_sha256),
+            format!("{name}_nim_config_read={}", nim.config_read()),
+            format!("{name}_nim_stdlib_sha256={}", nim.stdlib_inventory_sha256),
+            format!("{name}_nim_command={}", nim.command_line()),
+        ]);
     }
     std::fs::write(output.join(PROFILE), profile).map_err(|e| e.to_string())?;
     set_mode(&output.join(PROFILE), 0o444)?;
@@ -190,9 +204,11 @@ fn write_pair(
         format!("default_profile_sha256={}", sha256(profile)),
         format!("hagia_nim_deps_sha256={}", deps[0]),
         format!("narthex_nim_deps_sha256={}", deps[1]),
-        format!("nim_system_cfg={}", NIM_SYSTEM_CFG.as_str()),
         format!("toolchain_identity={TOOLCHAIN_NOTE}"),
     ]
+    .into_iter()
+    .chain(nim_lines)
+    .collect::<Vec<_>>()
     .join("\n")
         + "\n";
     std::fs::write(output.join(MANIFEST), &manifest).map_err(|e| e.to_string())?;
@@ -311,6 +327,26 @@ pub fn verify(
         let deps = Manifest::parse(
             &String::from_utf8(deps_bytes).map_err(|_| format!("{deps_file} is not UTF-8"))?,
         )?;
+        // The staged installation the half was built from is the reviewed
+        // one: its configuration and stdlib identities are the manifest's.
+        let tree_digest = |role: &str| {
+            deps.toolchain
+                .iter()
+                .find(|r| r.kind == "tree" && r.fields[0].1 == role)
+                .map(|r| r.fields[3].1.clone())
+        };
+        for (key, role) in [("config", "nim-config"), ("stdlib", "nim-lib")] {
+            let key = format!("{name}_nim_{key}_sha256");
+            if manifest.get(key.as_str()) != tree_digest(role).as_ref() {
+                return Err(format!("WM pair manifest {key} is not the reviewed {role}"));
+            }
+        }
+        for key in ["config_read", "command"] {
+            let key = format!("{name}_nim_{key}");
+            if manifest.get(key.as_str()).is_none_or(String::is_empty) {
+                return Err(format!("WM pair manifest {key} is empty"));
+            }
+        }
         if deps.status != "reviewed" || deps.product != name || deps.source_commit != commits[index]
         {
             return Err(format!(
@@ -334,9 +370,6 @@ pub fn verify(
         if manifest.get(key).map(String::as_str) != Some(expected) {
             return Err(format!("WM pair manifest {key} is not the bound value"));
         }
-    }
-    if !["kept-hashed", "skipped"].contains(&manifest["nim_system_cfg"].as_str()) {
-        return Err("WM pair manifest nim_system_cfg is not a known mode".into());
     }
     let (narthex, narthex_sha256, narthex_nim_deps_sha256) = derived.pop().expect("two halves");
     let (hagia, hagia_sha256, hagia_nim_deps_sha256) = derived.pop().expect("two halves");

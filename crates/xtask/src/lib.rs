@@ -10,6 +10,7 @@ pub mod direct_scanout_gate;
 pub mod dock;
 pub mod git_tree;
 pub mod nim_deps;
+pub mod nim_install;
 pub mod package_desktop;
 pub mod physical_inputs;
 pub mod pins;
