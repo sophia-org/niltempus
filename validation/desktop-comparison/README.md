@@ -159,7 +159,7 @@ populations and always end in `verdict=none`.
 Use absolute paths when launching sessions:
 
 - Sophia: set `SOPHIA_DESKTOP_PROFILE` to `profiles/hagia.kdl`; do not allow
-  the installed launcher to fall back to `~/.config/hagia/config.kdl`.
+  the installed launcher to fall back to the operator's own WM profile.
 - niri: launch with `niri --config profiles/niri.kdl` (or the equivalent
   `NIRI_CONFIG` setting). Validate it with
   `niri validate -c profiles/niri.kdl`.
