@@ -163,7 +163,11 @@ func verifyRelease(root string) (Manifest, error) {
 	}
 	executables := []string{"target/release/sophia", "target/release/hagia", "target/release/narthex", "target/release/lom", "target/release/bemenu-sophia", "bin/sophia-niltempus-desktop-session", "bin/sophia-hagia-session", "tools/install_live_session.sh", "tools/activate_live_session_release.sh", "tools/verify_packaged_policy.sh"}
 	files := []string{"share/sophia-niltempus-desktop/desktop.kdl", "share/wayland-sessions/" + desktopFile}
-	if manifest.Plan.Integration != nil {
+	bound, err := toolingBinding(manifest.Plan)
+	if err != nil {
+		return manifest, err
+	}
+	if bound != nil {
 		if err := verifyIntegrationRelease(metadata, manifest.Plan, actual); err != nil {
 			return manifest, err
 		}

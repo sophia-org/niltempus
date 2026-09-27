@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-const help = `sophia-niltempus-desktop [--config FILE] COMMAND
+const help = `niltempus [--config FILE] COMMAND
 
 plan              Inspect local source refs/signatures (default; no git pull)
 build             Build isolated snapshots and validate a full release
@@ -19,7 +19,9 @@ rollback          Select the previous desktop release (sudo)
 prepare-hagia     Build/preflight only Hagia into its user-owned executable path
 reload-hagia      Prepare Hagia, then restart it through Sophia control IPC
 
-Chezmoi owns the installer and settings. reload-hagia restarts only the WM.
+The niltempus repository owns the installer and desktop tooling.
+Existing sophia-niltempus-desktop configuration and state paths are retained.
+reload-hagia restarts only the WM.
 `
 
 func printJSON(value any) error {
@@ -131,7 +133,7 @@ func run(args []string) error {
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "sophia-niltempus-desktop:", err)
+		fmt.Fprintln(os.Stderr, "niltempus:", err)
 		os.Exit(1)
 	}
 }

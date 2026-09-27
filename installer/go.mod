@@ -1,4 +1,4 @@
-module sophia-niltempus-desktop
+module github.com/sophia-org/niltempus/installer
 
 go 1.25.5
 

@@ -1,6 +1,7 @@
-# Sophia niltempus Desktop
+# niltempus installer
 
-Personal Go installer and release assembler, maintained through chezmoi.
+Go installer and release assembler for the niltempus desktop. Its source lives
+alongside the Rust packaging and qualification tools in this repository.
 Sophia owns the compositor and session mechanisms; Hagia owns WM policy; Lom
 and Bemenu provide this desktop's panel and launcher. Narthex is packaged for
 Sophia's existing shell support. Desktop composition belongs here, outside
@@ -11,7 +12,7 @@ those repositories.
 For the next session, run this as your normal user:
 
 ```sh
-~/sophia-niltempus-desktop install
+niltempus install
 ```
 
 It resolves the configured local refs, builds and validates the stack (or
@@ -32,12 +33,12 @@ the IPC entry; their original files and checksums remain unchanged.
 The individual steps remain available:
 
 ```sh
-~/sophia-niltempus-desktop plan
-~/sophia-niltempus-desktop build
-~/sophia-niltempus-desktop verify /path/printed/by/build
-~/sophia-niltempus-desktop install /path/printed/by/build
-~/sophia-niltempus-desktop status
-~/sophia-niltempus-desktop rollback
+niltempus plan
+niltempus build
+niltempus verify /path/printed/by/build
+niltempus install /path/printed/by/build
+niltempus status
+niltempus rollback
 ```
 
 `plan` is the default and reads local refs only. It never fetches, pulls,
@@ -47,11 +48,11 @@ sources are wanted. Change a `reference` to an exact SHA to hold that component.
 Each plan records the resolved commits and Git signature status (`G`: valid
 trusted signature; `N`: unsigned). Present signatures must verify. Unsigned
 commits remain visible as such; currently Lom master has an unsigned docs tip.
-The external desktop packager requires trusted signatures for its own source,
+The niltempus packager requires trusted signatures for its own source,
 Sophia, Hagia and Narthex.
 
 `build` checks out those exact commits in private clones. The signed
-`sophia-desktop-integration` tool prepares the WM pair and packages Sophia;
+niltempus Rust tool prepares the WM pair and packages Sophia;
 the personal assembler adds Lom, Bemenu and the two login profiles. Changed or
 unexpected cached inputs are refused, never reset over. Bemenu uses a fresh checkout because Make
 does not track its embedded commit's compiler flags. Every attempt records the
@@ -70,16 +71,19 @@ devices, display sockets, runtime sockets and inherited Sophia variables hidden.
 The repositories' own build dependencies must be available; Cargo builds are
 offline. Build does not install, switch a release, start a session or probe GPUs.
 
-The explicit `integration` repository entry selects the external packaging
-tool. Its committed Sophia pin must equal the selected Sophia commit. Provision
-that integration revision explicitly before planning; its `.provision/accepted`
+The explicit `niltempus` repository entry selects both this installer and the
+packaging tools. The retired `integration` setting is refused for new plans.
+The installer's Go build information must identify the same clean Git revision;
+an independently built or dirty installer cannot plan a release.
+The committed Sophia pin must equal the selected Sophia commit. Provision
+that niltempus revision explicitly before planning; its `.provision/accepted`
 must match the committed lockfile and a private Cargo home outside the source
 trees. The plan records that home, lockfile digest and signed tool commit.
 Build revalidates the acceptance and runs the tool's pin/provision checks;
 it never downloads dependencies or provisions a cache implicitly.
 
-Packaging and activation scripts come from that integration revision.
-The outer manifest records the five product commits, the integration binding,
+Packaging and activation scripts come from that niltempus revision.
+The outer manifest records the five product commits, the niltempus binding,
 the source profile hash, the
 installer executable hash, and every packaged file's hash and permissions.
 Release IDs identify these inputs, not a claim of bit-for-bit reproducible
@@ -142,7 +146,7 @@ the prepared personal binary, with no temporary release swap.
 For WM source changes, run:
 
 ```sh
-~/sophia-niltempus-desktop reload-hagia
+niltempus reload-hagia
 ```
 
 This builds only committed Hagia source, validates it against installed Sophia
@@ -175,21 +179,29 @@ entry. Subsequent Hagia preparation and IPC reloads require no sudo. Tests use
 private processes and a CLI fixture for executable replacement, and private
 mounts for the real installation/rollback scripts. Live acceptance is separate.
 
-## Chezmoi and development
+## Building and contributing
 
-Chezmoi tracks only the entrypoint, settings and source:
+Build from a clean, signed niltempus revision. Go 1.25.5 or newer is required.
+Provision the pinned Go dependencies explicitly first; the build below refuses
+network downloads. Put the binary outside the checkout so it stays clean:
 
-```text
-~/sophia-niltempus-desktop
-~/.config/sophia-niltempus-desktop/config.json
-~/.local/share/sophia-niltempus-desktop/
+```sh
+cd /path/to/niltempus/installer
+go mod download
+mkdir -p "$HOME/.local/bin"
+GOPROXY=off GOSUMDB=off go build -mod=readonly -trimpath -buildvcs=true \
+    -o "$HOME/.local/bin/niltempus" .
 ```
 
-The entrypoint uses Go's build cache and pinned `go.mod`/`go.sum` with
-`-mod=readonly`, `-trimpath` and `-buildvcs=false`. Go 1.25.5 or newer is required.
-The first invocation may download the pinned Go dependency. It does not require
-Rust to compile the installer itself; building Sophia and Lom still needs Rust.
-There are no chezmoi install hooks.
+The config, cache, state and system release paths retain their historical
+names so existing installations and rollback records remain usable. Chezmoi may
+manage personal settings; it no longer owns the installer source or launcher.
+Rust is not required to compile the Go installer itself.
+
+Start from [examples/config.json](examples/config.json), replace every source
+path and revision, and supply your own Sophia profile and application choices.
+This assembles niltempus's selected components; Sophia and its independent C and
+Rust SDK repositories remain usable with other desktops.
 
 Caches live in `~/.cache/sophia-niltempus-desktop`; clones, logs and uninstalled
 release artifacts live in `~/.local/state/sophia-niltempus-desktop`, except the
@@ -197,7 +209,7 @@ private source clones under the cache's `sources` directory. XDG base
 directory overrides apply. These generated files are not tracked by chezmoi.
 
 ```sh
-cd ~/.local/share/sophia-niltempus-desktop
+cd /path/to/niltempus/installer
 go test ./...
 go vet ./...
 ```
@@ -220,17 +232,12 @@ makes the host filesystem read-only, hides devices, and substitutes an
 unprivileged sudo fixture. It cannot install into the host's `/opt`:
 
 ```sh
-go build -mod=readonly -trimpath -buildvcs=false -o ~/.cache/sophia-niltempus-desktop/installer .
+go build -mod=readonly -trimpath -buildvcs=true -o ~/.cache/sophia-niltempus-desktop/installer .
 DESKTOP_INSTALLER_TEST_RELEASE=/path/printed/by/build \
 DESKTOP_INSTALLER_TEST_BINARY="$HOME/.cache/sophia-niltempus-desktop/installer" \
     go test -run '^TestInstallAndRollbackInPrivateMounts$' -v
 ```
 
-After editing, add only these paths to chezmoi; avoid importing unrelated drift
-from an existing personal desktop profile:
-
-```sh
-chezmoi add ~/sophia-niltempus-desktop \
-    ~/.config/sophia-niltempus-desktop/config.json \
-    ~/.local/share/sophia-niltempus-desktop
-```
+Commit source changes here. Keep personal configuration, credentials, provisioned
+caches and built releases out of Git. The build identity check is intentional:
+after changing this installer, commit it and rebuild before planning a release.

@@ -1,0 +1,14 @@
+{
+  "profile": "~/.config/sophia/desktop.kdl",
+  "niltempus": {
+    "path": "/path/to/niltempus",
+    "reference": "REPLACE_WITH_SIGNED_NILTEMPUS_COMMIT"
+  },
+  "repositories": {
+    "sophia": {"path": "/path/to/sophia", "reference": "REPLACE_WITH_PINNED_SOPHIA_COMMIT"},
+    "hagia": {"path": "/path/to/hagia", "reference": "REPLACE_WITH_SIGNED_HAGIA_COMMIT"},
+    "narthex": {"path": "/path/to/narthex", "reference": "REPLACE_WITH_SIGNED_NARTHEX_COMMIT"},
+    "lom": {"path": "/path/to/lom", "reference": "REPLACE_WITH_LOM_COMMIT"},
+    "bemenu": {"path": "/path/to/bemenu", "reference": "REPLACE_WITH_BEMENU_COMMIT"}
+  }
+}

@@ -71,8 +71,8 @@ func buildRelease(plan Plan, loc Locations) (string, error) {
 		_, err = verifyRelease(destination)
 		return destination, err
 	}
-	if plan.Integration == nil {
-		return "", fmt.Errorf("new builds require the external integration packager; rerun plan")
+	if plan.Niltempus == nil || plan.Integration != nil {
+		return "", fmt.Errorf("new builds require the single niltempus source; the external integration packager setting is retired; rerun plan")
 	}
 	profile, err := os.ReadFile(plan.Profile)
 	if err != nil {
@@ -106,7 +106,7 @@ func buildRelease(plan Plan, loc Locations) (string, error) {
 		}
 		roots[name] = root
 	}
-	integrationRoot, err := buildSource("integration", plan.Integration.Source, loc.Cache, work)
+	integrationRoot, err := buildSource("niltempus", plan.Niltempus.Source, loc.Cache, work)
 	if err != nil {
 		return "", err
 	}
@@ -196,7 +196,7 @@ func buildRelease(plan Plan, loc Locations) (string, error) {
 	for name, root := range roots {
 		source := plan.Sources[name]
 		if name == "integration" {
-			source = plan.Integration.Source
+			source = plan.Niltempus.Source
 		}
 		if head, err := git(root, "rev-parse", "HEAD"); err != nil || head != source.Commit {
 			return "", fmt.Errorf("build source identity changed: %s", name)

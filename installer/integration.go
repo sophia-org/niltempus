@@ -11,6 +11,18 @@ import (
 
 const sophiaRepositoryURL = "https://github.com/sophia-org/sophia.git"
 
+// Old integration bindings remain readable for rollback. A release can never
+// name two competing tooling sources, even if their fields happen to match.
+func toolingBinding(plan Plan) (*IntegrationPlan, error) {
+	if plan.Niltempus != nil && plan.Integration != nil {
+		return nil, fmt.Errorf("release names both niltempus and historical integration sources")
+	}
+	if plan.Niltempus != nil {
+		return plan.Niltempus, nil
+	}
+	return plan.Integration, nil
+}
+
 // This is an explicit provisioning input, never a reason to fetch during build.
 // Pin and lock bytes come from the selected commit, not the user's worktree.
 func planIntegration(repo Repository, sophia Source) (IntegrationPlan, error) {
@@ -126,9 +138,12 @@ func integrationHome(home string, sources ...string) error {
 // Revalidate the accepted input before writing the private clone's marker. This
 // carries an existing acceptance, not a new provisioning decision.
 func carryIntegrationProvision(plan Plan, root string) error {
-	bound := plan.Integration
-	if bound == nil {
-		return fmt.Errorf("new builds require a planned external integration packager")
+	bound, err := toolingBinding(plan)
+	if err != nil {
+		return err
+	}
+	if bound == nil || plan.Niltempus == nil {
+		return fmt.Errorf("new builds require the single niltempus installer and tooling source")
 	}
 	again, err := planIntegration(Repository{bound.Source.Path, bound.Source.Commit}, plan.Sources["sophia"])
 	if err != nil {
@@ -149,7 +164,7 @@ func packageDesktop(plan Plan, roots map[string]string, work string) (string, er
 	if err := carryIntegrationProvision(plan, root); err != nil {
 		return "", err
 	}
-	env := map[string]string{"CARGO_HOME": plan.Integration.CargoHome, "CARGO_TARGET_DIR": filepath.Join(work, "integration-bootstrap")}
+	env := map[string]string{"CARGO_HOME": plan.Niltempus.CargoHome, "CARGO_TARGET_DIR": filepath.Join(work, "integration-bootstrap")}
 	if err := logged(isolated(root, env, "cargo", "build", "--offline", "--locked", "--jobs", "2", "-p", "xtask", "--bin", "xtask"), filepath.Join(work, "build-integration.log")); err != nil {
 		return "", err
 	}
@@ -191,10 +206,17 @@ func packageDesktop(plan Plan, roots map[string]string, work string) (string, er
 }
 
 func verifyIntegrationRelease(metadata []byte, plan Plan, files map[string]FileRecord) error {
+	bound, err := toolingBinding(plan)
+	if err != nil {
+		return err
+	}
+	if bound == nil {
+		return fmt.Errorf("release has no desktop tooling binding")
+	}
 	expected := map[string]string{
 		"schema":                       "6",
 		"commit":                       plan.Sources["sophia"].Commit,
-		"integration_commit":           plan.Integration.Source.Commit,
+		"integration_commit":           bound.Source.Commit,
 		"hagia_source_commit":          plan.Sources["hagia"].Commit,
 		"narthex_source_commit":        plan.Sources["narthex"].Commit,
 		"hagia_binary_sha256":          files["target/release/hagia"].SHA256,

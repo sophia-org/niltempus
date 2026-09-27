@@ -22,6 +22,7 @@ type Config struct {
 	Profile      string                `json:"profile"`
 	Repositories map[string]Repository `json:"repositories"`
 	Integration  Repository            `json:"integration"`
+	Niltempus    Repository            `json:"niltempus"`
 }
 
 type Source struct {
@@ -38,10 +39,12 @@ type Plan struct {
 	ProfileSHA256   string            `json:"profile_sha256"`
 	InstallerSHA256 string            `json:"installer_sha256"`
 	Integration     *IntegrationPlan  `json:"integration,omitempty"`
+	Niltempus       *IntegrationPlan  `json:"niltempus,omitempty"`
 }
 
 // Omitted on historical plans so their release identities stay unchanged.
-// New builds require the signed external packager and its accepted offline cache.
+// Integration is retained only to verify historical plans. New builds bind
+// the installer and packaging tools to the same signed niltempus revision.
 type IntegrationPlan struct {
 	Source          Source `json:"source"`
 	CargoHome       string `json:"cargo_home"`

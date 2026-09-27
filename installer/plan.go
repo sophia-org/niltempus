@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 )
 
@@ -42,13 +43,48 @@ func createPlan(loc Locations) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	integration, err := planIntegration(config.Integration, plan.Sources["sophia"])
+	repo, err := niltempusRepository(config)
 	if err != nil {
-		return Plan{}, fmt.Errorf("desktop integration: %w", err)
+		return Plan{}, err
 	}
-	plan.Integration = &integration
+	integration, err := planIntegration(repo, plan.Sources["sophia"])
+	if err != nil {
+		return Plan{}, fmt.Errorf("niltempus tooling: %w", err)
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return Plan{}, fmt.Errorf("niltempus installer has no Go build information")
+	}
+	if err := installerRevision(info, integration.Source.Commit); err != nil {
+		return Plan{}, err
+	}
+	plan.Niltempus = &integration
 	plan.ReleaseID = releaseID(plan)
 	return plan, nil
+}
+
+func niltempusRepository(config Config) (Repository, error) {
+	if config.Integration != (Repository{}) {
+		return Repository{}, fmt.Errorf("the integration repository setting is retired; configure niltempus as the single installer and tooling source")
+	}
+	if config.Niltempus.Path == "" || config.Niltempus.Reference == "" {
+		return Repository{}, fmt.Errorf("configure the niltempus repository path and reference explicitly")
+	}
+	return config.Niltempus, nil
+}
+
+func installerRevision(info *debug.BuildInfo, expected string) error {
+	settings := map[string]string{}
+	for _, setting := range info.Settings {
+		if _, exists := settings[setting.Key]; exists {
+			return fmt.Errorf("duplicate installer build setting: %s", setting.Key)
+		}
+		settings[setting.Key] = setting.Value
+	}
+	if settings["vcs"] != "git" || settings["vcs.revision"] != expected || settings["vcs.modified"] != "false" {
+		return fmt.Errorf("build the installer from the clean selected niltempus revision %s with go build -buildvcs=true", expected)
+	}
+	return nil
 }
 
 func createSourcePlan(config Config) (Plan, error) {

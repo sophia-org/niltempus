@@ -133,10 +133,15 @@ func TestPersonalWMPreparationDoesNotRequireIntegrationProvisioning(t *testing.T
 }
 
 func TestExternalReleaseRequiresItsToolsAndMatchingProvenance(t *testing.T) {
-	for _, damage := range []string{"", "missing tool", "wrong integration", "missing source", "wrong pair digest"} {
+	for _, damage := range []string{"", "niltempus binding", "ambiguous binding", "missing tool", "wrong integration", "missing source", "wrong pair digest"} {
 		t.Run(damage, func(t *testing.T) {
 			root, plan := fixtureRelease(t)
 			plan.Integration = &IntegrationPlan{Source: Source{Commit: "packager"}, CargoHome: "/cache", CargoLockSHA256: "lock"}
+			if damage == "niltempus binding" {
+				plan.Niltempus, plan.Integration = plan.Integration, nil
+			} else if damage == "ambiguous binding" {
+				plan.Niltempus = plan.Integration
+			}
 			plan.Sources = map[string]Source{"sophia": {Commit: "sophia"}, "hagia": {Commit: "hagia"}, "narthex": {Commit: "narthex"}}
 			plan.ReleaseID = releaseID(plan)
 			for _, path := range []string{"target/release/sophia-integration-xtask", "target/release/active-session-preflight", "tools/session/run_desktop_session.sh", "bin/sophia-session"} {
@@ -171,7 +176,7 @@ func TestExternalReleaseRequiresItsToolsAndMatchingProvenance(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = verifyRelease(root)
-			if (err != nil) != (damage != "") {
+			if (err != nil) != (damage != "" && damage != "niltempus binding") {
 				t.Fatalf("verify %s: %v", damage, err)
 			}
 		})
