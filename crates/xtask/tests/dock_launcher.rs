@@ -39,7 +39,11 @@ fn git(directory: &Path, args: &[&str]) -> String {
         .args(args)
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8(out.stdout).unwrap()
 }
 
@@ -64,11 +68,20 @@ fn artifact(directory: &Path, kind: &str, sdk_manifest: &Path) -> Identity {
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    child.stdin.take().unwrap().write_all(raw.as_bytes()).unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(raw.as_bytes())
+        .unwrap();
     let out = child.wait_with_output().unwrap();
     assert!(out.status.success());
     let commit = String::from_utf8(out.stdout).unwrap().trim().to_owned();
-    let binary = if kind == "bemenu" { "bemenu-sophia" } else { kind };
+    let binary = if kind == "bemenu" {
+        "bemenu-sophia"
+    } else {
+        kind
+    };
     let body = format!("fixture {kind} binary\n");
     fs::write(directory.join(binary), &body).unwrap();
     fs::write(directory.join("source.commit"), &raw).unwrap();
@@ -339,10 +352,19 @@ fn dock_launcher_uses_three_component_profile_and_refuses_failed_or_missing_evid
     let manifest = fs::read_to_string(f.directory.join("empty/identity.manifest")).unwrap();
     assert!(manifest.contains("provlita_binary_sha256="));
     assert!(manifest.contains("latency_acceptance=NOT_RUN"));
-    let provlita = &f.identities.iter().find(|(k, _)| *k == "provlita").unwrap().1;
+    let provlita = &f
+        .identities
+        .iter()
+        .find(|(k, _)| *k == "provlita")
+        .unwrap()
+        .1;
     assert!(manifest.contains(&format!("provlita_commit={}", provlita.commit)));
     // Builds and staged Sophia files stay in the private build directory.
-    assert!(f.build.join("sophia-tree/tools/run_sophia_session.sh").is_file());
+    assert!(
+        f.build
+            .join("sophia-tree/tools/run_sophia_session.sh")
+            .is_file()
+    );
     assert!(!f.sophia.join("target").exists() && !f.root.join("target").exists());
     assert!(
         !f.run("empty", "0", "0").status.success(),

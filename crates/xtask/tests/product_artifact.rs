@@ -11,9 +11,15 @@ fn args(values: &[&str]) -> Vec<String> {
 fn every_product_has_one_recipe() {
     let names = PRODUCTS.iter().map(|p| p.name).collect::<Vec<_>>();
     assert_eq!(names, ["lom", "provlita", "hagia"]);
-    assert_eq!(product("lom").unwrap().config, Some("examples/minimal/live-shell.kdl"));
+    assert_eq!(
+        product("lom").unwrap().config,
+        Some("examples/minimal/live-shell.kdl")
+    );
     assert_eq!(product("hagia").unwrap().config, None);
-    assert!(product("bemenu").is_err(), "Bemenu has its own SDK-pinned preparer");
+    assert!(
+        product("bemenu").is_err(),
+        "Bemenu has its own SDK-pinned preparer"
+    );
 }
 
 #[test]

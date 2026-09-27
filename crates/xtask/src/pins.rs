@@ -217,9 +217,8 @@ fn lock_sha256(repo: &Path) -> Result<String, String> {
 /// for exactly this pin and this Cargo.lock. Gates run it in addition to
 /// check-pins.
 pub fn check_provision(repo: &Path) -> Result<Vec<String>, String> {
-    let marker = std::fs::read(repo.join(PROVISION_MARKER)).map_err(|e| {
-        format!("{PROVISION_MARKER}: {e}; run tools/provision.sh")
-    })?;
+    let marker = std::fs::read(repo.join(PROVISION_MARKER))
+        .map_err(|e| format!("{PROVISION_MARKER}: {e}; run tools/provision.sh"))?;
     let lock = lock_sha256(repo)?;
     let home = std::env::var("CARGO_HOME")
         .map_err(|_| "CARGO_HOME must name the provisioned private CARGO_HOME".to_owned())?;
@@ -243,8 +242,11 @@ pub fn check_marker(text: &str, lock_sha256: &str, cargo_home: Option<&str>) -> 
         format!("cargo_lock_sha256={lock_sha256}"),
     ];
     let recorded = match lines.as_slice() {
-        [url, rev, lock, home] if [*url, *rev, *lock] == expected.each_ref().map(String::as_str) => {
-            home.strip_prefix("cargo_home=").filter(|home| home.starts_with('/'))
+        [url, rev, lock, home]
+            if [*url, *rev, *lock] == expected.each_ref().map(String::as_str) =>
+        {
+            home.strip_prefix("cargo_home=")
+                .filter(|home| home.starts_with('/'))
         }
         _ => None,
     };

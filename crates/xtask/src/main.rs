@@ -33,9 +33,10 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
         Some("prepare-product-artifact") => xtask::product_artifact::run(&arguments[1..]),
         // Moved from Sophia crates/xtask/src/main.rs:53-70 at 9fcaec782.
         Some("dock") => match &arguments[1..] {
-            [command, paths @ ..] if command == "profile" => {
-                Ok(xtask::dock::profile(paths)?.lines().map(str::to_owned).collect())
-            }
+            [command, paths @ ..] if command == "profile" => Ok(xtask::dock::profile(paths)?
+                .lines()
+                .map(str::to_owned)
+                .collect()),
             [command, path] if command == "verify" => {
                 use std::io::Read;
                 let mut text = String::new();

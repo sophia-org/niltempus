@@ -19,9 +19,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use crate::bemenu_artifact::{
-    SignedTree, inputs, set_mode, signed_tree, tail, wait_logged,
-};
+use crate::bemenu_artifact::{SignedTree, inputs, set_mode, signed_tree, tail, wait_logged};
 use crate::{read, sha256};
 
 const USAGE: &str = "usage: cargo xtask prepare-product-artifact <lom|provlita|hagia> \
@@ -96,10 +94,7 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
         Some(path) => {
             let config = tree_dir.join(path);
             if !std::fs::symlink_metadata(&config).is_ok_and(|m| m.is_file()) {
-                return Err(format!(
-                    "{} {commit} has no regular {path}",
-                    product.name
-                ));
+                return Err(format!("{} {commit} has no regular {path}", product.name));
             }
             Some(read(&config)?)
         }
@@ -167,10 +162,7 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
                 format!("source_tree={tree}"),
                 "signature_status=G".to_owned(),
                 format!("signer_fingerprint={signer}"),
-                format!(
-                    "config={}",
-                    if config.is_some() { CONFIG } else { "none" }
-                ),
+                format!("config={}", if config.is_some() { CONFIG } else { "none" }),
                 format!("config_sha256={config_sha256}"),
             ]
             .join("\n")
