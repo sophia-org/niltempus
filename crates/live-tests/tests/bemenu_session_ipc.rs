@@ -3,7 +3,9 @@
 // 807-886) at d20faf3709ae21d94491f7a628ac9a4a86619cdf, unchanged since
 // 9fcaec782 (Sophia rule 13). Their assertions are verbatim; only the
 // executable now comes from a bound, prepared artifact instead of
-// SOPHIA_TEST_BEMENU, and the feature gate is the dependency's feature.
+// SOPHIA_TEST_BEMENU (so the two `.into()` conversions from that OsString
+// are dropped: the bound path is already a PathBuf), and the feature gate is
+// the dependency's feature.
 //! LIVE smoke (G2 U1-U3): the real Bemenu through Sophia's Session-layer
 //! owners over the current IPC socket wire (the default component transport):
 //! the production ShellComponentLaunch plan and protection, the aggregate
@@ -130,7 +132,7 @@ fn protected_bemenu(
         sophia_config::ShellComponentConfig {
             id: "menu".into(),
             role: ShellComponentRole::ApplicationLauncher,
-            executable: executable.into(),
+            executable,
             config: None,
             reservation: None,
             gpu: sophia_config::ShellGpuMode::Denied,
@@ -212,7 +214,7 @@ fn joined_bemenu_evidence_requires_exact_current_negotiation() {
     let selection = sophia_config::ShellComponentConfig {
         id: "menu".into(),
         role: ShellComponentRole::ApplicationLauncher,
-        executable: binary.into(),
+        executable: binary,
         config: None,
         reservation: None,
         gpu: sophia_config::ShellGpuMode::Denied,
