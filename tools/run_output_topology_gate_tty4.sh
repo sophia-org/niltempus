@@ -129,11 +129,15 @@ if (( BUILD_HAGIA )); then
         || "$(git -C "$HAGIA_ROOT" rev-parse HEAD)" != "$HAGIA_SOURCE_COMMIT" ]]; then
         refuse "Hagia source identity changed while the physical inputs were prepared."
     fi
+    git -C "$HAGIA_ROOT" verify-commit "$HAGIA_SOURCE_COMMIT" >/dev/null 2>&1 ||
+        refuse "Hagia HEAD signature no longer verifies after the physical inputs were prepared."
 fi
 if [[ -n "$(git -C "$SOPHIA_SOURCE" status --porcelain --untracked-files=all)" \
     || "$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)" != "$source_commit" ]]; then
     refuse "Sophia source identity changed while the physical inputs were prepared."
 fi
+git -C "$SOPHIA_SOURCE" verify-commit "$source_commit" >/dev/null 2>&1 ||
+    refuse "Sophia HEAD signature no longer verifies after the physical inputs were prepared."
 SOPHIA_ROOT="${PI[SOPHIA_ROOT]}"
 export SOPHIA_ROOT
 

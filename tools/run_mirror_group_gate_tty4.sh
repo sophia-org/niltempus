@@ -93,7 +93,7 @@ kernel_after="$diagnostic_tmp/kernel-after.log"
 kernel_delta="$diagnostic_tmp/kernel-delta.log"
 trap 'rm -rf -- "$diagnostic_tmp"' EXIT
 
-echo "Preparing the exact physical-gate binary..."
+echo "Building..."
 physical_inputs_prepare --sophia-features=atomic-scanout-live
 physical_inputs_bound "$integration_commit"
 if [[ "${PI[SOPHIA_COMMIT]}" != "$source_commit" ]]; then
@@ -103,6 +103,10 @@ fi
 if [[ -n "$(git -C "$SOPHIA_SOURCE" status --porcelain --untracked-files=all)" ]] \
     || [[ "$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)" != "$source_commit" ]]; then
     echo "Sophia source identity changed while the physical inputs were prepared." >&2
+    exit 2
+fi
+if ! git -C "$SOPHIA_SOURCE" verify-commit "$source_commit" >/dev/null 2>&1; then
+    echo "Sophia HEAD signature no longer verifies after the physical inputs were prepared." >&2
     exit 2
 fi
 SOPHIA_ROOT="${PI[SOPHIA_ROOT]}"

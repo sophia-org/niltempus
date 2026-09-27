@@ -197,6 +197,10 @@ if [[ -n "$(git -C "$SOPHIA_SOURCE" status --porcelain --untracked-files=all)" \
     echo "Sophia source identity changed while the physical inputs were prepared." >&2
     exit 2
 fi
+git -C "$SOPHIA_SOURCE" verify-commit "$source_commit" >/dev/null 2>&1 || {
+    echo "Sophia HEAD signature no longer verifies after the physical inputs were prepared." >&2
+    exit 2
+}
 # Sophia's retained proof configuration and DRM-master guard: the staged
 # pinned tree.
 SOPHIA_ROOT="${PI[SOPHIA_ROOT]}"

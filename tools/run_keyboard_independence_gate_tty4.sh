@@ -73,6 +73,10 @@ if [[ -n "$(git -C "$SOPHIA_SOURCE" status --short)" \
     echo "Sophia source identity changed while the physical inputs were prepared." >&2
     exit 1
 fi
+git -C "$SOPHIA_SOURCE" verify-commit "$sophia_commit" >/dev/null 2>&1 || {
+    echo "Sophia signature no longer verifies after the inputs were prepared." >&2
+    exit 1
+}
 
 sophia_sha256="$(sha256sum "$sophia_bin" | awk '{ print $1 }')"
 echo "Sophia binary: $sophia_sha256"
