@@ -166,9 +166,13 @@ pub fn run(wire: Wire) {
     f.close(8);
     // While the renderer still holds the lease, the peer's retired bytes stay
     // charged as retiring and the closed owners cannot settle.
-    until(&mut f, &mut peer, start, "opening 8 retiring under a held lease", |f| {
-        f.retiring() > 0
-    });
+    until(
+        &mut f,
+        &mut peer,
+        start,
+        "opening 8 retiring under a held lease",
+        |f| f.retiring() > 0,
+    );
     assert!(!f.settled(8), "closed owners settled while a lease is held");
     f.release();
     until(&mut f, &mut peer, start, "opening 8 settled", |f| {
@@ -208,7 +212,10 @@ pub fn run(wire: Wire) {
     assert_eq!(announced, [negotiated.as_str()], "{stderr}");
     assert!(!stderr.contains("status=failed"), "{stderr}");
     if wire == Wire::Ipc {
-        assert!(!stderr.contains("wire=9p"), "IPC gate reached the file wire: {stderr}");
+        assert!(
+            !stderr.contains("wire=9p"),
+            "IPC gate reached the file wire: {stderr}"
+        );
     }
     assert_eq!(
         lines.last(),

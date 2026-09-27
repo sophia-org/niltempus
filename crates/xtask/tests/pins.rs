@@ -114,11 +114,9 @@ fn manifest_revision_or_redirection_drift_is_refused() {
     // A member cannot name Sophia itself; it inherits the root pin.
     let member = "[dev-dependencies]\nsophia-runtime = { git = \"https://github.com/sophia-org/sophia.git\", rev = \"9fcaec782ce4fe9978568c0466ee17a78b3d4571\" }\n";
     assert!(check_manifest("member", member, false).is_err());
-    let features_path =
-        "[dev-dependencies]\nsophia-shell-client = { workspace = true, features = [\"ipc-compat\"], path = \"../x\" }\n";
+    let features_path = "[dev-dependencies]\nsophia-shell-client = { workspace = true, features = [\"ipc-compat\"], path = \"../x\" }\n";
     assert!(check_manifest("member", features_path, false).is_err());
-    let features_ok =
-        "[dev-dependencies]\nsophia-shell-client = { workspace = true, features = [\"ipc-compat\"] }\n";
+    let features_ok = "[dev-dependencies]\nsophia-shell-client = { workspace = true, features = [\"ipc-compat\"] }\n";
     check_manifest("member", features_ok, false).unwrap();
     let absolute = "[dependencies]\nhelper = { path = \"/home/user/helper\" }\n";
     assert!(check_manifest("member", absolute, false).is_err());

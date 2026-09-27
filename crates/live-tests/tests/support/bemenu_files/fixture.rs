@@ -200,9 +200,10 @@ impl Fixture {
         };
         let timeout = Duration::from_secs(15);
         match self.wire {
-            Wire::Files => self
-                .transport
-                .begin_file_negotiation(&self.registry, EPOCH, timeout, policy),
+            Wire::Files => {
+                self.transport
+                    .begin_file_negotiation(&self.registry, EPOCH, timeout, policy)
+            }
             Wire::Ipc => self
                 .transport
                 .begin_negotiation(&self.registry, EPOCH, timeout, policy),
@@ -213,7 +214,10 @@ impl Fixture {
     /// Connect the neighbouring bar on a second transport in this registry.
     pub fn connect_neighbour(&mut self, root: &Path) {
         let bar = super::neighbour::Bar::connect(root, &mut self.registry, self.wire);
-        assert_ne!(bar.grant, self.grant, "neighbour and launcher share a grant");
+        assert_ne!(
+            bar.grant, self.grant,
+            "neighbour and launcher share a grant"
+        );
         self.bar = Some(bar);
     }
 
@@ -491,7 +495,11 @@ impl Fixture {
                     let description = lease.description();
                     assert!(description.width_px > 0 && description.height_px > 0);
                     assert_eq!(lease.bytes().len() as u64, description.total_bytes);
-                    assert!(lease.bytes().len() > 1024, "raster of {} bytes", lease.bytes().len());
+                    assert!(
+                        lease.bytes().len() > 1024,
+                        "raster of {} bytes",
+                        lease.bytes().len()
+                    );
                     lease.bytes().to_vec()
                 })
                 .collect::<Vec<_>>();

@@ -28,7 +28,11 @@ impl Bar {
     /// Bind, reserve the bar's grant in the shared registry, and negotiate
     /// the real client (its blocking connect runs on its own thread while
     /// this one drives the transport).
-    pub fn connect(root: &Path, registry: &mut ContentEpochRegistry, wire: crate::fixture::Wire) -> Self {
+    pub fn connect(
+        root: &Path,
+        registry: &mut ContentEpochRegistry,
+        wire: crate::fixture::Wire,
+    ) -> Self {
         let mut transport = ShellComponentTransport::bind_for_supervised_uid(
             root.join("bar-export"),
             rustix::process::geteuid().as_raw(),
@@ -64,13 +68,15 @@ impl Bar {
             crate::fixture::Wire::Files => {
                 let client =
                     std::thread::spawn(move || ShellConnection::connect_files(&path, options));
-                transport.begin_file_negotiation(registry, BAR_EPOCH, HANDSHAKE, policy)
+                transport
+                    .begin_file_negotiation(registry, BAR_EPOCH, HANDSHAKE, policy)
                     .unwrap();
                 client
             }
             crate::fixture::Wire::Ipc => {
                 let client = std::thread::spawn(move || ShellConnection::connect(&path, options));
-                transport.begin_negotiation(registry, BAR_EPOCH, HANDSHAKE, policy)
+                transport
+                    .begin_negotiation(registry, BAR_EPOCH, HANDSHAKE, policy)
                     .unwrap();
                 client
             }
@@ -80,7 +86,11 @@ impl Bar {
         while !client.is_finished() {
             if negotiated {
                 transport.poll_io(registry).unwrap();
-            } else if transport.poll_negotiation(registry, 65536).unwrap().is_some() {
+            } else if transport
+                .poll_negotiation(registry, 65536)
+                .unwrap()
+                .is_some()
+            {
                 negotiated = true;
             }
             assert!(Instant::now() < deadline, "neighbour bar handshake stalled");
