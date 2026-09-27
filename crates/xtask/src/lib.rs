@@ -6,6 +6,7 @@
 //! or the C SDK's source tree.
 pub mod bemenu_artifact;
 pub mod c_sdk_pin;
+pub mod direct_scanout_gate;
 pub mod dock;
 pub mod git_tree;
 pub mod package_desktop;
@@ -13,6 +14,7 @@ pub mod pins;
 pub mod product_artifact;
 pub mod session;
 pub mod session_preflight;
+pub mod verify_archives;
 pub mod wm_pair;
 
 pub(crate) fn hex(value: &str, length: usize) -> bool {

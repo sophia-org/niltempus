@@ -6,6 +6,8 @@ const USAGE: &str = "usage:
   xtask prepare-product-artifact lom|provlita|hagia SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR
   xtask prepare-wm-pair --hagia REPO COMMIT --narthex REPO COMMIT NEW-OUTPUT-DIR
   xtask package-desktop --sophia-root=/ABS --sophia-rev=SHA --wm-pair=/ABS --wm-pair-commits=H,N --wm-pair-sha256=H,N --wm-pair-profile-sha256=SHA --build-dir=/ABS --out=/ABS/NEW
+  xtask direct-scanout-gate [WIDTH HEIGHT HOLD WORKLOAD] [--overlay-proof] [--cost] [--cursor] [--atomic-cursor]
+  xtask verify-archives
   xtask session-recipe prepare-arguments|prepare-inputs|stage-proofs|prepare-environment --name=value ... -- [session arguments]
   xtask check-pins
   xtask check-provision
@@ -43,6 +45,8 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
         Some("prepare-product-artifact") => xtask::product_artifact::run(&arguments[1..]),
         Some("prepare-wm-pair") => xtask::wm_pair::run(&arguments[1..]),
         Some("package-desktop") => xtask::package_desktop::run(&repo, &arguments[1..]),
+        Some("direct-scanout-gate") => gate_direct_scanout(&repo, &arguments[1..]),
+        Some("verify-archives") => xtask::verify_archives::run(&repo, &arguments[1..]),
         // Moved from Sophia crates/xtask/src/main.rs:53-70 at 9fcaec782.
         Some("dock") => match &arguments[1..] {
             [command, paths @ ..] if command == "profile" => Ok(xtask::dock::profile(paths)?
@@ -72,6 +76,42 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
         },
         _ => Err(USAGE.into()),
     }
+}
+
+// Moved from Sophia crates/xtask/src/main.rs (gate_direct_scanout) at
+// de776c68afdf9a133818f86917893c3362dc9fb7 (the pin) (Sophia rule 13), with
+// explicit sources (xtask::direct_scanout_gate::Sources).
+fn gate_direct_scanout(repo: &Path, arguments: &[String]) -> Result<Vec<String>, String> {
+    use xtask::direct_scanout_gate::{Probe, Sources, run_gate_with};
+    // Parsed by `Probe`, which owns the argument vocabulary: the gate and the
+    // probe run the same session, and two spellings of the same options would
+    // let them drift.
+    let probe = Probe::from_arguments(arguments)?;
+    let sources = Sources::from_environment(repo)?;
+    println!("Building and running the exact physical-proof binary...");
+    if probe.overlay_proof {
+        println!("Overlay proof: the session will open an overlay over a direct frame.");
+    }
+    if probe.cost {
+        println!("Cost run: the overlay holds long enough to measure composed frames.");
+    }
+    if probe.cursor {
+        println!("Cursor proof: the session moves a cursor over directly scanned frames.");
+    }
+    if probe.atomic_cursor {
+        println!("Atomic cursor: the cursor rides a plane rather than the legacy ioctl.");
+    }
+    let report = run_gate_with(&sources, &probe)?;
+    Ok(vec![
+        format!("Sophia commit:  {}", report.source_commit),
+        format!("Sophia binary:  {}", report.sophia_sha256),
+        format!(
+            "Client:         {} ({})",
+            report.client.display(),
+            report.client_sha256
+        ),
+        format!("Direct scanout gate passed: {}", report.archive.display()),
+    ])
 }
 
 fn workspace_root() -> Result<PathBuf, String> {
