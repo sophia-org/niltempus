@@ -1,0 +1,90 @@
+<!-- Provenance: moved from Sophia docs/validation.md, sections "Installed Native Candidate" and the installed parts of "Keyboard Independence on Hardware", at de776c68afdf9a133818f86917893c3362dc9fb7 (the pin) (Sophia rule 13). Rewritten for this repository's package, install and verification commands. The day-to-day runbook is docs/operations.md. -->
+# Installed candidate
+
+An installed candidate is an immutable desktop release below `/opt/sophia`:
+Sophia, the Hagia/Narthex pair, this repository's session wrappers, recipe
+tool and host checker, and the retained Sophia session primitives. The
+[operations runbook](operations.md) covers the host boundary, session entries,
+logs, stop, recovery, fallback login and rollback. This page is the release
+and verification path.
+
+## Build and install a release
+
+```sh
+cargo xtask prepare-wm-pair --hagia /ABS/hagia <commit> --narthex /ABS/narthex <commit> /ABS/wm-pair \
+    --build-dir=/ABS/private-build \
+    --hagia-nim-deps=/ABS/hagia.nim-deps --hagia-nim-deps-sha256=<reviewed sha256> \
+    --narthex-nim-deps=/ABS/narthex.nim-deps --narthex-nim-deps-sha256=<reviewed sha256>
+cargo xtask package-desktop --sophia-root=/ABS/sophia --sophia-rev=<pinned rev> \
+    --wm-pair=/ABS/wm-pair --wm-pair-commits=<hagia>,<narthex> \
+    --wm-pair-sha256=<hagia>,<narthex> --wm-pair-profile-sha256=<default.kdl> \
+    --build-dir=/ABS/private-build --out=/ABS/release
+tools/install_live_session.sh /ABS/release
+```
+
+Packaging requires this repository clean with a signed HEAD, the pinned signed
+Sophia checkout, the full provisioning marker and the operator's expected
+pair commits and digests. Every source is staged as its exact signed tree and
+built in the private build directory; the release (schema 6, `SHA256SUMS`)
+records exact digests and Git identities. Installation verifies the artifact
+before an atomic `/opt/sophia/current` switch and keeps the former release as
+`previous`. No package contains an X11 WM bridge, an embedded legacy WM or
+bridge-specific configuration. Local installation does not require pushing or
+fetching any repository; publication is separate.
+
+Packaging and installing never switch or overwrite the user's own default
+window manager (`$XDG_STATE_HOME/sophia/bin/hagia` and its reload workflow,
+`tools/reload_policy_client.sh`, an exempt operator tool). The installed
+session may still prefer that user-owned client; the packaged pair is the
+fallback and the promotion profile.
+
+Hagia and Narthex build only from reviewed Nim dependency manifests; the
+compiler is a staged, verified copy of the reviewed installation. See
+[operations](operations.md#bound-nim-dependencies). Host-toolchain identity is
+recorded, not a fully reproducible closure.
+
+## Offline regressions
+
+```sh
+cargo test --offline --locked -p xtask --test package_desktop
+cargo test --offline --locked -p xtask --test wm_pair
+cargo test --offline --locked -p xtask --test installed_selftests -- --include-ignored   # needs SOPHIA_TEST_TREE
+cargo test --offline --locked -p xtask --test installed_xtask
+```
+
+`installed_selftests` runs the moved self-contained regressions:
+`check_installed_session_type.sh`, `check_hagia_profile_selection.sh`,
+`check_rehearse_wm_9p.sh` and `check_live_session_install.sh` (schema and digest
+validation, retired bridge fields refused, base and Hagia activation,
+rollback, removal of only Sophia-owned stale entries, foreign desktop entries
+preserved). `installed_xtask` runs the packaged recipe tool with its build
+checkout hidden. The installed native verifiers are pinned by
+`check_installed_native_verifiers.sh` and its sub-checks in
+`physical_selftests`.
+
+## Installed evidence
+
+```sh
+sophia-status
+sophia-verify-login-cycle
+sophia-verify-truecolor-runs 1
+sophia-verify-xterm-runs 1
+sophia-verify-watchdog
+sophia-verify-emergency
+sophia-verify-fallback
+sophia-verify-hagia
+sophia-verify-native-chrome
+sophia-verify-firefox-runs
+```
+
+The Firefox, TrueColor, xterm, watchdog, emergency-recovery, runtime-identity
+and login-cycle recorders all identify the Hagia native session. Their
+verifiers consume checksummed archives and fail closed on an unexpected
+revision, binary identity, result, protocol fault or teardown residue.
+
+Keyboard independence is accepted from an ordinary installed session, verified
+with `tools/verify_keyboard_independence_session.sh`; see
+[physical runners](physical-runners.md#keyboard-independence).
+
+Use `sophia-stop` or the independent recovery entry to leave a failed session;
+neither depends on the policy process continuing to answer.

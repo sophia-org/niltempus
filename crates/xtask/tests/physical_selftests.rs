@@ -86,6 +86,7 @@ self_test!(check_sophia_glxgears_performance_reporter);
 self_test!(check_sophia_native_chrome_verifier);
 self_test!(check_sophia_rendering_performance_reporter);
 self_test!(check_sophia_standalone_vkcube_verifier);
+self_test!(check_session_terminal_arguments);
 self_test!(check_sophia_terminal_performance_reporter);
 self_test!(check_truecolor_verifier);
 self_test!(check_xserver_rendering_performance_reporter);
