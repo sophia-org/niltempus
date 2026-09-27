@@ -15,9 +15,16 @@ install -m 755 "$ROOT_DIR/tools/installed/sophia-hagia-session" \
 # The system profile is an explicit fixture path, never the host's /etc: the
 # copy under test reads it from the fixture (the production default is kept).
 system_profile="$fixture/etc/sophia/desktop.kdl"
-[[ "$(grep -c '/etc/sophia/desktop.kdl' "$release/bin/sophia-hagia-session")" == 2 ]]
-sed -i "s#/etc/sophia/desktop.kdl#$system_profile#g" "$release/bin/sophia-hagia-session"
-! grep -q '/etc/sophia/desktop.kdl' "$release/bin/sophia-hagia-session"
+launcher="$release/bin/sophia-hagia-session"
+system_test='elif [[ -e /etc/sophia/desktop.kdl || -L /etc/sophia/desktop.kdl ]]; then'
+system_set='desktop_profile=/etc/sophia/desktop.kdl'
+# Exactly the system-profile branch (its test and its assignment) moves to
+# the fixture; nothing else in the launcher may name the path.
+[[ "$(grep -cF -- "$system_test" "$launcher")" == 1 && "$(grep -cF -- "$system_set" "$launcher")" == 1 ]]
+[[ "$(grep -c '/etc/sophia' "$launcher")" == 2 ]]
+sed -i -e "s#^\( *\)elif \[\[ -e /etc/sophia/desktop.kdl || -L /etc/sophia/desktop.kdl \]\]; then\$#\1elif [[ -e $system_profile || -L $system_profile ]]; then#" \
+    -e "s#^\( *\)desktop_profile=/etc/sophia/desktop.kdl\$#\1desktop_profile=$system_profile#" "$launcher"
+! grep -q '/etc/sophia' "$launcher"
 install -m 755 "$ROOT_DIR/tools/installed/sophia-hagia-promotion-session" \
     "$release/bin/sophia-hagia-promotion-session"
 printf 'schema 1\n' >"$release/share/sophia-policy/hagia/default.kdl"

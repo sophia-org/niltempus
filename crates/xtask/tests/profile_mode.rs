@@ -4,7 +4,9 @@
 //! and the profile digest to a stubbed Sophia unchanged. That the real
 //! session reads them and emits `sophia_live_desktop_profile` is Sophia's
 //! reader behaviour, recorded separately by a real (installed) run; a stub
-//! cannot prove it and this test does not claim to.
+//! cannot prove it and this test does not claim to. That real-reader
+//! evidence must come from a pin that includes root's reduced_record fix:
+//! at de776c68 the record drops the packaged-promotion mode.
 //!
 //! The retired names appear nowhere in this repository (tree-wide).
 use std::fs;
@@ -44,13 +46,25 @@ fn release(root: &Path) -> PathBuf {
     // the copy under test reads it from `root` (production keeps its default).
     let launcher = release.join("bin/sophia-hagia-session");
     let text = fs::read_to_string(&launcher).unwrap();
-    assert_eq!(text.matches("/etc/sophia/desktop.kdl").count(), 2);
+    // Exactly the system-profile branch (its test and its assignment) moves
+    // to the fixture; nothing else in the launcher may name the path.
+    let branch = "elif [[ -e /etc/sophia/desktop.kdl || -L /etc/sophia/desktop.kdl ]]; then\n\
+                  \x20               desktop_profile=/etc/sophia/desktop.kdl\n";
+    assert_eq!(
+        text.matches(branch).count(),
+        1,
+        "system-profile branch changed"
+    );
     let system = root.join("etc/sophia/desktop.kdl");
-    fs::write(
-        &launcher,
-        text.replace("/etc/sophia/desktop.kdl", system.to_str().unwrap()),
-    )
-    .unwrap();
+    let rewritten = text.replace(
+        branch,
+        &branch.replace("/etc/sophia/desktop.kdl", system.to_str().unwrap()),
+    );
+    assert!(
+        !rewritten.contains("/etc/sophia"),
+        "another system path appeared"
+    );
+    fs::write(&launcher, rewritten).unwrap();
     fs::write(
         release.join("tools/lib/session_lifecycle.sh"),
         "sophia_session_rotate_log() { :; }\n",
