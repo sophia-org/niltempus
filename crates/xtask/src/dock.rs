@@ -1,6 +1,7 @@
 // Provenance: moved from Sophia crates/sophia-conformance/src/dock.rs at
 // 9fcaec782ce4fe9978568c0466ee17a78b3d4571 (Sophia rule 13). Its one Sophia
-// dependency, the session-log record reader, is SEAM B (see seam_b.rs).
+// dependency, the session-log record reader, is Sophia's public seam B
+// (`sophia_conformance::record`) at the pinned revision.
 //! Three independent native shell components. This checks transcript evidence,
 //! not visual placement, input feel, driver behavior or a latency workload.
 use std::collections::{BTreeMap, BTreeSet};
@@ -96,7 +97,7 @@ pub fn verify(text: &str) -> Result<String, String> {
             raw
         };
         // Native logs may carry tracing prefixes as well as recorder columns.
-        let Some(record) = crate::seam_b::record_after_marker(line, "sophia_") else {
+        let Some(record) = sophia_conformance::record::after_marker(line, "sophia_") else {
             continue;
         };
         let record = format!("sophia_{record}");

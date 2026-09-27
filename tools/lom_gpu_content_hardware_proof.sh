@@ -28,20 +28,11 @@ git -C "$ROOT_DIR" verify-commit HEAD >/dev/null
 check_sophia_source "$SOPHIA_SOURCE"
 check_build_dir "$SOPHIA_GATE_BUILD_DIR"
 
-# WAITING ON SEAM D. At the pinned Sophia revision the proof command is
-# Lom-named (`sophia-shell-gpu-content-hardware-proof`). The approved generic
-# command is `sophia shell-gpu-content-proof`, armed by
-# SOPHIA_SHELL_GPU_PROOF_ARM=1, reporting per-render
-# `sophia_shell_gpu_content_render schema=1` and a final
-# `sophia_shell_gpu_content_proof schema=1` record. It is bound only once the
-# seams commit lands and pins/sophia.toml moves to it; until then this script
-# refuses before building anything. The Lom expectations below (surface,
-# edge, outcomes, end, input) belong to this repository, not to Sophia.
-SEAM_D_BOUND=false
-[[ "$SEAM_D_BOUND" == true ]] || {
-    echo "waiting on seam D: the pinned Sophia revision has no generic shell-gpu-content-proof command" >&2
-    exit 3
-}
+# Seam D: Sophia's generic `shell-gpu-content-proof`, armed by
+# SOPHIA_SHELL_GPU_PROOF_ARM=1, reports per-render
+# `sophia_shell_gpu_content_render schema=1` records and a final
+# `sophia_shell_gpu_content_proof schema=1` record. The Lom expectations below
+# (surface, edge, outcomes, end, input, pixels) belong to this repository.
 
 [[ ! -e "$EVIDENCE_DIR" ]] || { echo "Evidence directory already exists; refusing to overwrite it" >&2; exit 2; }
 mkdir -p "$(dirname "$EVIDENCE_DIR")"
@@ -73,9 +64,11 @@ echo "Evidence: $EVIDENCE_DIR"
 # SOPHIA_SHELL_GPU_EXPECTED_DEVICE ("MAJ:MIN@PCI" or "none", for example
 # 226:128@0000:03:00.0) is supplied by the operator when wanted; this script
 # never derives or defaults it, and it reaches Sophia through the environment.
-# SEAM D (approved names; bound when the seams commit is pinned). Lom's
-# expectations: one 256x24 top-edge panel on a 256x64 output, presented then
-# renderer-failed, the client exits on its own, discrete input granted.
+# Lom's expectations: one 256x24 top-edge panel on a 256x64 output, the full
+# surface raster pattern, presented then renderer-failed, the client exits on
+# its own, discrete input granted. full-surface-raster proves only that the
+# pattern crossed the content path; GPU execution rests on the protected
+# grant plus Lom's own lom_gpu_admission evidence (see the verifier).
 env -u DISPLAY -u WAYLAND_DISPLAY -u WAYLAND_SOCKET SOPHIA_SHELL_GPU_PROOF_ARM=1 \
     "$SOPHIA_BIN" shell-gpu-content-proof \
     "--client=$LOM_BIN" --client-arg=--serve "--config=$LOM_CONFIG" \

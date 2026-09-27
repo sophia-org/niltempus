@@ -90,9 +90,11 @@ if [[ "$GATE_MODE" == launcher ]]; then
 fi
 XTASK_BIN="$INTEGRATION_TARGET/release/xtask"
 if [[ "$GATE_MODE" == dock ]]; then
-    CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR="$INTEGRATION_TARGET" nice -n 19 cargo \
-        --config "$ROOT_DIR/.provision/cargo-config.toml" build --locked --offline --release -p xtask \
-        --manifest-path "$ROOT_DIR/Cargo.toml"
+    # This repository builds offline from its accepted private CARGO_HOME.
+    [[ -f "$ROOT_DIR/.provision/accepted" ]] || { echo "Run tools/provision.sh first" >&2; exit 2; }
+    (export CARGO_HOME="$ROOT_DIR/.provision/cargo-home"
+        CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR="$INTEGRATION_TARGET" nice -n 19 cargo build --locked --offline \
+            --release -p xtask --manifest-path "$ROOT_DIR/Cargo.toml")
     "$XTASK_BIN" dock profile "$LOM_BIN" "$LOM_CONFIG" "$BEMENU_BIN" "$PROVLITA_BIN" "$PROVLITA_CONFIG" \
         > "$EVIDENCE_DIR/probe-overrides.kdl"
 fi

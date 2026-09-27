@@ -15,10 +15,12 @@ fn text(name: &str) -> String {
 const OTHER_REV: &str = "0123456789abcdef0123456789abcdef01234567";
 
 fn lock(runtime: &str, protocol: &str, extra: &str) -> String {
+    let conformance = pinned_source();
     format!(
         "version = 4\n\n[[package]]\nname = \"live-tests\"\nversion = \"0.1.0\"\n\n\
          [[package]]\nname = \"sophia-protocol\"\nversion = \"0.1.0\"\nsource = \"{protocol}\"\n\n\
-         [[package]]\nname = \"sophia-runtime\"\nversion = \"0.1.0\"\nsource = \"{runtime}\"\n{extra}"
+         [[package]]\nname = \"sophia-runtime\"\nversion = \"0.1.0\"\nsource = \"{runtime}\"\n\n\
+         [[package]]\nname = \"sophia-conformance\"\nversion = \"0.1.0\"\nsource = \"{conformance}\"\n{extra}"
     )
 }
 

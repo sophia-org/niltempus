@@ -58,21 +58,28 @@ self-tests are part of the offline gate (`crates/xtask/tests/verifier_self_tests
 
 ## Provisioning
 
-    sh tools/provision.sh [--source ABSOLUTE-SOPHIA-REPO] [--generate-lockfile]
+    sh tools/provision.sh [--source ABSOLUTE-SOPHIA-REPO] [--generate-lockfile | --update-lockfile]
 
-This vendors every dependency into `.provision/` (ignored) and accepts the
-result only after `check-pins` passes. The default fetches the pinned revision
-from its public URL; `--source` redirects that URL to a local clone for the
-script's own cargo and git children only. Afterwards every command is offline:
+This fetches every dependency into a private `CARGO_HOME` under `.provision/`
+(ignored) and accepts it (`.provision/accepted`) only after `check-pins`
+passes. The default fetches the pinned revision from its public URL;
+`--source` redirects that URL to a local clone for the script's own cargo and
+git children only. A private `CARGO_HOME` rather than `cargo vendor` is used
+because `sophia-conformance` builds only from an exact git checkout.
+Afterwards every command is offline:
 
-    cargo --config .provision/cargo-config.toml <command> --offline --locked
+    CARGO_HOME="$PWD/.provision/cargo-home" cargo <command> --offline --locked
 
 ## Gates
 
-    CARGO_BUILD_JOBS=2 nice -n 19 cargo --config .provision/cargo-config.toml \
-        test --workspace --offline --locked
-    CARGO_BUILD_JOBS=2 nice -n 19 cargo --config .provision/cargo-config.toml \
-        clippy --workspace --all-targets --offline --locked -- -D warnings
+All with a private target outside this tree, two jobs, low priority and a hard
+timeout:
+
+    export CARGO_HOME="$PWD/.provision/cargo-home" CARGO_TARGET_DIR=/abs/private-target CARGO_BUILD_JOBS=2
+    timeout -s KILL 3600 nice -n 19 cargo test --workspace --offline --locked
+    timeout -s KILL 3600 nice -n 19 cargo clippy --workspace --all-targets --offline --locked -- -D warnings
+    cargo fmt --check
+    timeout -s KILL 600 nice -n 19 bash tools/check_lom_gpu_content_proof_verifiers.sh
 
 The live Bemenu gate is ignored by default and fails closed on any missing or
 mismatched input:
@@ -80,5 +87,4 @@ mismatched input:
     CARGO_BUILD_JOBS=2 nice -n 19 cargo xtask prepare-bemenu-artifact SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR
     SOPHIA_BEMENU_ARTIFACT=OUTPUT-DIR SOPHIA_BEMENU_SHA256=BINARY-SHA256 \
     SOPHIA_BEMENU_COMMIT=SIGNED-COMMIT CARGO_BUILD_JOBS=2 nice -n 19 \
-    cargo --config .provision/cargo-config.toml test --offline --locked \
-        -p live-tests --test bemenu_files -- --ignored --nocapture
+    cargo test --offline --locked -p live-tests --test bemenu_files -- --ignored --nocapture

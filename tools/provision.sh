@@ -1,9 +1,10 @@
 #!/bin/sh
-# Provision the pinned Sophia crates and every crates.io dependency into
-# .provision/ so that all later gates build with
-#   cargo --config .provision/cargo-config.toml <command> --offline --locked
+# Provision the pinned Sophia crates and every crates.io dependency into a
+# private CARGO_HOME (.provision/cargo-home) so that all later gates build with
+#   CARGO_HOME="$PWD/.provision/cargo-home" cargo <command> --offline --locked
 #
-# usage: sh tools/provision.sh [--source ABSOLUTE-SOPHIA-REPO] [--generate-lockfile]
+# usage: sh tools/provision.sh [--source ABSOLUTE-SOPHIA-REPO]
+#                              [--generate-lockfile | --update-lockfile]
 #
 # Default route: fetch the pinned revision from its canonical public URL
 # (pins/sophia.toml). Optional route: --source redirects that URL to an
@@ -11,16 +12,23 @@
 # through GIT_CONFIG_COUNT/KEY/VALUE in their environment. No Git or Cargo
 # configuration file is written anywhere.
 #
-# --generate-lockfile creates Cargo.lock when it does not exist yet (first
-# provisioning only); otherwise Cargo.lock is required and used --locked.
+# Why a private CARGO_HOME and not `cargo vendor`: sophia-conformance (the
+# public record reader) builds only from an exact git checkout; its
+# conformance-host bins use ../ paths that the vendored layout breaks. Cargo's
+# git cache keeps the whole checkout at the pinned revision.
 #
-# The result is accepted only after `cargo xtask check-pins` passes against
-# the vendored tree (and `audit-pins` when a local clone was named).
-# Until then no .provision/cargo-config.toml exists, so no gate can build.
+# --generate-lockfile creates Cargo.lock when it does not exist yet (first
+# provisioning only). --update-lockfile resolves what a manifest or pin change
+# requires (`cargo fetch` without --locked); the change must then be reviewed
+# and committed. Otherwise Cargo.lock is required and used --locked.
+#
+# The result is accepted only after `cargo xtask check-pins` passes offline
+# against it (and `audit-pins` when a local clone was named): until then no
+# .provision/accepted marker exists.
 set -eu
 
 usage() {
-    echo "usage: sh tools/provision.sh [--source ABSOLUTE-SOPHIA-REPO] [--generate-lockfile]" >&2
+    echo "usage: sh tools/provision.sh [--source ABSOLUTE-SOPHIA-REPO] [--generate-lockfile | --update-lockfile]" >&2
     exit 2
 }
 
@@ -34,7 +42,13 @@ while [ $# -gt 0 ]; do
         shift 2
         ;;
     --generate-lockfile)
-        generate=1
+        [ -z "$generate" ] || usage
+        generate=generate
+        shift
+        ;;
+    --update-lockfile)
+        [ -z "$generate" ] || usage
+        generate=update
         shift
         ;;
     *) usage ;;
@@ -54,6 +68,7 @@ pin() {
 }
 url=$(pin url)
 rev=$(pin rev)
+cargo_home="$repo/.provision/cargo-home"
 
 : "${CARGO_BUILD_JOBS:=2}"
 export CARGO_BUILD_JOBS
@@ -72,7 +87,7 @@ if [ -n "$source_repo" ]; then
         exit 1
     }
     run_cargo() {
-        env CARGO_NET_GIT_FETCH_WITH_CLI=true \
+        env CARGO_HOME="$cargo_home" CARGO_NET_GIT_FETCH_WITH_CLI=true \
             GIT_CONFIG_COUNT=2 \
             GIT_CONFIG_KEY_0="url.file://$source_repo.insteadOf" \
             GIT_CONFIG_VALUE_0="$url" \
@@ -82,16 +97,20 @@ if [ -n "$source_repo" ]; then
     }
 else
     run_cargo() {
-        nice -n 19 cargo "$@"
+        env CARGO_HOME="$cargo_home" CARGO_NET_GIT_FETCH_WITH_CLI=true nice -n 19 cargo "$@"
     }
 fi
 
-rm -f .provision/cargo-config.toml .provision/cargo-config.toml.new
-trap 'rm -f "$repo/.provision/cargo-config.toml.new"' EXIT
-rm -rf .provision/vendor
-mkdir -p .provision
+rm -f .provision/accepted
+mkdir -p "$cargo_home"
 
-if [ -n "$generate" ]; then
+if [ "$generate" = update ]; then
+    [ -e Cargo.lock ] || {
+        echo "provision: --update-lockfile needs an existing Cargo.lock" >&2
+        exit 1
+    }
+    run_cargo fetch
+elif [ "$generate" = generate ]; then
     if [ -e Cargo.lock ]; then
         echo "provision: Cargo.lock exists; refusing to regenerate it" >&2
         exit 1
@@ -102,17 +121,15 @@ elif [ ! -e Cargo.lock ]; then
     exit 1
 fi
 
-run_cargo vendor --locked --versioned-dirs "$repo/.provision/vendor" \
-    >.provision/cargo-config.toml.new
+run_cargo fetch --locked
 
-# Accept the vendored tree only when every pin agrees, offline.
+# Accept the provisioned home only when every pin agrees, offline.
 check() {
-    nice -n 19 cargo --config .provision/cargo-config.toml.new \
-        run --offline --locked --package xtask -- "$@"
+    env CARGO_HOME="$cargo_home" nice -n 19 cargo run --offline --locked --package xtask -- "$@"
 }
 check check-pins
 if [ -n "$source_repo" ]; then
     check audit-pins "$source_repo"
 fi
-mv .provision/cargo-config.toml.new .provision/cargo-config.toml
-echo "provision status=pass sophia=$rev config=.provision/cargo-config.toml"
+printf 'sophia=%s\n' "$rev" >.provision/accepted
+echo "provision status=pass sophia=$rev cargo_home=.provision/cargo-home"

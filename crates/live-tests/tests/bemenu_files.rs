@@ -15,8 +15,8 @@
 //!   SOPHIA_BEMENU_COMMIT=<signed commit> nice -n 19 \
 //!   cargo test -p live-tests --test bemenu_files -- --ignored --nocapture
 //!
-//! (After tools/provision.sh, every cargo command here also takes
-//! `--config .provision/cargo-config.toml --offline --locked`.)
+//! (After tools/provision.sh, every cargo command here runs with
+//! `CARGO_HOME=$PWD/.provision/cargo-home` and `--offline --locked`.)
 //!
 //! Covered: negotiation; catalog and output-fact objects; opening; the peer's
 //! allocation request; the actual Cairo raster upload; Prepared/Presented;

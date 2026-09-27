@@ -12,9 +12,9 @@ use std::process::Command;
 use std::time::Duration;
 
 pub const SOPHIA_URL: &str = "https://github.com/sophia-org/sophia.git";
-pub const SOPHIA_REV: &str = "9fcaec782ce4fe9978568c0466ee17a78b3d4571";
+pub const SOPHIA_REV: &str = "d20faf3709ae21d94491f7a628ac9a4a86619cdf";
 /// The Sophia crates this repository names directly.
-pub const SOPHIA_CRATES: [&str; 2] = ["sophia-protocol", "sophia-runtime"];
+pub const SOPHIA_CRATES: [&str; 3] = ["sophia-conformance", "sophia-protocol", "sophia-runtime"];
 
 pub const FONT: &str = "assets/fonts/JetBrainsMonoNL-Regular.ttf";
 pub const FONT_SHA256: &str = "fb3b2575d7b0657359707993288f12a7360344d39387bb26050e276d61f6bd2a";

@@ -136,9 +136,13 @@ impl Fixture {
             "tools/lib",
             "tools/probes/lom_workload",
             "pins/c-desktop-sdk",
+            ".provision",
         ] {
             fs::create_dir_all(root.join(name)).unwrap();
         }
+        // The dock branch builds xtask only from an accepted private
+        // CARGO_HOME; the fixture's cargo is a stub.
+        fs::write(root.join(".provision/accepted"), "sophia=fixture\n").unwrap();
         for name in [
             "tools/run_current_lom_panel_gate_tty4.sh",
             "tools/lib/artifacts.sh",

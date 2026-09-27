@@ -9,11 +9,21 @@ The private domain receives one render node under its real kernel basename and
 a generated read-only sysfs discovery view for that same device, with no card
 node, host sysfs tree, input device, display socket or network. Lom validates
 the enumerated Vulkan adapter's DRM render major/minor before rendering a 256x24 Vello
-panel and sends its real complete content candidate. The host verifies the
-nonempty immutable pixels, returns the real `RendererFailed` outcome, and
-requires resource and backing cleanup. This is a hardware render and protocol
-proof; it deliberately records `native_presentation=false` and does not acquire
-DRM master.
+panel and sends its real complete content candidate. Sophia's generic
+`shell-gpu-content-proof` (armed by `SOPHIA_SHELL_GPU_PROOF_ARM=1`) runs Lom's
+parameters: a 256x24 top panel on a 256x64 output, `--pixels=full-surface-raster`,
+presented then the real `RendererFailed` outcome, the client exiting on its own,
+discrete input granted. It reports one `sophia_shell_gpu_content_render` record
+per render and a final `sophia_shell_gpu_content_proof` record, and requires
+resource and backing cleanup.
+
+What passing means, precisely: `pixels=full_surface_raster` proves only that
+the requested pattern crossed Sophia's content path. That Lom drew it on the
+GPU rests on the protected device grant plus Lom's own adapter and render
+evidence (`lom_gpu_admission`), which the verifier cross-checks against the
+grant. The proof records `native_presentation=false` and does not acquire DRM
+master. The verifier also applies the negotiated prototype limits (width 8192,
+height 4096, thickness 512, one 4 MiB resource, 50% coverage).
 
 ```sh
 cargo xtask prepare-product-artifact lom LOM-REPO SIGNED-COMMIT LOM-ARTIFACT-DIR
@@ -26,10 +36,6 @@ SOPHIA_LOM_SHA256=BINARY-SHA256 SOPHIA_LOM_CONFIG_SHA256=CONFIG-SHA256 \
 The operator may also supply `SOPHIA_SHELL_GPU_EXPECTED_DEVICE` (`MAJ:MIN@PCI`
 or `none`, for example `226:128@0000:03:00.0`); the scripts never derive or
 default it.
-
-Waiting on seam D: at the pinned Sophia revision the proof command is
-Lom-named. Until Sophia's generic `shell-gpu-content-proof` command is approved
-the script refuses (exit 3) before building anything.
 
 The separate `tools/run_current_lom_panel_gate_tty4.sh` is the native acceptance
 candidate. Run it only from tty4 after ending the graphical session, with

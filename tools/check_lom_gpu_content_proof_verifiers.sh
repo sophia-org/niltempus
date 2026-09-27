@@ -8,19 +8,28 @@ trap 'rm -rf "$work"' EXIT
 
 cat > "$work/gpu.log" <<'EOF'
 lom_gpu_admission schema=2 status=ready grant_epoch=1 render_node=/dev/dri/renderD128 device_major=226 device_minor=128 selection_method=drm_dev_t adapter_render_major=226 adapter_render_minor=128 adapter_has_render=true pci_bus_id=0000:01:00.0 pci_vendor_id=1002 pci_device_id=744c backend=Vulkan device_type=DiscreteGpu adapter_name="fixture" driver="fixture" visible_dri_entries=renderD128
-sophia_shell_gpu_content_hardware_proof schema=2 status=complete protected=true revision=6 capabilities=0x783 grant_epoch=1 render_node=/dev/dri/renderD128 device_major=226 device_minor=128 pci_bus_id=0000:01:00.0 width=256 height=24 renders=2 first_bytes=24576 first_checksum=0123456789abcdef second_bytes=24576 second_checksum=fedcba9876543210 first_outcome=presented_synthetic second_renderer_outcome=9 backing_bytes=0 native_presentation=false
+sophia_shell_gpu_content_render schema=1 index=1 generation=3 bytes=24576 checksum=0123456789abcdef outcome=presented_synthetic
+sophia_shell_gpu_content_render schema=1 index=2 generation=4 bytes=24576 checksum=fedcba9876543210 outcome=renderer_failed
+sophia_shell_gpu_content_proof schema=1 status=complete protected=true revision=6 capabilities=0x783 grant_epoch=1 render_node=/dev/dri/renderD128 device_major=226 device_minor=128 pci_bus_id=0000:01:00.0 output_width=256 output_height=64 edge=top width=256 height=24 renders=2 pixels=full_surface_raster discrete_input=true end=client_exits backing_bytes=0 native_presentation=false
 EOF
 "$ROOT_DIR/tools/verify_lom_gpu_content_hardware_proof.sh" "$work/gpu.log" >/dev/null
-for mutation in \
-    extra_drm cpu zero_checksum native identity adapter_identity method has_render \
-    missing_identity missing_backend missing_device_type duplicate_epoch malformed_major \
-    overflow_major zero_epoch non_vulkan missing_content_input_capability wrong_renderer_outcome \
-    one_render missing_second_checksum claimed_native_first; do
+proof='/^sophia_shell_gpu_content_proof /'
+render1='/^sophia_shell_gpu_content_render schema=1 index=1 /'
+render2='/^sophia_shell_gpu_content_render schema=1 index=2 /'
+gpu_mutations=(
+    extra_drm cpu zero_checksum native identity adapter_identity method has_render
+    missing_identity missing_backend missing_device_type duplicate_epoch malformed_major
+    overflow_major zero_epoch non_vulkan missing_content_input_capability wrong_renderer_outcome
+    one_render missing_second_checksum claimed_native_first
+    contract_pixels stop_client input_denied bottom_edge other_output wide_surface
+    thick_surface over_coverage wrong_bytes regressed_generation reordered_render
+    extra_render backing_retained old_record)
+for mutation in "${gpu_mutations[@]}"; do
     cp "$work/gpu.log" "$work/$mutation.log"
     case "$mutation" in
         extra_drm) sed -i 's/visible_dri_entries=renderD128/visible_dri_entries=card0,renderD128/' "$work/$mutation.log" ;;
         cpu) sed -i 's/device_type=DiscreteGpu/device_type=Cpu/' "$work/$mutation.log" ;;
-        zero_checksum) sed -i 's/first_checksum=0123456789abcdef/first_checksum=0000000000000000/' "$work/$mutation.log" ;;
+        zero_checksum) sed -i 's/checksum=0123456789abcdef/checksum=0000000000000000/' "$work/$mutation.log" ;;
         native) sed -i 's/native_presentation=false/native_presentation=true/' "$work/$mutation.log" ;;
         identity) sed -i '/^lom_gpu_admission /s/device_minor=128/device_minor=129/' "$work/$mutation.log" ;;
         adapter_identity) sed -i '/^lom_gpu_admission /s/adapter_render_minor=128/adapter_render_minor=129/' "$work/$mutation.log" ;;
@@ -44,11 +53,32 @@ for mutation in \
         zero_epoch) sed -i 's/grant_epoch=1/grant_epoch=0/g' "$work/$mutation.log" ;;
         non_vulkan) sed -i '/^lom_gpu_admission /s/backend=Vulkan/backend=Gl/' "$work/$mutation.log" ;;
         missing_content_input_capability) sed -i 's/capabilities=0x783/capabilities=0x683/' "$work/$mutation.log" ;;
-        wrong_renderer_outcome) sed -i 's/second_renderer_outcome=9/second_renderer_outcome=10/' "$work/$mutation.log" ;;
-        one_render) sed -i 's/renders=2/renders=1/' "$work/$mutation.log" ;;
-        missing_second_checksum) sed -i 's/ second_checksum=fedcba9876543210//' "$work/$mutation.log" ;;
-        claimed_native_first) sed -i 's/first_outcome=presented_synthetic/first_outcome=presented_native/' "$work/$mutation.log" ;;
+        wrong_renderer_outcome) sed -i "${render2}s/outcome=renderer_failed/outcome=presented_synthetic/" "$work/$mutation.log" ;;
+        one_render)
+            sed -i "${render2}d" "$work/$mutation.log"
+            sed -i "${proof}s/renders=2/renders=1/" "$work/$mutation.log"
+            ;;
+        missing_second_checksum) sed -i "${render2}s/ checksum=fedcba9876543210//" "$work/$mutation.log" ;;
+        claimed_native_first) sed -i "${render1}s/outcome=presented_synthetic/outcome=presented_native/" "$work/$mutation.log" ;;
+        contract_pixels) sed -i "${proof}s/pixels=full_surface_raster/pixels=contract/" "$work/$mutation.log" ;;
+        stop_client) sed -i "${proof}s/end=client_exits/end=stop_client/" "$work/$mutation.log" ;;
+        input_denied) sed -i "${proof}s/discrete_input=true/discrete_input=false/" "$work/$mutation.log" ;;
+        bottom_edge) sed -i "${proof}s/edge=top/edge=bottom/" "$work/$mutation.log" ;;
+        other_output) sed -i "${proof}s/output_width=256/output_width=512/" "$work/$mutation.log" ;;
+        wide_surface) sed -i "${proof}s/ width=256 / width=8193 /" "$work/$mutation.log" ;;
+        thick_surface) sed -i "${proof}s/ height=24 / height=513 /" "$work/$mutation.log" ;;
+        over_coverage) sed -i "${proof}s/output_height=64/output_height=40/" "$work/$mutation.log" ;;
+        wrong_bytes) sed -i "${render1}s/bytes=24576/bytes=24575/" "$work/$mutation.log" ;;
+        regressed_generation) sed -i "${render2}s/generation=4/generation=3/" "$work/$mutation.log" ;;
+        reordered_render) sed -i "${render1}s/index=1/index=3/" "$work/$mutation.log" ;;
+        extra_render) sed -n "${render2}p" "$work/gpu.log" >> "$work/$mutation.log" ;;
+        backing_retained) sed -i "${proof}s/backing_bytes=0/backing_bytes=24576/" "$work/$mutation.log" ;;
+        old_record) sed -i "${proof}s/^sophia_shell_gpu_content_proof schema=1/sophia_shell_gpu_content_hardware_proof schema=2/" "$work/$mutation.log" ;;
     esac
+    if cmp -s "$work/gpu.log" "$work/$mutation.log"; then
+        echo "mutation $mutation did not change the fixture" >&2
+        exit 1
+    fi
     if "$ROOT_DIR/tools/verify_lom_gpu_content_hardware_proof.sh" "$work/$mutation.log" >/dev/null 2>&1; then
         echo "verifier accepted $mutation mutation" >&2
         exit 1
@@ -233,4 +263,4 @@ python3 -B -m unittest discover -s "$ROOT_DIR/tools/probes/lom_workload/tests"
 
 python3 -B -m unittest discover -s "$ROOT_DIR/tools/probes/native_launcher/tests"
 
-echo "lom_gpu_content_verifiers schema=1 status=pass mutations=28 structured_events=true pre_takeover_proof=true sequential_renders=2 workload_verifier=true launcher_smoke_verifier=true"
+echo "lom_gpu_content_verifiers schema=1 status=pass mutations=$(( ${#gpu_mutations[@]} + 12 )) structured_events=true pre_takeover_proof=true sequential_renders=2 workload_verifier=true launcher_smoke_verifier=true"
