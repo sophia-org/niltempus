@@ -11,7 +11,13 @@
 //! made read-only. Both halves go through the one corrected builder
 //! (product_artifact::build): a private `--build-dir`, and each half's
 //! REVIEWED Nim dependency manifest with its independently supplied sha256,
-//! copied into the pair and bound by the pair manifest (schema 2).
+//! copied into the pair and bound by the pair manifest.
+//!
+//! Hagia vendors the C desktop SDK. Its revision is an explicit operator or
+//! director input (`--hagia-c-sdk-rev`), never inferred from Hagia's tree:
+//! the staged signed tree's vendored snapshot must be that revision and
+//! re-verify file by file against its own manifest. The pair records the
+//! revision and carries the vendored manifest, bound by its sha256 (schema 3).
 //!
 //! ARTIFACT BINDING is `verify`'s separate job: the manifest is not signed, so
 //! the packager requires the operator's expected commits and binary digests
@@ -33,13 +39,15 @@ use crate::{hex, read, sha256};
 const USAGE: &str = "usage: cargo xtask prepare-wm-pair --hagia <repo> <signed-commit> \
                      --narthex <repo> <signed-commit> <new-output-dir> --build-dir=/ABS \
                      --hagia-nim-deps=/ABS --hagia-nim-deps-sha256=<64 hex> \
-                     --narthex-nim-deps=/ABS --narthex-nim-deps-sha256=<64 hex>";
-const OPTIONS: [&str; 5] = [
+                     --narthex-nim-deps=/ABS --narthex-nim-deps-sha256=<64 hex> \
+                     --hagia-c-sdk-rev=<40 hex>";
+const OPTIONS: [&str; 6] = [
     "build-dir",
     "hagia-nim-deps",
     "hagia-nim-deps-sha256",
     "narthex-nim-deps",
     "narthex-nim-deps-sha256",
+    "hagia-c-sdk-rev",
 ];
 pub const MANIFEST: &str = "wm-pair.manifest";
 pub const PROFILE: &str = "default.kdl";
@@ -51,8 +59,15 @@ const HAGIA_COMMIT: &str = "hagia.commit";
 const NARTHEX_COMMIT: &str = "narthex.commit";
 const HAGIA_DEPS: &str = "hagia-nim-deps.manifest";
 const NARTHEX_DEPS: &str = "narthex-nim-deps.manifest";
-pub const SCHEMA: &str = "2";
-const KEYS: [&str; 23] = [
+/// Where Hagia's signed tree vendors the C desktop SDK snapshot
+/// (manifest.json, upstream.commit, source/).
+// TODO(root): confirm the exact vendor path when the Hagia hagia-9p-only
+// commit lands. This single constant is the only place it is named.
+pub const HAGIA_C_SDK_VENDOR: &str = "vendor/c-desktop-sdk";
+/// The vendored SDK manifest, copied into the pair byte for byte.
+pub const HAGIA_C_SDK_MANIFEST: &str = "hagia-c-sdk.manifest.json";
+pub const SCHEMA: &str = "3";
+const KEYS: [&str; 25] = [
     "schema",
     "hagia_source_commit",
     "hagia_source_tree",
@@ -76,6 +91,8 @@ const KEYS: [&str; 23] = [
     "narthex_nim_config_read",
     "narthex_nim_stdlib_sha256",
     "narthex_nim_command",
+    "hagia_c_sdk_revision",
+    "hagia_c_sdk_manifest_sha256",
 ];
 
 pub fn run(args: &[String]) -> Result<Vec<String>, String> {
@@ -101,6 +118,15 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
     let (hagia_source, output) = inputs(hagia_repo, hagia_commit, output)?;
     let (narthex_source, _) = inputs(narthex_repo, narthex_commit, &output.to_string_lossy())?;
     let options = options(rest, &OPTIONS, USAGE)?;
+    // No default and no inference: the operator or director names it.
+    let sdk_rev = *options.get("hagia-c-sdk-rev").ok_or_else(|| {
+        format!("--hagia-c-sdk-rev=<40 hex> is required (no default; never inferred from Hagia's tree); {USAGE}")
+    })?;
+    if !hex(sdk_rev, 40) {
+        return Err(format!(
+            "--hagia-c-sdk-rev must be 40 lowercase hex: {sdk_rev:?}"
+        ));
+    }
     let build_dir = build_dir(options.get("build-dir"))?;
     let required = |prefix: &str| {
         nim_deps_option(&options, prefix)?.ok_or_else(|| {
@@ -123,6 +149,11 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
         ));
     }
     let profile = read(&profile_path)?;
+    let sdk = crate::c_sdk_pin::verify_vendored(
+        &hagia.tree.tree_dir.join(HAGIA_C_SDK_VENDOR),
+        sdk_rev,
+    )
+    .map_err(|e| format!("hagia {hagia_commit} vendored C SDK ({HAGIA_C_SDK_VENDOR}): {e}"))?;
     let narthex = build(
         product(NARTHEX)?,
         &narthex_source,
@@ -138,6 +169,7 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
         &hagia,
         &narthex,
         &profile,
+        &sdk,
         hagia_commit,
         narthex_commit,
     );
@@ -157,6 +189,7 @@ fn write_pair(
     hagia: &Built,
     narthex: &Built,
     profile: &[u8],
+    sdk: &crate::c_sdk_pin::VendoredSnapshot,
     hagia_commit: &str,
     narthex_commit: &str,
 ) -> Result<String, String> {
@@ -189,6 +222,8 @@ fn write_pair(
     }
     std::fs::write(output.join(PROFILE), profile).map_err(|e| e.to_string())?;
     set_mode(&output.join(PROFILE), 0o444)?;
+    std::fs::write(output.join(HAGIA_C_SDK_MANIFEST), &sdk.manifest).map_err(|e| e.to_string())?;
+    set_mode(&output.join(HAGIA_C_SDK_MANIFEST), 0o444)?;
     let manifest = [
         format!("schema={SCHEMA}"),
         format!("hagia_source_commit={hagia_commit}"),
@@ -208,6 +243,10 @@ fn write_pair(
     ]
     .into_iter()
     .chain(nim_lines)
+    .chain([
+        format!("hagia_c_sdk_revision={}", sdk.revision),
+        format!("hagia_c_sdk_manifest_sha256={}", sdk.manifest_sha256),
+    ])
     .collect::<Vec<_>>()
     .join("\n")
         + "\n";
@@ -216,10 +255,11 @@ fn write_pair(
     set_mode(output, 0o555)?;
     Ok(format!(
         "wm_pair status=prepared hagia_commit={hagia_commit} hagia_sha256={} \
-             narthex_commit={narthex_commit} narthex_sha256={} default_profile_sha256={} dir={}",
+             narthex_commit={narthex_commit} narthex_sha256={} default_profile_sha256={} hagia_c_sdk_revision={} dir={}",
         digests[0],
         digests[1],
         sha256(profile),
+        sdk.revision,
         output.display()
     ))
 }
@@ -239,6 +279,9 @@ pub struct VerifiedPair {
     /// The reviewed dependency manifests the halves were built from.
     pub hagia_nim_deps_sha256: String,
     pub narthex_nim_deps_sha256: String,
+    /// Hagia's vendored C SDK revision and manifest digest, as prepared.
+    pub hagia_c_sdk_revision: String,
+    pub hagia_c_sdk_manifest_sha256: String,
 }
 
 /// Bind a prepared pair to the operator's expected commits and binary digests
@@ -371,6 +414,25 @@ pub fn verify(
             return Err(format!("WM pair manifest {key} is not the bound value"));
         }
     }
+    // Hagia's vendored SDK: the carried manifest hashes to the bound digest
+    // and names the bound revision.
+    let sdk_bytes = read(&regular(HAGIA_C_SDK_MANIFEST)?)?;
+    let hagia_c_sdk_manifest_sha256 = sha256(&sdk_bytes);
+    if manifest.get("hagia_c_sdk_manifest_sha256") != Some(&hagia_c_sdk_manifest_sha256) {
+        return Err("WM pair manifest hagia_c_sdk_manifest_sha256 is not the bound value".into());
+    }
+    let hagia_c_sdk_revision = manifest
+        .get("hagia_c_sdk_revision")
+        .cloned()
+        .unwrap_or_default();
+    let named = serde_json::from_slice::<serde_json::Value>(&sdk_bytes)
+        .ok()
+        .and_then(|value| value["revision"].as_str().map(str::to_owned));
+    if !hex(&hagia_c_sdk_revision, 40) || named.as_ref() != Some(&hagia_c_sdk_revision) {
+        return Err(format!(
+            "WM pair manifest hagia_c_sdk_revision is not the revision {HAGIA_C_SDK_MANIFEST} names"
+        ));
+    }
     let (narthex, narthex_sha256, narthex_nim_deps_sha256) = derived.pop().expect("two halves");
     let (hagia, hagia_sha256, hagia_nim_deps_sha256) = derived.pop().expect("two halves");
     Ok(VerifiedPair {
@@ -385,6 +447,8 @@ pub fn verify(
         profile_sha256,
         hagia_nim_deps_sha256,
         narthex_nim_deps_sha256,
+        hagia_c_sdk_revision,
+        hagia_c_sdk_manifest_sha256,
     })
 }
 

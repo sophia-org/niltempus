@@ -58,6 +58,42 @@ fn prepare_refuses_ambiguous_inputs_before_building() {
         .unwrap_err()
         .contains("40 lowercase hex")
     );
+    // The Hagia C SDK revision is an explicit input with no default: absent
+    // or malformed, the run stops before any build (the build dir and Nim
+    // dependency paths are never consulted).
+    let complete = |rev: Option<&str>| {
+        let mut values = vec![
+            "--hagia".to_owned(),
+            root.clone(),
+            zero.clone(),
+            "--narthex".to_owned(),
+            root.clone(),
+            zero.clone(),
+            out.clone(),
+            "--build-dir=/nonexistent/build".to_owned(),
+            "--hagia-nim-deps=/nonexistent/h".to_owned(),
+            format!("--hagia-nim-deps-sha256={}", "a".repeat(64)),
+            "--narthex-nim-deps=/nonexistent/n".to_owned(),
+            format!("--narthex-nim-deps-sha256={}", "b".repeat(64)),
+        ];
+        values.extend(rev.map(|rev| format!("--hagia-c-sdk-rev={rev}")));
+        values
+    };
+    let error = run(&complete(None)).unwrap_err();
+    assert!(
+        error.contains("--hagia-c-sdk-rev=<40 hex> is required"),
+        "{error}"
+    );
+    for bad in ["841563d", "HEAD", &"G".repeat(40)] {
+        let error = run(&complete(Some(bad))).unwrap_err();
+        assert!(
+            error.contains("--hagia-c-sdk-rev must be 40 lowercase hex"),
+            "{error}"
+        );
+    }
+    // A well-formed revision gets past this check to the next one.
+    let error = run(&complete(Some(fixture::HAGIA_C_SDK_REV))).unwrap_err();
+    assert!(error.contains("--build-dir"), "{error}");
     fs::create_dir(dir.0.join("pair")).unwrap();
     assert!(
         run(&args(&[
@@ -84,6 +120,7 @@ fn verify_binds_every_identity_to_the_files() {
     let verified = verify(&pair, commits, digests, &ids.profile).unwrap();
     assert_eq!(verified.hagia, pair.join("hagia"));
     assert_eq!(verified.narthex_sha256, ids.digests[1]);
+    assert_eq!(verified.hagia_c_sdk_revision, fixture::HAGIA_C_SDK_REV);
 
     assert!(
         verify(std::path::Path::new("pair"), commits, digests, &ids.profile)
@@ -124,4 +161,50 @@ fn verify_binds_every_identity_to_the_files() {
     )
     .unwrap_err();
     assert!(error.contains("no regular hagia"), "{error}");
+}
+
+#[test]
+fn verify_binds_the_vendored_c_sdk_manifest_and_revision() {
+    let dir = Dir::new("wm-pair-sdk");
+    let pair = dir.0.join("pair");
+    let ids = write_pair(&pair);
+    let commits = [ids.commits[0].as_str(), ids.commits[1].as_str()];
+    let digests = [ids.digests[0].as_str(), ids.digests[1].as_str()];
+    verify(&pair, commits, digests, &ids.profile).unwrap();
+    let sdk = pair.join("hagia-c-sdk.manifest.json");
+    let manifest_path = pair.join("wm-pair.manifest");
+    let original_sdk = fs::read_to_string(&sdk).unwrap();
+    let original = fs::read_to_string(&manifest_path).unwrap();
+    // The carried manifest changed: its digest no longer binds.
+    fs::write(&sdk, original_sdk.replace("README.md", "README.txt")).unwrap();
+    let error = verify(&pair, commits, digests, &ids.profile).unwrap_err();
+    assert!(error.contains("hagia_c_sdk_manifest_sha256"), "{error}");
+    // Missing entirely.
+    fs::remove_file(&sdk).unwrap();
+    let error = verify(&pair, commits, digests, &ids.profile).unwrap_err();
+    assert!(
+        error.contains("no regular hagia-c-sdk.manifest.json"),
+        "{error}"
+    );
+    fs::write(&sdk, &original_sdk).unwrap();
+    // The recorded revision is not the one the carried manifest names.
+    let other = "0".repeat(40);
+    fs::write(
+        &manifest_path,
+        original.replace(fixture::HAGIA_C_SDK_REV, &other),
+    )
+    .unwrap();
+    let error = verify(&pair, commits, digests, &ids.profile).unwrap_err();
+    assert!(error.contains("hagia_c_sdk_revision"), "{error}");
+    // A schema-2 pair (no SDK binding) is refused.
+    let schema2 = original
+        .replace("schema=3", "schema=2")
+        .lines()
+        .filter(|line| !line.starts_with("hagia_c_sdk_"))
+        .map(|line| format!("{line}\n"))
+        .collect::<String>();
+    fs::write(&manifest_path, schema2).unwrap();
+    assert!(verify(&pair, commits, digests, &ids.profile).is_err());
+    fs::write(&manifest_path, &original).unwrap();
+    verify(&pair, commits, digests, &ids.profile).unwrap();
 }

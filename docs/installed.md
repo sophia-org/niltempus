@@ -14,13 +14,23 @@ and verification path.
 cargo xtask prepare-wm-pair --hagia /ABS/hagia <commit> --narthex /ABS/narthex <commit> /ABS/wm-pair \
     --build-dir=/ABS/private-build \
     --hagia-nim-deps=/ABS/hagia.nim-deps --hagia-nim-deps-sha256=<reviewed sha256> \
-    --narthex-nim-deps=/ABS/narthex.nim-deps --narthex-nim-deps-sha256=<reviewed sha256>
+    --narthex-nim-deps=/ABS/narthex.nim-deps --narthex-nim-deps-sha256=<reviewed sha256> \
+    --hagia-c-sdk-rev=<the C SDK revision Hagia vendors>
 cargo xtask package-desktop --sophia-root=/ABS/sophia --sophia-rev=<pinned rev> \
     --wm-pair=/ABS/wm-pair --wm-pair-commits=<hagia>,<narthex> \
     --wm-pair-sha256=<hagia>,<narthex> --wm-pair-profile-sha256=<default.kdl> \
     --build-dir=/ABS/private-build --out=/ABS/release
 tools/install_live_session.sh /ABS/release
 ```
+
+`--hagia-c-sdk-rev` has no default and is never read from Hagia's tree: the
+operator or director names it. Hagia's staged signed tree must vendor exactly
+that SDK revision (the manifest names it and `upstream.commit` hashes to it)
+and its vendored `source/` must match the manifest file for file, with none
+extra or missing. The pair (schema 3) records `hagia_c_sdk_revision`,
+carries the vendored manifest as `hagia-c-sdk.manifest.json`, and binds it by
+`hagia_c_sdk_manifest_sha256`; verification re-checks both. The vendor path
+is `wm_pair::HAGIA_C_SDK_VENDOR`, pending root's Hagia commit.
 
 Packaging requires this repository clean with a signed HEAD, the pinned signed
 Sophia checkout, the full provisioning marker and the operator's expected

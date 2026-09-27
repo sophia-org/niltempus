@@ -122,6 +122,9 @@ pub fn reviewed_deps(product: &str, commit: &str) -> String {
 }
 
 /// A prepared-pair directory in `prepare-wm-pair`'s layout (schema 2).
+/// The SDK revision the fixture pair's Hagia vendors.
+pub const HAGIA_C_SDK_REV: &str = "841563d614ed8540472f0edfa7f4cddaafe3fdde";
+
 pub fn write_pair(dir: &Path) -> PairIds {
     fs::create_dir(dir).unwrap();
     let mut commits = Vec::new();
@@ -145,8 +148,14 @@ pub fn write_pair(dir: &Path) -> PairIds {
     }
     let profile = b"schema 1\n";
     fs::write(dir.join("default.kdl"), profile).unwrap();
+    // Hagia's vendored C SDK manifest, carried into the pair.
+    let sdk = format!(
+        "{{\"schema\":1,\"repository\":\"https://github.com/sophia-org/sophia-desktop-sdk-c\",\"revision\":\"{HAGIA_C_SDK_REV}\",\"files\":{{\"README.md\":\"{}\"}}}}\n",
+        "a".repeat(64)
+    );
+    fs::write(dir.join("hagia-c-sdk.manifest.json"), &sdk).unwrap();
     let manifest = [
-        "schema=2".to_owned(),
+        "schema=3".to_owned(),
         format!("hagia_source_commit={}", commits[0]),
         format!("hagia_source_tree={}", trees[0]),
         "hagia_signer_fingerprint=ABCDEF0123".to_owned(),
@@ -171,6 +180,10 @@ pub fn write_pair(dir: &Path) -> PairIds {
             format!("{name}_nim_command=/b/nim/bin/nim c -d:release src/{name}.nim"),
         ]
     }))
+    .chain([
+        format!("hagia_c_sdk_revision={HAGIA_C_SDK_REV}"),
+        format!("hagia_c_sdk_manifest_sha256={}", sha256(sdk.as_bytes())),
+    ])
     .collect::<Vec<_>>()
     .join("\n")
         + "\n";

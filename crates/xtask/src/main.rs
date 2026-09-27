@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 const USAGE: &str = "usage:
   xtask prepare-bemenu-artifact SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR
   xtask prepare-product-artifact lom|provlita|hagia SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR --build-dir=/ABS [--nim-deps=/ABS --nim-deps-sha256=SHA]
-  xtask prepare-wm-pair --hagia REPO COMMIT --narthex REPO COMMIT NEW-OUTPUT-DIR --build-dir=/ABS --hagia-nim-deps=/ABS --hagia-nim-deps-sha256=SHA --narthex-nim-deps=/ABS --narthex-nim-deps-sha256=SHA
+  xtask prepare-wm-pair --hagia REPO COMMIT --narthex REPO COMMIT NEW-OUTPUT-DIR --build-dir=/ABS --hagia-nim-deps=/ABS --hagia-nim-deps-sha256=SHA --narthex-nim-deps=/ABS --narthex-nim-deps-sha256=SHA --hagia-c-sdk-rev=REV
   xtask prepare-physical-inputs --sophia-root=/ABS --build-dir=/ABS --out=/ABS/NEW --sophia-features=F [--sophia-packages=P] [--hagia=... --narthex=...] [--profile=OWNER:PATH ...]
   xtask prepare-physical-inputs verify --out=/ABS --manifest-sha256=SHA
   xtask nim-deps draft --store=/ABS --source=/ABS --commit=SHA --product=hagia|narthex --nim=/ABS --nim-lib=/ABS --gcc=/ABS --bwrap=/ABS --build-dir=/ABS --pin=NAME=VERSION ... --out=/ABS/NEW

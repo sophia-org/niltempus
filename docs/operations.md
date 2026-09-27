@@ -35,7 +35,8 @@ pinned Sophia checkout and a prepared Hagia/Narthex pair, then install it:
 cargo xtask prepare-wm-pair --hagia /ABS/hagia <commit> --narthex /ABS/narthex <commit> /ABS/wm-pair \
     --build-dir=/ABS/private-build \
     --hagia-nim-deps=/ABS/hagia.nim-deps --hagia-nim-deps-sha256=<reviewed sha256> \
-    --narthex-nim-deps=/ABS/narthex.nim-deps --narthex-nim-deps-sha256=<reviewed sha256>
+    --narthex-nim-deps=/ABS/narthex.nim-deps --narthex-nim-deps-sha256=<reviewed sha256> \
+    --hagia-c-sdk-rev=<the C SDK revision Hagia vendors>
 cargo xtask package-desktop --sophia-root=/ABS/sophia --sophia-rev=<pinned rev> \
     --wm-pair=/ABS/wm-pair --wm-pair-commits=<hagia>,<narthex> \
     --wm-pair-sha256=<hagia>,<narthex> --wm-pair-profile-sha256=<default.kdl> \
