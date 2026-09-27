@@ -6,47 +6,31 @@ renders its content with Vello and hands complete candidates to Sophia over
 the shell content path. Sophia owns the generic content contract; this page is
 Lom's side and the external gates that exercise it.
 
-## Status: pending the Lom 9P lockstep
+## 9P transport
 
-Lom `0d1ff046edd41de02fdf0948cdb0ff74d35a97e7` is 9P-only: `lom --serve`
-requires a nonempty `SOPHIA_SHELL_9P_SOCKET` and refuses any presence of
-`SOPHIA_SHELL_SOCKET` (empty, or both set). It writes
-`lom_shell_transport schema=1 wire=9p2000.L revision=6 epoch=N` after
-negotiation and before GPU validation; revision 6 and capabilities `0x783`,
-`lom_gpu_admission` and the presentation and action records are unchanged.
-`lom content-proof --socket` is 9P-only too (revision 6, capabilities `0x81`,
-renderer failure and resource release required).
+Lom `0d1ff046edd41de02fdf0948cdb0ff74d35a97e7` requires a nonempty
+`SOPHIA_SHELL_9P_SOCKET` and refuses any presence of `SOPHIA_SHELL_SOCKET`,
+including an empty value. It emits `lom_shell_transport schema=1
+wire=9p2000.L revision=6 epoch=N` before GPU admission. The serve profile keeps
+capabilities `0x783`; the CPU `content-proof` profile requests `0x81`.
 
-The pinned Sophia (`de776c68`) serves both of Lom's proof paths and the legacy
-`--shell-process` shell over IPC only:
+Sophia at `740c52551b4a667ffefc2b388eb58e5e4611ca1c` supports the selected
+9P wire in the content conformance host, `shell-gpu-content-proof` and the
+single-shell Session path. The panel runner passes
+`--shell-transport=9p2000.L`; the GPU proof passes `--transport=9p2000.L`.
+Independent Lom and Bemenu components explicitly select the same wire in
+profiles. Provlita is outside this conversion and retains its existing wire.
 
-- `sophia shell-gpu-content-proof`
-  (`crates/sophia-session/src/live_session/metadata_shell/gpu_content_proof.rs`);
-- the content-proof conformance host
-  (`crates/sophia-runtime/examples/shell_content_conformance_host.rs`);
-- the legacy metadata shell that `--shell-process` starts
-  (`metadata_shell.rs`, `metadata_shell/component_launch.rs`).
+The verifier requires one 9P transport record before GPU admission and render
+records, with its epoch matching Sophia's grant. Mutations cover a missing,
+repeated, late, wrong-wire or mismatched-epoch record. Sophia's protected
+content host has exchanged a complete candidate and resource release with
+Lom's CPU proof. This does not establish GPU execution or live presentation.
 
-Independent shell components already select 9P through
-`transport "9p2000.L"`. Root is adding a generic 9P option to the two proof
-hosts and deciding how the panel runner converges. Until those land and the pin
-moves, these stay pending and on the bounds pending list, with no IPC path
-kept for them:
-
-- `tools/run_current_lom_panel_gate_tty4.sh [launcher|dock]`;
-- `tools/lom_gpu_content_hardware_proof.sh` and
-  `tools/verify_lom_gpu_content_hardware_proof.sh`;
-- `tools/verify_lom_panel_native_gate.sh` and `tools/probes/lom_workload/`;
-- their self-test `tools/check_lom_gpu_content_proof_verifiers.sh`;
-- the Lom recipe in `prepare-product-artifact` (still at its earlier signed
-  revision).
-
-When they land, the lockstep requires `lom_shell_transport` (wire
-`9p2000.L`, revision 6, the negotiated epoch, ordered after negotiation and
-before GPU admission), passes only `SOPHIA_SHELL_9P_SOCKET` with negatives for
-the IPC variable present, empty or both set, updates the content-proof
-invocation, moves the Lom artifact to `0d1ff046` with provenance, and converts
-the three Lom scripts to prepared inputs.
+The remaining runner work is conversion of the three Lom scripts to the
+prepared-input helper. Their existing private-target builds remain on the
+explicit bounds pending list until that conversion is gated. A freshly bound
+Lom artifact and any attended GPU run remain separate release evidence.
 
 ## Lom's side of the content path
 

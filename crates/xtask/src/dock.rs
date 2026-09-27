@@ -32,8 +32,8 @@ pub fn profile(paths: &[String]) -> Result<String, String> {
         r#"schema 1
 shell {{ enabled #true; content #true; content-input #true; panel 24; gpu "denied"; }}
 session {{
-    shell-component "panel" "bar" {{ executable {lom}; config {config}; gpu "direct"; reservation "top" 24; }}
-    shell-component "menu" "application-launcher" {{ executable {menu}; gpu "denied"; }}
+    shell-component "panel" "bar" {{ transport "9p2000.L"; executable {lom}; config {config}; gpu "direct"; reservation "top" 24; }}
+    shell-component "menu" "application-launcher" {{ transport "9p2000.L"; executable {menu}; gpu "denied"; }}
     shell-component "dock" "dock" {{ executable {dock}; config {dock_config}; gpu "direct"; reservation "bottom" 64; }}
     application-catalog "native-launcher-gate"
     startup

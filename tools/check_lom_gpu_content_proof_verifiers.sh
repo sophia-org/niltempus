@@ -7,10 +7,11 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 cat > "$work/gpu.log" <<'EOF'
+lom_shell_transport schema=1 wire=9p2000.L revision=6 epoch=1
 lom_gpu_admission schema=2 status=ready grant_epoch=1 render_node=/dev/dri/renderD128 device_major=226 device_minor=128 selection_method=drm_dev_t adapter_render_major=226 adapter_render_minor=128 adapter_has_render=true pci_bus_id=0000:01:00.0 pci_vendor_id=1002 pci_device_id=744c backend=Vulkan device_type=DiscreteGpu adapter_name="fixture" driver="fixture" visible_dri_entries=renderD128
 sophia_shell_gpu_content_render schema=1 index=1 generation=3 bytes=24576 checksum=0123456789abcdef outcome=presented_synthetic
 sophia_shell_gpu_content_render schema=1 index=2 generation=4 bytes=24576 checksum=fedcba9876543210 outcome=renderer_failed
-sophia_shell_gpu_content_proof schema=1 status=complete protected=true revision=6 capabilities=0x783 grant_epoch=1 render_node=/dev/dri/renderD128 device_major=226 device_minor=128 pci_bus_id=0000:01:00.0 output_width=256 output_height=64 edge=top width=256 height=24 renders=2 pixels=full_surface_raster discrete_input=true end=client_exits backing_bytes=0 native_presentation=false
+sophia_shell_gpu_content_proof schema=1 status=complete protected=true wire=9p2000.L revision=6 capabilities=0x783 grant_epoch=1 render_node=/dev/dri/renderD128 device_major=226 device_minor=128 pci_bus_id=0000:01:00.0 output_width=256 output_height=64 edge=top width=256 height=24 renders=2 pixels=full_surface_raster discrete_input=true end=client_exits backing_bytes=0 native_presentation=false
 EOF
 "$ROOT_DIR/tools/verify_lom_gpu_content_hardware_proof.sh" "$work/gpu.log" >/dev/null
 proof='/^sophia_shell_gpu_content_proof /'
@@ -23,10 +24,18 @@ gpu_mutations=(
     one_render missing_second_checksum claimed_native_first
     contract_pixels stop_client input_denied bottom_edge other_output wide_surface
     thick_surface over_coverage wrong_bytes regressed_generation reordered_render
-    extra_render backing_retained old_record)
+    extra_render backing_retained old_record
+    missing_transport duplicate_transport wrong_wire wrong_host_wire wrong_transport_epoch late_transport natural_ipc)
 for mutation in "${gpu_mutations[@]}"; do
     cp "$work/gpu.log" "$work/$mutation.log"
     case "$mutation" in
+        missing_transport) sed -i '/^lom_shell_transport /d' "$work/$mutation.log" ;;
+        duplicate_transport) sed -n '/^lom_shell_transport /p' "$work/gpu.log" >> "$work/$mutation.log" ;;
+        wrong_wire) sed -i '/^lom_shell_transport /s/wire=9p2000.L/wire=current-ipc/' "$work/$mutation.log" ;;
+        wrong_host_wire) sed -i "${proof}s/wire=9p2000.L/wire=current-ipc/" "$work/$mutation.log" ;;
+        wrong_transport_epoch) sed -i '/^lom_shell_transport /s/epoch=1/epoch=2/' "$work/$mutation.log" ;;
+        late_transport) sed -i '/^lom_shell_transport /{h;d;}; /^lom_gpu_admission /G' "$work/$mutation.log" ;;
+        natural_ipc) sed -i 's/wire=9p2000.L/wire=current-ipc/g' "$work/$mutation.log" ;;
         extra_drm) sed -i 's/visible_dri_entries=renderD128/visible_dri_entries=card0,renderD128/' "$work/$mutation.log" ;;
         cpu) sed -i 's/device_type=DiscreteGpu/device_type=Cpu/' "$work/$mutation.log" ;;
         zero_checksum) sed -i 's/checksum=0123456789abcdef/checksum=0000000000000000/' "$work/$mutation.log" ;;

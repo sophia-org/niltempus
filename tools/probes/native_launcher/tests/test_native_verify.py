@@ -89,6 +89,8 @@ class EvidenceTests(unittest.TestCase):
         result = profile('/opt/lom', '/private/a "quoted".kdl', '/opt/bemenu-sophia')
         self.assertIn('shell-component "panel" "bar"', result)
         self.assertIn('shell-component "menu" "application-launcher"', result)
+        self.assertEqual(result.count('transport "9p2000.L"'), 2)
+        self.assertNotIn('current-ipc', result)
         self.assertIn('config "/private/a \\"quoted\\".kdl"', result)
         self.assertIn('    startup\n', result)
         self.assertNotIn('bind ', result)

@@ -937,7 +937,7 @@ checksum = "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e"
 [[package]]
 name = "sophia-9p"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 dependencies = [
  "rustix",
  "sophia-9p-records",
@@ -946,7 +946,7 @@ dependencies = [
 [[package]]
 name = "sophia-9p-client"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 dependencies = [
  "rustix",
  "sophia-9p-records",
@@ -955,12 +955,12 @@ dependencies = [
 [[package]]
 name = "sophia-9p-records"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 
 [[package]]
 name = "sophia-backend-live"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 dependencies = [
  "sophia-engine",
  "sophia-protocol",
@@ -971,7 +971,7 @@ dependencies = [
 [[package]]
 name = "sophia-config"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 dependencies = [
  "kdl",
  "rustix",
@@ -981,7 +981,7 @@ dependencies = [
 [[package]]
 name = "sophia-conformance"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 dependencies = [
  "drm",
  "niri-ipc",
@@ -1000,12 +1000,12 @@ dependencies = [
 [[package]]
 name = "sophia-desktop-ids"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 
 [[package]]
 name = "sophia-engine"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 dependencies = [
  "rustix",
  "sha2",
@@ -1019,7 +1019,7 @@ dependencies = [
 [[package]]
 name = "sophia-input-authority"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 dependencies = [
  "sophia-protocol",
 ]
@@ -1027,7 +1027,7 @@ dependencies = [
 [[package]]
 name = "sophia-linux-peer"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 dependencies = [
  "libc",
 ]
@@ -1035,7 +1035,7 @@ dependencies = [
 [[package]]
 name = "sophia-portal"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 dependencies = [
  "sophia-protocol",
 ]
@@ -1043,7 +1043,7 @@ dependencies = [
 [[package]]
 name = "sophia-protocol"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 dependencies = [
  "serde",
  "serde_json",
@@ -1054,7 +1054,7 @@ dependencies = [
 [[package]]
 name = "sophia-renderer-live"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 dependencies = [
  "gbm",
  "parley",
@@ -1071,7 +1071,7 @@ dependencies = [
 [[package]]
 name = "sophia-renderer-native-egl"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 dependencies = [
  "gbm",
  "glow",
@@ -1083,7 +1083,7 @@ dependencies = [
 [[package]]
 name = "sophia-runtime"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 dependencies = [
  "rustix",
  "sophia-9p",
@@ -1096,7 +1096,7 @@ dependencies = [
 [[package]]
 name = "sophia-shell-client"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 dependencies = [
  "sophia-9p-client",
  "sophia-9p-records",
@@ -1106,7 +1106,7 @@ dependencies = [
 [[package]]
 name = "sophia-shell-protocol"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 dependencies = [
  "sophia-desktop-ids",
 ]
@@ -1114,7 +1114,7 @@ dependencies = [
 [[package]]
 name = "sophia-sysv-shm"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 dependencies = [
  "libc",
 ]
@@ -1122,7 +1122,7 @@ dependencies = [
 [[package]]
 name = "sophia-x-authority"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 dependencies = [
  "miniz_oxide",
  "rustix",
@@ -1138,7 +1138,7 @@ dependencies = [
 [[package]]
 name = "sophia-xshmfence"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=de776c68afdf9a133818f86917893c3362dc9fb7#de776c68afdf9a133818f86917893c3362dc9fb7"
+source = "git+https://github.com/sophia-org/sophia.git?rev=740c52551b4a667ffefc2b388eb58e5e4611ca1c#740c52551b4a667ffefc2b388eb58e5e4611ca1c"
 dependencies = [
  "libloading",
 ]

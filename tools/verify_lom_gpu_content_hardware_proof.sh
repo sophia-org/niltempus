@@ -28,6 +28,9 @@ if [[ $# -ne 1 || ! -f "$1" ]]; then
 fi
 
 log=$1
+transport_count=$(grep -c '^lom_shell_transport ' "$log" || true)
+[[ "$transport_count" -eq 1 ]] || { echo "expected one Lom 9P transport record" >&2; exit 1; }
+transport=$(grep '^lom_shell_transport ' "$log")
 ready_count=$(grep -c '^lom_gpu_admission schema=2 status=ready ' "$log" || true)
 complete_count=$(grep -c '^sophia_shell_gpu_content_proof schema=1 status=complete ' "$log" || true)
 [[ "$ready_count" -eq 1 ]] || { echo "expected one Lom GPU admission record" >&2; exit 1; }
@@ -59,6 +62,17 @@ bounded_unsigned() {
         return 1
     fi
 }
+
+[[ "$(field "$transport" schema)" == 1 && "$(field "$transport" wire)" == 9p2000.L \
+    && "$(field "$transport" revision)" == 6 ]] || { echo "Lom did not negotiate the 9P content contract" >&2; exit 1; }
+transport_epoch=$(field "$transport" epoch)
+bounded_unsigned "$transport_epoch" 18446744073709551615 "transport epoch"
+transport_line=$(grep -n '^lom_shell_transport ' "$log" | cut -d: -f1)
+ready_line=$(grep -n '^lom_gpu_admission schema=2 status=ready ' "$log" | cut -d: -f1)
+first_render_line=$(grep -n '^sophia_shell_gpu_content_render ' "$log" | head -n 1 | cut -d: -f1)
+[[ -n "$first_render_line" && "$transport_line" -lt "$ready_line" \
+    && "$ready_line" -lt "$first_render_line" ]] || { echo "transport, admission and rendering are out of order" >&2; exit 1; }
+[[ "$(field "$complete" wire)" == 9p2000.L ]] || { echo "Sophia did not use 9P" >&2; exit 1; }
 
 ready_schema=$(field "$ready" schema)
 ready_status=$(field "$ready" status)
@@ -177,6 +191,7 @@ done
 compare_identity() {
     [[ "$1" == "$2" ]] || { echo "Lom and Sophia disagree on $3" >&2; exit 1; }
 }
+compare_identity "$transport_epoch" "$complete_epoch" transport_epoch
 compare_identity "$grant_epoch" "$complete_epoch" grant_epoch
 compare_identity "$render_node" "$complete_render_node" render_node
 compare_identity "$device_major" "$complete_major" device_major

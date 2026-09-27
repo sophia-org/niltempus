@@ -69,8 +69,9 @@ echo "Evidence: $EVIDENCE_DIR"
 # its own, discrete input granted. full-surface-raster proves only that the
 # pattern crossed the content path; GPU execution rests on the protected
 # grant plus Lom's own lom_gpu_admission evidence (see the verifier).
-env -u DISPLAY -u WAYLAND_DISPLAY -u WAYLAND_SOCKET SOPHIA_SHELL_GPU_PROOF_ARM=1 \
-    "$SOPHIA_BIN" shell-gpu-content-proof \
+env -u DISPLAY -u WAYLAND_DISPLAY -u WAYLAND_SOCKET \
+    -u SOPHIA_SHELL_SOCKET -u SOPHIA_SHELL_9P_SOCKET SOPHIA_SHELL_GPU_PROOF_ARM=1 \
+    "$SOPHIA_BIN" shell-gpu-content-proof --transport=9p2000.L \
     "--client=$LOM_BIN" --client-arg=--serve "--config=$LOM_CONFIG" \
     "--seat=$SEAT" "--render-node=$RENDER_NODE" --output=256x64 --surface=256x24 --edge=top \
     --pixels=full-surface-raster --outcomes=presented,renderer-failed --end=client-exits \

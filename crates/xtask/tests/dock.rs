@@ -144,6 +144,8 @@ fn actual_generated_profile_has_three_roles_separate_reservations_and_no_wm_over
     assert_eq!(components[0].role, ShellComponentRole::Bar);
     assert_eq!(components[1].role, ShellComponentRole::ApplicationLauncher);
     assert_eq!(components[2].role, ShellComponentRole::Dock);
+    assert_eq!(components[0].transport, ShellTransportSelection::NineP2000L);
+    assert_eq!(components[1].transport, ShellTransportSelection::NineP2000L);
     assert_eq!(
         components[0].reservation.unwrap().edge,
         ShellComponentEdge::Top

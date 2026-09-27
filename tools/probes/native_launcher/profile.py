@@ -15,8 +15,8 @@ def profile(lom: str, config: str, bemenu: str) -> str:
     return f'''schema 1
 shell {{ enabled #true; content #true; content-input #true; panel 24; gpu "denied"; }}
 session {{
-    shell-component "panel" "bar" {{ executable {quoted(lom)}; config {quoted(config)}; gpu "direct"; }}
-    shell-component "menu" "application-launcher" {{ executable {quoted(bemenu)}; gpu "denied"; }}
+    shell-component "panel" "bar" {{ transport "9p2000.L"; executable {quoted(lom)}; config {quoted(config)}; gpu "direct"; }}
+    shell-component "menu" "application-launcher" {{ transport "9p2000.L"; executable {quoted(bemenu)}; gpu "denied"; }}
     application-catalog "native-launcher-gate"
     startup
 }}

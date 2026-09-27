@@ -200,9 +200,10 @@ echo session >> "$TEST_TRACE"
 # Staged, never the operator's checkout: an input missing from the pinned
 # tree (TEST_SOURCE_UNTRACKED) is unavailable here.
 [[ -z "${TEST_SOURCE_UNTRACKED:-}" ]] || source "$(dirname "$0")/lib/untracked-input.sh"
-[[ "$#" == 3 && "$1" == --max-runtime-ms=90000 ]]
+[[ "$#" == 4 && "$1" == --max-runtime-ms=90000 ]]
 [[ "$2" == --shell-process="$SOPHIA_LOM_NATIVE_EVIDENCE_DIR/lom" ]]
-[[ "$3" == --wm-process="$SOPHIA_HAGIA_BIN" ]]
+[[ "$3" == --shell-transport=9p2000.L ]]
+[[ "$4" == --wm-process="$SOPHIA_HAGIA_BIN" ]]
 [[ "$SOPHIA_HAGIA_BIN" == "$SOPHIA_LOM_NATIVE_EVIDENCE_DIR/hagia" ]]
 [[ "$SOPHIA_SESSION_WATCHDOG_SECONDS" == 110 && "$SOPHIA_SESSION_STARTUP" == none ]]
 [[ "$SOPHIA_REQUIRE_LOCAL_VT" == true && "$SOPHIA_MANAGE_KEYD" == true ]]

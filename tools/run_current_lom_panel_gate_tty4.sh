@@ -230,7 +230,7 @@ Record physical monitor placement, focus and visual observations separately.
 INSTRUCTIONS
 fi
 shell_args=()
-[[ "$GATE_MODE" != panel ]] || shell_args+=("--shell-process=$LOM_BIN")
+[[ "$GATE_MODE" != panel ]] || shell_args+=("--shell-process=$LOM_BIN" --shell-transport=9p2000.L)
 set +e
 # The external launcher (rule d): absolute SOPHIA_BIN and SOPHIA_SESSION_PREFLIGHT,
 # the staged pinned tree as SOPHIA_ROOT, and the explicit target TTY. It maps
