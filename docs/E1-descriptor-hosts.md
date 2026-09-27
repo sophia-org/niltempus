@@ -7,7 +7,7 @@ three things:
 - **generic**: Sophia keeps it, in root's
   `crates/sophia-conformance/tests/shell_descriptor_modes.rs` at `9bc6bb7`;
 - **product**: Narthex coverage, which belongs outside Sophia;
-- **unpeered**: no independent peer covers it.
+- **GAP**: no independent peer covers it (director's ruling: recorded as a gap, not as inherited coverage).
 
 Sources:
 - the pin, `de776c68afdf9a133818f86917893c3362dc9fb7`;
@@ -84,7 +84,9 @@ Last, the `--proof` descriptor lifecycle runs.
   transaction and the disposition of the live ack, and only the disposition of
   the stale one (the `9bc6bb7` host diff).
 
-**Unpeered: flag.** No independent (non-Rust-codec) generic peer runs `--serve`.
+**GAP (director's ruling).** `--serve` has no independent peer. This is
+recorded as a gap, not as coverage inherited from the IPC runs. No independent
+(non-Rust-codec) generic peer runs `--serve`.
 The C `sophia_shell_v1_client` runs only `--proof`. Before, the only
 independent encoder of the tab and reference frames here was Narthex's Nim.
 Root's peer shares the host's codecs, so a codec defect that is symmetric on
@@ -114,12 +116,15 @@ side of Narthex already has external coverage here, in the Hagia policy gate
 **Generic (kept in Sophia).** `reservation_changes_work_area_only_at_commit_and_withdraws`
 asserts that exact line, with the same Rust-codec peer.
 
-**Unpeered: flag.** No independent generic peer runs `--bar-proof`. The C
+**GAP (director's ruling).** No independent-client 9P test proves that the work
+area changes only at commit (`--bar-proof`). This is recorded as a gap, not as
+coverage inherited from the IPC bar proof. No independent generic peer runs
+`--bar-proof`. The C
 client does not implement the bar mode. Narthex was the only independent
 implementation that claimed a strip through this host. The component bar's
 file-wire reservation role (bit 1 in `sophia-shell-files.md`) is a different
 profile. No test found at the pin drives "work area changes only at commit"
-through it with an independent client. Root should confirm or name one.
+through it with an independent client.
 
 **Product (Narthex).** `check_shell_protocol.sh:127-132` runs `--bar-proof`
 against Narthex. It is IPC. External target: the 9P descriptor host seam.
@@ -136,8 +141,12 @@ same product script drives it. It too is IPC.
 | Mode | Generic (Sophia, `9bc6bb7`) | Independent generic peer | Product (Narthex) |
 | --- | --- | --- | --- |
 | `--proof` | `descriptor_presentation_activation_and_withdrawal` | C `sophia_shell_v1_client` (IPC, retires with product IPC) | seam: 9P descriptor host |
-| `--serve` | `persistent_tabs_reference_and_descriptor_lifecycles`, `tab_acknowledgements_must_name_the_exact_event_and_transaction` | **none: flag** | seam: 9P descriptor host |
-| `--bar-proof` | `reservation_changes_work_area_only_at_commit_and_withdraws` | **none: flag** | seam: 9P descriptor host |
+| `--serve` | `persistent_tabs_reference_and_descriptor_lifecycles`, `tab_acknowledgements_must_name_the_exact_event_and_transaction` | **GAP**: no independent peer | seam: 9P descriptor host |
+| `--bar-proof` | `reservation_changes_work_area_only_at_commit_and_withdraws` | **GAP**: no independent-client 9P test of commit-only work-area change | seam: 9P descriptor host |
+
+Both gaps close only with root's descriptor-file contract and host, plus an
+independent C SDK peer that drives them over 9P. Until then the Rust-codec
+peer's result is the only evidence, and it is not independent.
 
 Nothing in E1 moves to this repository until the seam exists. When it does:
 - the Narthex runs of the three modes and the `tshell_*` tests move here as

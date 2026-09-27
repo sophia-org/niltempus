@@ -138,8 +138,8 @@ pub struct Observed {
     pub stages: BTreeSet<String>,
     /// Every X error, in trace order. None is dropped before the verdict.
     pub errors: Vec<ObservedError>,
-    /// Dispatch failures while the client was still running, as
-    /// `name:major=M:minor=N`. The old probe counted any failure as an error.
+    /// Dispatch failures, as `name:major=M:minor=N`. The old probe counted
+    /// any failure as an error; only [`excused_failure`] is left out.
     pub failures: Vec<String>,
     pub transactions: u64,
     /// The trace channel was full at least once, so evidence may be missing.
@@ -148,6 +148,56 @@ pub struct Observed {
     pub server_error: Option<String>,
     /// The client wrote more than the log cap to stdout or stderr.
     pub client_log_exceeded: bool,
+}
+
+/// One dispatched request, reduced to the facts the verdict uses.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct TraceRecord {
+    /// The exact `evidence_name`, or `None` for `Other`.
+    pub stage: Option<String>,
+    pub major: u8,
+    pub minor: u16,
+    /// `X11ObservedDispatchFailure`'s variant name, if the dispatch failed.
+    pub failure: Option<String>,
+    pub errors: Vec<ObservedError>,
+    pub transactions: u64,
+    /// The observation was made after the probe initiated an intentional
+    /// stop of the client. This says when it was observed, not what caused it.
+    pub after_stop_initiated: bool,
+}
+
+/// Whether the probe stopped the client on purpose. A client that exited by
+/// itself was not stopped; departures after that are not excused.
+pub fn stop_is_intentional(end: ClientEnd) -> bool {
+    !matches!(end, ClientEnd::Exited { .. })
+}
+
+/// The one failure left out of the verdict: `ClientDeparted` observed after
+/// the probe initiated an intentional stop (director's ruling). Before any
+/// stop, after a natural exit, or of any other kind, a failure is refused.
+pub fn excused_failure(failure: &str, after_stop_initiated: bool) -> bool {
+    after_stop_initiated && failure == "ClientDeparted"
+}
+
+impl Observed {
+    /// Fold one request into the observation. X errors are kept whatever
+    /// their timing; the verdict checks every one.
+    pub fn record(&mut self, trace: TraceRecord) {
+        self.requests += 1;
+        if let Some(stage) = trace.stage {
+            self.stages.insert(stage);
+        }
+        if let Some(failure) = trace.failure
+            && !excused_failure(&failure, trace.after_stop_initiated)
+        {
+            self.failures.push(format!(
+                "{failure}:major={}:minor={}",
+                trace.major, trace.minor
+            ));
+        }
+        self.errors.extend(trace.errors);
+        self.transactions += trace.transactions;
+    }
 }
 
 /// The verdict. `Ok` carries the accepted report line; `Err` names every

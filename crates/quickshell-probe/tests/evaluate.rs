@@ -1,6 +1,9 @@
 //! The verdict: every error examined, exact stage tokens, overflow, failure,
 //! exit status and the deadline stop.
-use quickshell_probe::{ClientEnd, Observed, ObservedError, Renderer, allowed, evaluate};
+use quickshell_probe::{
+    ClientEnd, Observed, ObservedError, Renderer, TraceRecord, allowed, evaluate,
+    stop_is_intentional,
+};
 
 fn error(code: &str, major: u8, minor: u16, resource: u32) -> ObservedError {
     ObservedError {
@@ -199,4 +202,111 @@ fn a_failed_client_or_one_that_never_connected_is_refused() {
         .unwrap_err();
         assert!(refusal.contains("client_never_connected"), "{refusal}");
     }
+}
+
+fn departure(after_stop_initiated: bool) -> TraceRecord {
+    TraceRecord {
+        major: 1,
+        failure: Some("ClientDeparted".to_owned()),
+        after_stop_initiated,
+        ..TraceRecord::default()
+    }
+}
+
+fn with(records: Vec<TraceRecord>) -> Observed {
+    let mut observed = connected(Renderer::Gpu);
+    for record in records {
+        observed.record(record);
+    }
+    observed
+}
+
+// Director's ruling: ClientDeparted is excused only when observed after an
+// intentional, probe-initiated stop. Controls (a)-(d).
+
+#[test]
+fn a_departure_before_any_stop_fails() {
+    // (a) The run is still going: nothing was stopped.
+    let observed = with(vec![departure(false)]);
+    let refusal = evaluate(Renderer::Gpu, &observed, ClientEnd::StoppedAtDeadline).unwrap_err();
+    assert!(
+        refusal.contains("dispatch_failure=ClientDeparted:major=1"),
+        "{refusal}"
+    );
+}
+
+#[test]
+fn a_late_departure_after_a_natural_exit_is_not_excused() {
+    // (b) A natural exit is not an intentional stop, so the runner never
+    // raises the flag and the departure is recorded as observed.
+    let exit = ClientEnd::Exited {
+        code: Some(0),
+        signal: None,
+    };
+    assert!(!stop_is_intentional(exit));
+    let observed = with(vec![departure(stop_is_intentional(exit))]);
+    let refusal = evaluate(Renderer::Gpu, &observed, exit).unwrap_err();
+    assert!(
+        refusal.contains("dispatch_failure=ClientDeparted"),
+        "{refusal}"
+    );
+    let signalled = ClientEnd::Exited {
+        code: None,
+        signal: Some(15),
+    };
+    assert!(!stop_is_intentional(signalled));
+}
+
+#[test]
+fn a_departure_after_an_intentional_stop_is_allowed() {
+    // (c) Both intentional stop paths raise the flag.
+    for end in [
+        ClientEnd::StoppedAtDeadline,
+        ClientEnd::StoppedAfterTransaction,
+    ] {
+        assert!(stop_is_intentional(end));
+        let observed = with(vec![departure(stop_is_intentional(end))]);
+        let line = evaluate(Renderer::Gpu, &observed, end).unwrap_or_else(|r| panic!("{r}"));
+        assert!(line.ends_with("status=accepted"), "{line}");
+        assert!(observed.failures.is_empty());
+    }
+}
+
+#[test]
+fn other_post_stop_failures_and_errors_still_fail() {
+    // (d) After an intentional stop, every other failure kind is refused, and
+    // an unexpected X error is refused whenever it arrives.
+    for kind in ["ParseRejected", "DispatchAborted", "UnpublishedEffects"] {
+        let observed = with(vec![TraceRecord {
+            failure: Some(kind.to_owned()),
+            after_stop_initiated: true,
+            ..TraceRecord::default()
+        }]);
+        let refusal = evaluate(Renderer::Gpu, &observed, ClientEnd::StoppedAtDeadline).unwrap_err();
+        assert!(
+            refusal.contains(&format!("dispatch_failure={kind}")),
+            "{refusal}"
+        );
+    }
+    let observed = with(vec![TraceRecord {
+        errors: vec![error("BadMatch", 130, 2, 9)],
+        after_stop_initiated: true,
+        ..departure(true)
+    }]);
+    let refusal = evaluate(Renderer::Gpu, &observed, ClientEnd::StoppedAtDeadline).unwrap_err();
+    assert!(refusal.contains("x_error=BadMatch"), "{refusal}");
+    assert!(!refusal.contains("dispatch_failure"), "{refusal}");
+    // Stage and error checks are unchanged by the stop: an exact stage
+    // recorded after the stop still counts, a near miss still does not.
+    let mut observed = Observed {
+        requests: 1,
+        connections: 1,
+        ..Observed::default()
+    };
+    observed.record(TraceRecord {
+        stage: Some("RENDER:QueryPictFormatsX".to_owned()),
+        after_stop_initiated: true,
+        ..TraceRecord::default()
+    });
+    assert!(evaluate(Renderer::Gpu, &observed, ClientEnd::StoppedAtDeadline).is_err());
 }

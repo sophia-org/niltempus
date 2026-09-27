@@ -20,13 +20,12 @@ use std::time::{Duration, Instant};
 
 use sophia_protocol::{NamespaceId, TransactionId};
 use sophia_x_authority::{
-    X11CoreTraceObserver, X11DispatchObservation, X11ObservedDispatchFailure,
-    X11ObservedRequestStage, X11SetupSocketError, XClientOutput, XServerFrontend,
-    XServerFrontendConfig, XServerFrontendRouteBroker,
+    X11CoreTraceObserver, X11DispatchObservation, X11ObservedRequestStage, X11SetupSocketError,
+    XClientOutput, XServerFrontend, XServerFrontendConfig, XServerFrontendRouteBroker,
 };
 use xtask::bemenu_artifact::ProcessGroup;
 
-use crate::{ClientEnd, Observed, ObservedError, Renderer};
+use crate::{ClientEnd, Observed, ObservedError, Renderer, TraceRecord, stop_is_intentional};
 
 /// The old probes' proof window (basic_smokes.rs at the pin): a Qt cold start.
 pub const PROOF_DEADLINE: Duration = Duration::from_secs(20);
@@ -49,17 +48,6 @@ pub struct Probe {
     /// A new evidence directory, created here with mode 0700.
     pub out: PathBuf,
     pub deadline: Duration,
-}
-
-/// One dispatched request, reduced to the facts the verdict uses.
-struct Trace {
-    stage: X11ObservedRequestStage,
-    major: u8,
-    minor: u16,
-    failure: Option<X11ObservedDispatchFailure>,
-    errors: Vec<ObservedError>,
-    transactions: usize,
-    after_stop: bool,
 }
 
 /// Run the probe. `Ok` is the accepted report line and `Err` a refusal or a
@@ -125,7 +113,7 @@ fn serve(probe: &Probe, gpu: Option<gpu::Device>) -> Result<String, String> {
 
     let overflowed = Arc::new(AtomicBool::new(false));
     let stopping = Arc::new(AtomicBool::new(false));
-    let (sender, receiver) = mpsc::sync_channel::<Trace>(TRACE_CAPACITY);
+    let (sender, receiver) = mpsc::sync_channel::<TraceRecord>(TRACE_CAPACITY);
     let observer = observer(sender, overflowed.clone(), stopping.clone());
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -225,7 +213,11 @@ fn serve(probe: &Probe, gpu: Option<gpu::Device>) -> Result<String, String> {
         }
         std::thread::sleep(Duration::from_millis(10));
     };
-    stopping.store(true, Ordering::Release);
+    // Only the probe's own stops are intentional. After a natural exit the
+    // flag stays clear, so a late departure is not excused.
+    if stop_is_intentional(end) {
+        stopping.store(true, Ordering::Release);
+    }
     drop(child);
 
     stop.store(true, Ordering::Release);
@@ -251,7 +243,7 @@ fn serve(probe: &Probe, gpu: Option<gpu::Device>) -> Result<String, String> {
 }
 
 fn observer(
-    sender: SyncSender<Trace>,
+    sender: SyncSender<TraceRecord>,
     overflowed: Arc<AtomicBool>,
     stopping: Arc<AtomicBool>,
 ) -> Arc<X11CoreTraceObserver> {
@@ -271,18 +263,19 @@ fn observer(
                 _ => None,
             })
             .collect();
-        let record = Trace {
-            stage: trace.request_stage,
+        let record = TraceRecord {
+            stage: (trace.request_stage != X11ObservedRequestStage::Other)
+                .then(|| trace.request_stage.evidence_name().to_owned()),
             major: trace.major_opcode,
             minor: trace.minor_opcode,
-            failure: trace.failure,
+            failure: trace.failure.map(|failure| format!("{failure:?}")),
             errors,
             transactions: trace
                 .result
                 .response
                 .as_ref()
-                .map_or(0, |response| response.transactions.len()),
-            after_stop: stopping.load(Ordering::Acquire),
+                .map_or(0, |response| response.transactions.len() as u64),
+            after_stop_initiated: stopping.load(Ordering::Acquire),
         };
         match sender.try_send(record) {
             Ok(()) | Err(TrySendError::Disconnected(_)) => {}
@@ -292,27 +285,9 @@ fn observer(
     })
 }
 
-fn drain(receiver: &mpsc::Receiver<Trace>, observed: &mut Observed) {
+fn drain(receiver: &mpsc::Receiver<TraceRecord>, observed: &mut Observed) {
     while let Ok(trace) = receiver.try_recv() {
-        observed.requests += 1;
-        if trace.stage != X11ObservedRequestStage::Other {
-            observed
-                .stages
-                .insert(trace.stage.evidence_name().to_owned());
-        }
-        // A request in flight when the probe stops the client ends with the
-        // client departed; that is the probe's doing, not the server's. Every
-        // other failure, and any failure before the stop, is refused.
-        if let Some(failure) = trace.failure
-            && !(trace.after_stop && failure == X11ObservedDispatchFailure::ClientDeparted)
-        {
-            observed.failures.push(format!(
-                "{failure:?}:major={}:minor={}",
-                trace.major, trace.minor
-            ));
-        }
-        observed.errors.extend(trace.errors);
-        observed.transactions += trace.transactions as u64;
+        observed.record(trace);
     }
 }
 

@@ -105,7 +105,7 @@ review's corrections:
 | X errors | first only | **every** error is checked against explicit allowed shapes; each disallowed one is named in the refusal |
 | Allowed shapes | GPU: `BadWindow` 138/3; all: null-window `BadWindow` 3/14 dropped | the same two shapes, no wider; 138/3 stays GPU-only |
 | Trace overflow | dropped silently | channel of 65,536 requests; any full send marks the run and **refuses** it |
-| Dispatch failure | refused (`parse_error`) | refused, except `ClientDeparted` for a request in flight after the probe began stopping the client |
+| Dispatch failure | refused (`parse_error`) | refused, except `ClientDeparted` observed after an intentional, probe-initiated stop |
 | Never connected | passed | **refused** (`client_never_connected`) |
 | Client exit | nonzero refused; deadline stop allowed | the same; a signal death is refused too |
 | Early stop | first transaction | the same |
@@ -114,11 +114,23 @@ review's corrections:
 | Render node | first openable node, discovered | GPU: an explicit `--render-node=/dev/dri/renderDN`, never discovered; software: none, and the CLI refuses unless `/dev/dri` is absent or empty (device-hidden) |
 | Socket | `/tmp/.X11-unix/X{7900 or 7950 + pid%1000}` | the first free `/tmp/.X11-unix/XN`, N from 7900 to 8899, bound exclusively; removed on return |
 
-The `ClientDeparted` exception is new. The old probe killed the client and then
-drained, so a request in flight at the kill could fail it. Here the observer
-records whether the probe had begun stopping the client. Only that one failure
-kind, after that point, is not the server's. Any X error, whenever it arrives,
-is still checked.
+The `ClientDeparted` exception is new, and the director accepted it only in
+this narrow form. The old probe killed the client and then drained, so a
+request in flight at the kill could fail it. Here the probe raises a flag only
+on its intentional stop paths: the deadline, the early stop after a
+transaction, and the refusal paths (log cap, frontend failure). It does not
+raise the flag when the client exits by itself. The observer records whether
+each observation came after that flag was raised. That establishes order only;
+the probe does not claim it caused the departure. A `ClientDeparted` observed
+after an intentional stop is left out of the verdict. The following are all
+refused:
+- a departure observed before any stop;
+- a departure observed after a natural exit;
+- any other failure kind, whenever it is observed;
+- any disallowed X error, whenever it arrives.
+
+The exact stage and error checks do not change. Controls (a) to (d) are in
+`tests/evaluate.rs`.
 
 Evidence goes into the `--out` directory, which is new and mode 0700. It
 contains `identity.txt` (renderer, binary and QML paths with SHA-256, render
