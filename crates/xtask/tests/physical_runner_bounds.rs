@@ -11,9 +11,10 @@ fn repo() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// Scripts that may still build, each for a stated reason; the list may only
-/// shrink. None of them is a converted physical runner.
-const PENDING: [(&str, &str); 5] = [
+/// Scripts that may still build until their own change lands, each for a
+/// stated reason; the list may only shrink. None of them is a converted
+/// physical runner.
+const PENDING: [(&str, &str); 4] = [
     (
         "tools/run_current_lom_panel_gate_tty4.sh",
         "Lom lockstep (SDK + 9P): frozen until root's Lom change is gated",
@@ -27,14 +28,17 @@ const PENDING: [(&str, &str); 5] = [
         "the Lom self-test that scans those two scripts for builds",
     ),
     (
-        "tools/reload_policy_client.sh",
-        "the operator's own default-WM reload workflow, not a gate (ruling pending)",
-    ),
-    (
         "tools/provision.sh",
         "provisioning's offline --locked self-check of this repository's own xtask",
     ),
 ];
+
+/// Scripts explicitly exempt by ruling (fixed; not a waiting list).
+const EXEMPT: [(&str, &str); 1] = [(
+    "tools/reload_policy_client.sh",
+    "operator tool (director ruling): the operator's own default-WM reload workflow, \
+     not a gate; its conversion belongs with the niltempus prepare/reload-Hagia path",
+)];
 
 /// A forbidden construct: its name and whether a (comment-free) line has it.
 struct Rule {
@@ -221,7 +225,7 @@ fn no_runner_builds_or_reads_a_source_target() {
         let name = relative(path);
         let text = fs::read_to_string(path).unwrap();
         let found = violations(&text);
-        if PENDING.iter().any(|(p, _)| *p == name) {
+        if PENDING.iter().chain(EXEMPT.iter()).any(|(p, _)| *p == name) {
             pending_seen.push(name);
             continue;
         }
@@ -231,10 +235,17 @@ fn no_runner_builds_or_reads_a_source_target() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
     // Every pending entry still exists (the list only shrinks, deliberately).
-    for (path, reason) in PENDING {
+    for (path, reason) in PENDING.iter().chain(EXEMPT.iter()) {
         assert!(
             pending_seen.iter().any(|p| p == path),
             "{path} ({reason}) is gone: drop it"
+        );
+    }
+    // The two lists never overlap.
+    for (path, _) in EXEMPT {
+        assert!(
+            !PENDING.iter().any(|(p, _)| *p == path),
+            "{path} is both pending and exempt"
         );
     }
 }
