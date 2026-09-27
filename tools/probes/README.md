@@ -26,7 +26,7 @@ master. The verifier also applies the negotiated prototype limits (width 8192,
 height 4096, thickness 512, one 4 MiB resource, 50% coverage).
 
 ```sh
-cargo xtask prepare-product-artifact lom LOM-REPO SIGNED-COMMIT LOM-ARTIFACT-DIR
+cargo xtask prepare-product-artifact lom LOM-REPO SIGNED-COMMIT LOM-ARTIFACT-DIR --build-dir=/ABS/PRIVATE
 SOPHIA_LOM_GPU_PROOF_ARM=1 SOPHIA_SOURCE=/abs/sophia SOPHIA_GATE_BUILD_DIR=/abs/private-build \
 SOPHIA_LOM_ARTIFACT=LOM-ARTIFACT-DIR SOPHIA_LOM_COMMIT=SIGNED-COMMIT \
 SOPHIA_LOM_SHA256=BINARY-SHA256 SOPHIA_LOM_CONFIG_SHA256=CONFIG-SHA256 \

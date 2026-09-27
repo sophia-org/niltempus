@@ -175,6 +175,37 @@ pub(crate) fn signed_tree(source: &Path, commit: &str, label: &str) -> Result<Si
     archive_tree(source, commit, label, signer)
 }
 
+/// `signed_tree` with its scratch in a new, randomly named, private (0700)
+/// directory under `parent` (a caller's private build directory) instead of
+/// the system temporary directory.
+pub(crate) fn signed_tree_under(
+    parent: &Path,
+    source: &Path,
+    commit: &str,
+    label: &str,
+) -> Result<SignedTree, String> {
+    let signer = authorize(source, commit)?;
+    archive_tree_under(parent, source, commit, label, signer)
+}
+
+/// A new private (0700) directory `parent/<label>-<128 random bits>`,
+/// created exclusively: never a predictable or pre-existing path.
+pub(crate) fn private_scratch(parent: &Path, label: &str) -> Result<PathBuf, String> {
+    let mut random = [0u8; 16];
+    rustix::rand::getrandom(&mut random, rustix::rand::GetRandomFlags::empty())
+        .map_err(|e| format!("getrandom: {e}"))?;
+    let suffix = random
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    let scratch = parent.join(format!("{label}-{suffix}"));
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&scratch)
+        .map_err(|e| format!("{}: {e}", scratch.display()))?;
+    Ok(scratch)
+}
+
 /// Signer authorization, read-only against the source repository: the
 /// commit resolves to exactly itself, `git verify-commit` passes with status
 /// G, and the raw object carries a gpgsig header. Returns the signer.
@@ -221,22 +252,22 @@ pub(crate) fn archive_tree(
     label: &str,
     signer: String,
 ) -> Result<SignedTree, String> {
+    archive_tree_under(&std::env::temp_dir(), source, commit, label, signer)
+}
+
+/// `archive_tree` with its scratch under `parent` (`private_scratch`).
+pub(crate) fn archive_tree_under(
+    parent: &Path,
+    source: &Path,
+    commit: &str,
+    label: &str,
+    signer: String,
+) -> Result<SignedTree, String> {
     let raw = git(source, &["cat-file", "commit", commit])?;
     let tree = commit_tree(&raw)?;
 
     // Isolated build input: exactly the signed tree, nothing from the checkout.
-    let scratch = std::env::temp_dir().join(format!(
-        "sophia-{label}-artifact-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|e| e.to_string())?
-            .as_nanos()
-    ));
-    std::fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&scratch)
-        .map_err(|e| format!("{}: {e}", scratch.display()))?;
+    let scratch = private_scratch(parent, &format!("sophia-{label}-artifact"))?;
     let _scratch = RemoveOnDrop(scratch.clone());
     let archive = scratch.join("source.tar");
     let tree_dir = scratch.join("source");

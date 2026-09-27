@@ -88,12 +88,29 @@ pub struct PairIds {
     pub profile: String,
 }
 
-/// A prepared-pair directory in `prepare-wm-pair`'s layout.
+/// A reviewed dependency manifest for a fixture half (no packages; the
+/// toolchain is not probed by the pair verifier).
+pub fn reviewed_deps(product: &str, commit: &str) -> String {
+    xtask::nim_deps::Manifest {
+        status: "reviewed".into(),
+        product: product.into(),
+        source_commit: commit.into(),
+        source_tree: "1".repeat(40),
+        store: PathBuf::from("/nonexistent-fixture-store"),
+        toolchain: Vec::new(),
+        packages: Vec::new(),
+    }
+    .render()
+    .unwrap()
+}
+
+/// A prepared-pair directory in `prepare-wm-pair`'s layout (schema 2).
 pub fn write_pair(dir: &Path) -> PairIds {
     fs::create_dir(dir).unwrap();
     let mut commits = Vec::new();
     let mut digests = Vec::new();
     let mut trees = Vec::new();
+    let mut deps = Vec::new();
     for name in ["hagia", "narthex"] {
         let (raw, commit) = commit_object(name);
         fs::write(dir.join(format!("{name}.commit")), &raw).unwrap();
@@ -103,13 +120,16 @@ pub fn write_pair(dir: &Path) -> PairIds {
             &format!("# fixture {name}\n[[ \"$1 $2\" == \"config check\" ]]"),
         );
         digests.push(sha256(&fs::read(dir.join(name)).unwrap()));
+        let manifest = reviewed_deps(name, &commit);
+        fs::write(dir.join(format!("{name}-nim-deps.manifest")), &manifest).unwrap();
+        deps.push(sha256(manifest.as_bytes()));
         commits.push(commit);
         trees.push("1".repeat(40));
     }
     let profile = b"schema 1\n";
     fs::write(dir.join("default.kdl"), profile).unwrap();
     let manifest = [
-        "schema=1".to_owned(),
+        "schema=2".to_owned(),
         format!("hagia_source_commit={}", commits[0]),
         format!("hagia_source_tree={}", trees[0]),
         "hagia_signer_fingerprint=ABCDEF0123".to_owned(),
@@ -121,6 +141,10 @@ pub fn write_pair(dir: &Path) -> PairIds {
         "default_profile=default.kdl".to_owned(),
         "default_profile_source=examples/config/default.kdl".to_owned(),
         format!("default_profile_sha256={}", sha256(profile)),
+        format!("hagia_nim_deps_sha256={}", deps[0]),
+        format!("narthex_nim_deps_sha256={}", deps[1]),
+        "nim_system_cfg=kept-hashed".to_owned(),
+        "toolchain_identity=recorded-not-a-reproducible-closure".to_owned(),
     ]
     .join("\n")
         + "\n";

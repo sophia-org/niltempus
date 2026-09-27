@@ -1,5 +1,7 @@
 //! Prepare an immutable product artifact (Lom, Provlita, Hagia) from one
-//! signed revision, for the attended tty4 gates.
+//! signed revision, for the attended tty4 gates. `build` here is the one
+//! corrected builder that `prepare-wm-pair` and `prepare-physical-inputs`
+//! use too.
 //!
 //! The same custody rules as `prepare-bemenu-artifact`: SOURCE AUTHORIZATION
 //! (`git verify-commit`, status G) happens only here, the build input is
@@ -13,20 +15,38 @@
 //! products build `--offline --locked` from their own pinned lock file, so
 //! their dependencies must already be fetched (`cargo fetch --locked` in the
 //! product repository).
+//!
+//! Every build writes only below the caller's private `--build-dir` (a new,
+//! randomly named scratch there; no shared or predictable /tmp path). Nim
+//! products build only from a REVIEWED dependency manifest whose sha256 is
+//! supplied separately (crate::nim_deps): the closure is staged read-only and
+//! verified before and after, the host toolchain must be the reviewed one
+//! before and after, and the compiler runs in bwrap with no network and with
+//! /home and /opt hidden, skipping nimble paths and the user, parent and
+//! project configurations (the installation config per NIM_SYSTEM_CFG,
+//! recorded). After every build the staged source tree must still hash to
+//! the signed commit's tree.
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::os::unix::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use crate::bemenu_artifact::{SignedTree, inputs, set_mode, signed_tree, tail, wait_logged};
+use crate::bemenu_artifact::{SignedTree, inputs, set_mode, signed_tree_under, tail, wait_logged};
+use crate::nim_deps::{NIM_SYSTEM_CFG, Reviewed, STDLIB_PATHS, SystemCfg, load_reviewed};
 use crate::{read, sha256};
 
 const USAGE: &str = "usage: cargo xtask prepare-product-artifact <lom|provlita|hagia> \
-                     <source-repo> <signed-commit> <new-output-dir>";
+                     <source-repo> <signed-commit> <new-output-dir> --build-dir=/ABS \
+                     [--nim-deps=/ABS --nim-deps-sha256=<64 hex>] (Nim products only, required)";
 pub const MANIFEST: &str = "product-artifact.manifest";
 pub const COMMIT_OBJECT: &str = "source.commit";
 pub const CONFIG: &str = "config.kdl";
+/// The reviewed dependency manifest a Nim product was built from.
+pub const NIM_DEPS: &str = "nim-deps.manifest";
+/// Recorded in every Nim artifact manifest.
+pub const TOOLCHAIN_NOTE: &str = "recorded-not-a-reproducible-closure";
 const CARGO_TIMEOUT: Duration = Duration::from_secs(3600);
 const NIM_TIMEOUT: Duration = Duration::from_secs(900);
 
@@ -85,8 +105,70 @@ pub fn product(name: &str) -> Result<&'static Product, String> {
         .ok_or_else(|| format!("unknown product {name:?}; {USAGE}"))
 }
 
+/// `--key=value` options, each allowed key at most once, none empty.
+pub(crate) fn options<'a>(
+    args: &'a [String],
+    allowed: &[&str],
+    usage: &str,
+) -> Result<BTreeMap<&'a str, &'a str>, String> {
+    let mut options = BTreeMap::new();
+    for arg in args {
+        let (key, value) = arg
+            .strip_prefix("--")
+            .and_then(|a| a.split_once('='))
+            .ok_or_else(|| format!("unexpected argument {arg:?}; {usage}"))?;
+        if !allowed.contains(&key) || value.is_empty() {
+            return Err(format!("unknown or empty option --{key}; {usage}"));
+        }
+        if options.insert(key, value).is_some() {
+            return Err(format!("--{key} is repeated"));
+        }
+    }
+    Ok(options)
+}
+
+/// A private build directory: absolute, owned, 0700, not a link.
+pub(crate) fn build_dir(value: Option<&&str>) -> Result<PathBuf, String> {
+    let dir = value.ok_or("--build-dir is required (no default)")?;
+    if !dir.starts_with('/') {
+        return Err(format!("--build-dir must be absolute: {dir}"));
+    }
+    crate::package_desktop::private_dir(Path::new(dir))?;
+    Ok(PathBuf::from(dir))
+}
+
+/// The reviewed dependency manifest and its independently supplied sha256.
+#[derive(Clone, Copy)]
+pub struct NimDeps<'a> {
+    pub path: &'a Path,
+    pub sha256: &'a str,
+}
+
+/// `--{prefix}nim-deps` and `--{prefix}nim-deps-sha256`, both or neither.
+pub(crate) fn nim_deps_option<'a>(
+    options: &BTreeMap<&str, &'a str>,
+    prefix: &str,
+) -> Result<Option<NimDeps<'a>>, String> {
+    let path = options.get(format!("{prefix}nim-deps").as_str());
+    let digest = options.get(format!("{prefix}nim-deps-sha256").as_str());
+    match (path, digest) {
+        (Some(path), Some(digest)) => Ok(Some(NimDeps {
+            path: Path::new(*path),
+            sha256: digest,
+        })),
+        (None, None) => Ok(None),
+        _ => Err(format!(
+            "--{prefix}nim-deps and --{prefix}nim-deps-sha256 go together"
+        )),
+    }
+}
+
 pub fn run(args: &[String]) -> Result<Vec<String>, String> {
-    let [name, source, commit, output] = args else {
+    if args.len() < 4 {
+        return Err(USAGE.into());
+    }
+    let (head, rest) = args.split_at(4);
+    let [name, source, commit, output] = head else {
         return Err(USAGE.into());
     };
     let product = product(name)?;
@@ -94,7 +176,10 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
         return Err("narthex is packaged with Hagia: use prepare-wm-pair".into());
     }
     let (source, output) = inputs(source, commit, output)?;
-    let built = build(product, &source, commit)?;
+    let options = options(rest, &["build-dir", "nim-deps", "nim-deps-sha256"], USAGE)?;
+    let build_dir = build_dir(options.get("build-dir"))?;
+    let deps = nim_deps_option(&options, "")?;
+    let built = build(product, &source, commit, &build_dir, deps)?;
     let SignedTree {
         raw,
         tree,
@@ -118,9 +203,20 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
     // Immutable output: created last, removed again if any step fails.
     std::fs::create_dir(&output).map_err(|e| format!("{}: {e}", output.display()))?;
     let written = write_output(product, &output, binary, raw, config.as_deref())
+        .and_then(|digests| {
+            if let Some(deps) = &built.nim_deps {
+                std::fs::write(output.join(NIM_DEPS), &deps.text).map_err(|e| e.to_string())?;
+                set_mode(&output.join(NIM_DEPS), 0o444)?;
+            }
+            Ok(digests)
+        })
         .map(|(binary_sha256, config_sha256)| {
+            let (deps, cfg, note) = match &built.nim_deps {
+                Some(deps) => (deps.sha256.clone(), NIM_SYSTEM_CFG.as_str(), TOOLCHAIN_NOTE),
+                None => ("none".to_owned(), "none", "none"),
+            };
             [
-                "schema=1".to_owned(),
+                "schema=2".to_owned(),
                 format!("product={}", product.name),
                 format!("binary={}", product.binary),
                 format!("binary_sha256={binary_sha256}"),
@@ -130,6 +226,9 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
                 format!("signer_fingerprint={signer}"),
                 format!("config={}", if config.is_some() { CONFIG } else { "none" }),
                 format!("config_sha256={config_sha256}"),
+                format!("nim_deps_sha256={deps}"),
+                format!("nim_system_cfg={cfg}"),
+                format!("toolchain_identity={note}"),
             ]
             .join("\n")
                 + "\n"
@@ -172,13 +271,53 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
 pub struct Built {
     pub(crate) tree: SignedTree,
     pub binary: std::path::PathBuf,
+    /// The reviewed dependency manifest (Nim products).
+    pub nim_deps: Option<Reviewed>,
 }
 
-/// Signer authorization and the exact signed tree (`signed_tree`), then the
-/// product's low-priority, two-job, bounded build inside that scratch tree.
-pub(crate) fn build(product: &Product, source: &Path, commit: &str) -> Result<Built, String> {
-    let tree = signed_tree(source, commit, product.name)?;
+/// Signer authorization and the exact signed tree, staged in a private
+/// scratch under `build_dir`, then the product's low-priority, two-job,
+/// bounded build inside that scratch, then the post-build tree proof. Nim
+/// products need their reviewed dependency manifest (`deps`); Cargo
+/// products refuse one.
+pub(crate) fn build(
+    product: &Product,
+    source: &Path,
+    commit: &str,
+    build_dir: &Path,
+    deps: Option<NimDeps>,
+) -> Result<Built, String> {
+    // Refuse a missing or misplaced dependency manifest before anything is
+    // authorized or staged.
+    let deps = match (&product.kind, deps) {
+        (Kind::Cargo, None) => None,
+        (Kind::Cargo, Some(_)) => {
+            return Err(format!(
+                "{} is a Cargo product: it takes no --nim-deps",
+                product.name
+            ));
+        }
+        (Kind::Nim { .. }, None) => {
+            return Err(format!(
+                "{} needs its reviewed dependency manifest: --nim-deps=/ABS --nim-deps-sha256=<64 hex>",
+                product.name
+            ));
+        }
+        (Kind::Nim { .. }, Some(deps)) => Some(deps),
+    };
+    let tree = signed_tree_under(build_dir, source, commit, product.name)?;
     let (scratch, tree_dir) = (tree.scratch.clone(), tree.tree_dir.clone());
+    let reviewed = match deps {
+        None => None,
+        Some(deps) => Some(load_reviewed(
+            deps.path,
+            deps.sha256,
+            product.name,
+            commit,
+            &tree.tree,
+        )?),
+    };
+    let mut staged = None;
     // Low-priority, two-job build inside the scratch tree only.
     let log = scratch.join("build.log");
     let log_file = File::create(&log).map_err(|e| e.to_string())?;
@@ -199,14 +338,53 @@ pub(crate) fn build(product: &Product, source: &Path, commit: &str) -> Result<Bu
             (command, binary, CARGO_TIMEOUT)
         }
         Kind::Nim { main } => {
+            let reviewed = reviewed
+                .as_ref()
+                .expect("Nim products have a reviewed manifest");
+            let toolchain = reviewed.check_toolchain()?;
+            let deps = reviewed.stage(&scratch.join("nim-deps"))?;
             let binary = out.join(product.binary);
+            let gcc = toolchain.tool("gcc")?;
+            let home = scratch.join("home");
+            std::fs::create_dir(&home).map_err(|e| e.to_string())?;
             let mut command = Command::new("nice");
             command
-                .args(["-n", "19", "nim", "c", "-d:release", "--hints:off"])
+                .env_clear()
+                .env("PATH", gcc.parent().ok_or("gcc has no directory")?)
+                .env("HOME", &home)
+                .env("LC_ALL", "C")
+                .args(["-n", "19"])
+                .arg(toolchain.tool("bwrap")?)
+                .args(["--unshare-net", "--die-with-parent", "--ro-bind", "/", "/"])
+                .args(["--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"]);
+            // No ambient package lookup: every home and /opt (nimble's
+            // default stores) is hidden; only the private scratch returns.
+            for hidden in ["/home", "/opt", "/root"] {
+                if Path::new(hidden).is_dir() {
+                    command.args(["--tmpfs", hidden]);
+                }
+            }
+            command
+                .arg("--bind")
+                .args([&scratch, &scratch])
+                .arg("--ro-bind")
+                .args([&deps.root, &deps.root])
+                .arg("--chdir")
+                .arg(&tree_dir)
+                .arg("--")
+                .arg(toolchain.tool("nim")?)
+                .args(["c", "-d:release", "--hints:off"])
+                .args(nim_flags(
+                    NIM_SYSTEM_CFG,
+                    &toolchain.tree("nim-lib")?,
+                    &gcc,
+                    &deps.dirs,
+                ))
                 .args(["--path:src", "--parallelBuild:2"])
                 .arg(format!("--nimcache:{}", scratch.join("nimcache").display()))
                 .arg(format!("-o:{}", binary.display()))
                 .arg(main);
+            staged = Some(deps);
             (command, binary, NIM_TIMEOUT)
         }
     };
@@ -226,7 +404,50 @@ pub(crate) fn build(product: &Product, source: &Path, commit: &str) -> Result<Bu
     if !std::fs::symlink_metadata(&binary).is_ok_and(|m| m.is_file()) {
         return Err(format!("build produced no regular {}", product.binary));
     }
-    Ok(Built { tree, binary })
+    // Post-build proofs: the source tree is still the signed tree, and the
+    // closure and toolchain are still the reviewed ones.
+    if crate::git_tree::inventory(&tree_dir)?.tree != tree.tree {
+        return Err(format!(
+            "the {} build changed its staged source tree",
+            product.name
+        ));
+    }
+    if let (Some(reviewed), Some(deps)) = (&reviewed, &staged) {
+        reviewed.verify(deps)?;
+        reviewed.check_toolchain()?;
+    }
+    Ok(Built {
+        tree,
+        binary,
+        nim_deps: reviewed,
+    })
+}
+
+/// The Nim flags that make the dependency set and configuration explicit.
+pub fn nim_flags(cfg: SystemCfg, lib: &Path, gcc: &Path, deps: &[PathBuf]) -> Vec<String> {
+    let mut flags = [
+        "--noNimblePath",
+        "--clearNimblePath",
+        "--skipUserCfg:on",
+        "--skipParentCfg:on",
+        "--skipProjCfg:on",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    if cfg == SystemCfg::Skipped {
+        flags.push("--skipCfg:on".into());
+        for path in STDLIB_PATHS {
+            flags.push(format!("--path:{}", lib.join(path).display()));
+        }
+    }
+    flags.push(format!("--lib:{}", lib.display()));
+    flags.push("--cc:gcc".into());
+    flags.push(format!("--gcc.exe:{}", gcc.display()));
+    flags.push(format!("--gcc.linkerexe:{}", gcc.display()));
+    for dir in deps {
+        flags.push(format!("--path:{}", dir.display()));
+    }
+    flags
 }
 
 /// Copy the binary, config and raw commit; returns (binary, config) digests.

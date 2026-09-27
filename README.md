@@ -33,7 +33,8 @@ launcher and dock runners, their transcript verifiers, the workload budgets
 and fixtures, and the `xtask dock` profile generator and verifier. See
 [tools/probes/README.md](tools/probes/README.md). Every input is explicit:
 
-    cargo xtask prepare-product-artifact lom|provlita|hagia REPO SIGNED-COMMIT NEW-DIR
+    cargo xtask prepare-product-artifact lom|provlita|hagia REPO SIGNED-COMMIT NEW-DIR \
+        --build-dir=/ABS [--nim-deps=/ABS --nim-deps-sha256=SHA]   # Hagia: reviewed deps required
     cargo xtask prepare-bemenu-artifact BEMENU-REPO SIGNED-COMMIT NEW-DIR
     SOPHIA_LOM_NATIVE_GATE_ARM=1 SOPHIA_SOURCE=/abs/sophia SOPHIA_GATE_BUILD_DIR=/abs/build \
     SOPHIA_LOM_ARTIFACT=DIR SOPHIA_LOM_COMMIT=REV SOPHIA_LOM_SHA256=SHA SOPHIA_LOM_CONFIG_SHA256=SHA \

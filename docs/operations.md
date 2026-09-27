@@ -32,13 +32,19 @@ Package an explicit release from this repository (clean, signed HEAD), the
 pinned Sophia checkout and a prepared Hagia/Narthex pair, then install it:
 
 ```sh
-cargo xtask prepare-wm-pair --hagia /ABS/hagia <commit> --narthex /ABS/narthex <commit> /ABS/wm-pair
+cargo xtask prepare-wm-pair --hagia /ABS/hagia <commit> --narthex /ABS/narthex <commit> /ABS/wm-pair \
+    --build-dir=/ABS/private-build \
+    --hagia-nim-deps=/ABS/hagia.nim-deps --hagia-nim-deps-sha256=<reviewed sha256> \
+    --narthex-nim-deps=/ABS/narthex.nim-deps --narthex-nim-deps-sha256=<reviewed sha256>
 cargo xtask package-desktop --sophia-root=/ABS/sophia --sophia-rev=<pinned rev> \
     --wm-pair=/ABS/wm-pair --wm-pair-commits=<hagia>,<narthex> \
     --wm-pair-sha256=<hagia>,<narthex> --wm-pair-profile-sha256=<default.kdl> \
     --build-dir=/ABS/private-build --out=/ABS/release
 tools/install_live_session.sh /ABS/release
 ```
+
+Hagia and Narthex build only from REVIEWED Nim dependency manifests (below);
+the pair records both manifests and their digests (pair schema 2).
 
 Packaging never switches or overwrites your own default window manager
 (`$XDG_STATE_HOME/sophia/bin/hagia` and its reload workflow); an installed
@@ -54,6 +60,65 @@ included. A Hagia artifact additionally records its signed source commit, the
 canonical default-profile digest, and Hagia and Narthex executable digests.
 Installation rejects missing, non-executable, or mismatched artifacts. Legacy
 WM executables, compatibility configuration, and bridge fields are forbidden.
+
+### Bound Nim dependencies
+
+`prepare-wm-pair`, `prepare-product-artifact hagia` and
+`prepare-physical-inputs` share one builder. A Nim product builds only from a
+reviewed dependency manifest whose sha256 root or the operator supplies
+separately; nothing picks a version or looks packages up implicitly.
+
+1. Draft a closure for review. Every requirement, transitively, needs an
+   explicit `--pin`; `.nimble` files are read as data (nimble never runs), and
+   an unsupported `requires` expression fails by name:
+
+   ```sh
+   cargo xtask nim-deps draft --store=/ABS/.nimble/pkgs2 --source=/ABS/hagia \
+       --commit=<signed commit> --product=hagia --nim=/ABS/nim --nim-lib=/ABS/nim/lib \
+       --gcc=/ABS/gcc --bwrap=/ABS/bwrap --build-dir=/ABS/private-build \
+       --pin=chronicles=<version> ... --out=/ABS/hagia.nim-deps
+   ```
+
+   The printed digest is a DRAFT digest, never an authorization.
+2. Root reviews the file (every package's provenance and complete file
+   inventory, the toolchain records), changes `status=draft` to
+   `status=reviewed`, and supplies the final file's sha256 separately.
+3. The builder refuses a draft, a digest mismatch, or a manifest reviewed for
+   another commit. It stages the closure read-only in a private scratch under
+   `--build-dir` and verifies it before and after the build, requires the
+   host toolchain to be the reviewed one before and after, and runs `nim` in
+   bwrap with no network and /home, /opt and /root hidden, with
+   `--noNimblePath --clearNimblePath --skipUserCfg --skipParentCfg
+   --skipProjCfg` and an explicit `--lib`. The Nim installation's own
+   configuration is kept and hashed (`nim_system_cfg=kept-hashed`, recorded in
+   every artifact) pending the director's ruling; `skipped` is the one-line
+   alternative.
+
+Host-toolchain identity (nim, its standard library and installation config,
+gcc, cc1, as, ld, bwrap, and the owning host packages) is recorded and
+re-checked; it is NOT a fully reproducible closure. The host toolchain is
+identified, not rebuilt.
+
+### Physical gate inputs
+
+Physical runners never build in a source tree. They take a prepared,
+read-only input directory:
+
+```sh
+cargo xtask prepare-physical-inputs --sophia-root=/ABS/sophia --build-dir=/ABS/private-build \
+    --out=/ABS/NEW --sophia-features=native-session|atomic-scanout-live \
+    [--sophia-packages=sophia-cli,sophia-wm-demo] \
+    [--hagia=/ABS/hagia --hagia-commit=<c> --hagia-nim-deps=/ABS --hagia-nim-deps-sha256=<s>] \
+    [--narthex=/ABS/narthex --narthex-commit=<c> --narthex-nim-deps=/ABS --narthex-nim-deps-sha256=<s>] \
+    [--profile=hagia:examples/config/default.kdl ...]
+cargo xtask prepare-physical-inputs verify --out=/ABS/NEW --manifest-sha256=<printed sha256>
+```
+
+The output holds `bin/`, the exact pinned Sophia tree (`sophia-tree/`, the
+runners' `SOPHIA_ROOT`), profiles copied from their owning staged source,
+the reviewed dependency manifests, `inputs.env` (read by a strict parser,
+never sourced) and `physical-inputs.manifest`. `verify` requires the expected
+manifest sha256.
 
 Every release installs this base entry:
 

@@ -504,7 +504,7 @@ fn canonical(path: &str) -> Result<PathBuf, String> {
 }
 
 /// Absolute path with `.`/`..` removed, without following links.
-fn resolve_lexically(path: &Path) -> PathBuf {
+pub(crate) fn resolve_lexically(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for component in path.components() {
         match component {
@@ -534,7 +534,7 @@ fn resolve_lexically(path: &Path) -> PathBuf {
 }
 
 /// An existing directory owned by this user, not a link, private (0700).
-fn private_dir(path: &Path) -> Result<(), String> {
+pub(crate) fn private_dir(path: &Path) -> Result<(), String> {
     let meta = std::fs::symlink_metadata(path)
         .map_err(|e| format!("--build-dir {}: {e}", path.display()))?;
     if !meta.is_dir()
@@ -549,7 +549,7 @@ fn private_dir(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn git_text(repo: &Path, args: &[&str]) -> Result<String, String> {
+pub(crate) fn git_text(repo: &Path, args: &[&str]) -> Result<String, String> {
     text(bounded(
         Command::new("git")
             .arg("-C")
@@ -562,7 +562,7 @@ fn git_text(repo: &Path, args: &[&str]) -> Result<String, String> {
     )?)
 }
 
-fn clean_checkout(repo: &Path, what: &str) -> Result<(), String> {
+pub(crate) fn clean_checkout(repo: &Path, what: &str) -> Result<(), String> {
     let status = git_text(repo, &["status", "--porcelain", "--untracked-files=normal"])
         .map_err(|e| format!("{what} {} is not a readable checkout: {e}", repo.display()))?;
     if !status.is_empty() {
@@ -574,7 +574,10 @@ fn clean_checkout(repo: &Path, what: &str) -> Result<(), String> {
 /// The full provisioning marker check (pins::check_marker: canonical URL,
 /// pinned revision, this checkout's Cargo.lock digest) plus the caller's
 /// CARGO_HOME, which must be the provisioned one. Returns (home, lock digest).
-fn provisioned(repo: &Path, cargo_home: Option<&str>) -> Result<(PathBuf, String), String> {
+pub(crate) fn provisioned(
+    repo: &Path,
+    cargo_home: Option<&str>,
+) -> Result<(PathBuf, String), String> {
     let marker =
         String::from_utf8(read(&repo.join(pins::PROVISION_MARKER))?).map_err(|e| e.to_string())?;
     let lock = sha256(&read(&repo.join("Cargo.lock"))?);
@@ -638,7 +641,7 @@ fn workspace_version(tree: &Path) -> Result<String, String> {
 
 /// Low-priority, two-job, offline, locked release build in a private
 /// process group, bounded by time and log size.
-fn cargo(
+pub(crate) fn cargo(
     dir: &Path,
     target: &Path,
     cargo_home: Option<&Path>,

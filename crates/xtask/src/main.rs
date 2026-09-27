@@ -3,8 +3,11 @@ use std::path::{Path, PathBuf};
 
 const USAGE: &str = "usage:
   xtask prepare-bemenu-artifact SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR
-  xtask prepare-product-artifact lom|provlita|hagia SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR
-  xtask prepare-wm-pair --hagia REPO COMMIT --narthex REPO COMMIT NEW-OUTPUT-DIR
+  xtask prepare-product-artifact lom|provlita|hagia SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR --build-dir=/ABS [--nim-deps=/ABS --nim-deps-sha256=SHA]
+  xtask prepare-wm-pair --hagia REPO COMMIT --narthex REPO COMMIT NEW-OUTPUT-DIR --build-dir=/ABS --hagia-nim-deps=/ABS --hagia-nim-deps-sha256=SHA --narthex-nim-deps=/ABS --narthex-nim-deps-sha256=SHA
+  xtask prepare-physical-inputs --sophia-root=/ABS --build-dir=/ABS --out=/ABS/NEW --sophia-features=F [--sophia-packages=P] [--hagia=... --narthex=...] [--profile=OWNER:PATH ...]
+  xtask prepare-physical-inputs verify --out=/ABS --manifest-sha256=SHA
+  xtask nim-deps draft --store=/ABS --source=/ABS --commit=SHA --product=hagia|narthex --nim=/ABS --nim-lib=/ABS --gcc=/ABS --bwrap=/ABS --build-dir=/ABS --pin=NAME=VERSION ... --out=/ABS/NEW
   xtask package-desktop --sophia-root=/ABS --sophia-rev=SHA --wm-pair=/ABS --wm-pair-commits=H,N --wm-pair-sha256=H,N --wm-pair-profile-sha256=SHA --build-dir=/ABS --out=/ABS/NEW
   xtask direct-scanout-gate [WIDTH HEIGHT HOLD WORKLOAD] [--overlay-proof] [--cost] [--cursor] [--atomic-cursor]
   xtask verify-archives [--legacy]
@@ -45,6 +48,8 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
         Some("prepare-bemenu-artifact") => xtask::bemenu_artifact::run(&repo, &arguments[1..]),
         Some("prepare-product-artifact") => xtask::product_artifact::run(&arguments[1..]),
         Some("prepare-wm-pair") => xtask::wm_pair::run(&arguments[1..]),
+        Some("prepare-physical-inputs") => xtask::physical_inputs::run(&repo, &arguments[1..]),
+        Some("nim-deps") => xtask::nim_deps::run(&arguments[1..]),
         Some("package-desktop") => xtask::package_desktop::run(&repo, &arguments[1..]),
         Some("direct-scanout-gate") => gate_direct_scanout(&repo, &arguments[1..]),
         Some("verify-archives") => xtask::verify_archives::run(&repo, &arguments[1..]),
