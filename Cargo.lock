@@ -12,6 +12,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "autocfg"
+version = "1.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
+
+[[package]]
 name = "bitflags"
 version = "2.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -27,10 +33,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "bytemuck"
+version = "1.25.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95832e849adfb21180ccb6826a99da14e5d266ae5c2e668e1602cf234f153797"
+dependencies = [
+ "bytemuck_derive",
+]
+
+[[package]]
+name = "bytemuck_derive"
+version = "1.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a1f896587b6f2c069c73d2f0913e2d590c3990285cd2f0b6aa02b786b4c679c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
+]
+
+[[package]]
 name = "cfg-if"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
+
+[[package]]
+name = "cfg_aliases"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 
 [[package]]
 name = "cpufeatures"
@@ -62,6 +94,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "drm"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a41816e58f47f49acfd956651055ddcf137c4882c2098c30c448817af21183a"
+dependencies = [
+ "bitflags",
+ "bytemuck",
+ "bytemuck_derive",
+ "drm-ffi",
+ "drm-fourcc",
+ "libc",
+ "rustix",
+]
+
+[[package]]
+name = "drm-ffi"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51a91c9b32ac4e8105dec255e849e0d66e27d7c34d184364fb93e469db08f690"
+dependencies = [
+ "drm-sys",
+ "rustix",
+]
+
+[[package]]
+name = "drm-fourcc"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0aafbcdb8afc29c1a7ee5fbe53b5d62f4565b35a042a662ca9fecd0b54dae6f4"
+
+[[package]]
+name = "drm-sys"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ecc8e1361066d91f5ffccff060a3c3be9c3ecde15be2959c1937595f7a82a9f8"
+dependencies = [
+ "libc",
+ "linux-raw-sys 0.9.4",
+]
+
+[[package]]
 name = "errno"
 version = "0.3.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -82,10 +155,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "gethostname"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bd49230192a3797a9a4d6abe9b3eed6f7fa4c8a8a4947977c6f80025f92cbd8"
+dependencies = [
+ "rustix",
+ "windows-link",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+
+[[package]]
+name = "kdl"
+version = "6.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "082ddf81b2acd76fe04412655d17befedfff1837db772f8e74c38050d25ed670"
+dependencies = [
+ "miette",
+ "num-traits",
+ "winnow",
+]
 
 [[package]]
 name = "lazy_static"
@@ -98,6 +192,12 @@ name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+
+[[package]]
+name = "linux-raw-sys"
+version = "0.9.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd945864f07fe9f5371a27ad7b52a172b4b499999f1d97574c9fa68373937e12"
 
 [[package]]
 name = "linux-raw-sys"
@@ -137,12 +237,62 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
+name = "memmap2"
+version = "0.9.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1219ed1b7f229ee7104d281dd01d6802fe28bb6e95d292942c4daacdeb798c0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "miette"
+version = "7.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f98efec8807c63c752b5bd61f862c165c115b0a35685bdcfd9238c7aeb592b7"
+dependencies = [
+ "cfg-if",
+ "unicode-width",
+]
+
+[[package]]
+name = "niri-ipc"
+version = "26.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a4adbddf4037ce047854d36a60b5bf80a7990b8db2f0a0b9ede7534b0bae09a"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "nix"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
+dependencies = [
+ "bitflags",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
  "windows-sys",
+]
+
+[[package]]
+name = "num-traits"
+version = "0.2.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
+dependencies = [
+ "autocfg",
 ]
 
 [[package]]
@@ -201,7 +351,7 @@ dependencies = [
  "bitflags",
  "errno",
  "libc",
- "linux-raw-sys",
+ "linux-raw-sys 0.12.1",
  "windows-sys",
 ]
 
@@ -277,7 +427,7 @@ checksum = "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e"
 [[package]]
 name = "sophia-9p"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=9fcaec782ce4fe9978568c0466ee17a78b3d4571#9fcaec782ce4fe9978568c0466ee17a78b3d4571"
+source = "git+https://github.com/sophia-org/sophia.git?rev=d20faf3709ae21d94491f7a628ac9a4a86619cdf#d20faf3709ae21d94491f7a628ac9a4a86619cdf"
 dependencies = [
  "rustix",
  "sophia-9p-records",
@@ -286,25 +436,76 @@ dependencies = [
 [[package]]
 name = "sophia-9p-records"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=9fcaec782ce4fe9978568c0466ee17a78b3d4571#9fcaec782ce4fe9978568c0466ee17a78b3d4571"
+source = "git+https://github.com/sophia-org/sophia.git?rev=d20faf3709ae21d94491f7a628ac9a4a86619cdf#d20faf3709ae21d94491f7a628ac9a4a86619cdf"
+
+[[package]]
+name = "sophia-config"
+version = "0.1.0"
+source = "git+https://github.com/sophia-org/sophia.git?rev=d20faf3709ae21d94491f7a628ac9a4a86619cdf#d20faf3709ae21d94491f7a628ac9a4a86619cdf"
+dependencies = [
+ "kdl",
+ "rustix",
+ "sha2",
+]
+
+[[package]]
+name = "sophia-conformance"
+version = "0.1.0"
+source = "git+https://github.com/sophia-org/sophia.git?rev=d20faf3709ae21d94491f7a628ac9a4a86619cdf#d20faf3709ae21d94491f7a628ac9a4a86619cdf"
+dependencies = [
+ "drm",
+ "niri-ipc",
+ "nix",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sophia-config",
+ "sophia-engine",
+ "sophia-protocol",
+ "sophia-runtime",
+ "x11rb",
+]
 
 [[package]]
 name = "sophia-desktop-ids"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=9fcaec782ce4fe9978568c0466ee17a78b3d4571#9fcaec782ce4fe9978568c0466ee17a78b3d4571"
+source = "git+https://github.com/sophia-org/sophia.git?rev=d20faf3709ae21d94491f7a628ac9a4a86619cdf#d20faf3709ae21d94491f7a628ac9a4a86619cdf"
+
+[[package]]
+name = "sophia-engine"
+version = "0.1.0"
+source = "git+https://github.com/sophia-org/sophia.git?rev=d20faf3709ae21d94491f7a628ac9a4a86619cdf#d20faf3709ae21d94491f7a628ac9a4a86619cdf"
+dependencies = [
+ "rustix",
+ "sha2",
+ "sophia-portal",
+ "sophia-protocol",
+ "sophia-runtime",
+ "tracing",
+ "xkbcommon",
+]
 
 [[package]]
 name = "sophia-linux-peer"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=9fcaec782ce4fe9978568c0466ee17a78b3d4571#9fcaec782ce4fe9978568c0466ee17a78b3d4571"
+source = "git+https://github.com/sophia-org/sophia.git?rev=d20faf3709ae21d94491f7a628ac9a4a86619cdf#d20faf3709ae21d94491f7a628ac9a4a86619cdf"
 dependencies = [
  "libc",
 ]
 
 [[package]]
+name = "sophia-portal"
+version = "0.1.0"
+source = "git+https://github.com/sophia-org/sophia.git?rev=d20faf3709ae21d94491f7a628ac9a4a86619cdf#d20faf3709ae21d94491f7a628ac9a4a86619cdf"
+dependencies = [
+ "sophia-protocol",
+]
+
+[[package]]
 name = "sophia-protocol"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=9fcaec782ce4fe9978568c0466ee17a78b3d4571#9fcaec782ce4fe9978568c0466ee17a78b3d4571"
+source = "git+https://github.com/sophia-org/sophia.git?rev=d20faf3709ae21d94491f7a628ac9a4a86619cdf#d20faf3709ae21d94491f7a628ac9a4a86619cdf"
 dependencies = [
  "serde",
  "serde_json",
@@ -315,7 +516,7 @@ dependencies = [
 [[package]]
 name = "sophia-runtime"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=9fcaec782ce4fe9978568c0466ee17a78b3d4571#9fcaec782ce4fe9978568c0466ee17a78b3d4571"
+source = "git+https://github.com/sophia-org/sophia.git?rev=d20faf3709ae21d94491f7a628ac9a4a86619cdf#d20faf3709ae21d94491f7a628ac9a4a86619cdf"
 dependencies = [
  "rustix",
  "sophia-9p",
@@ -328,7 +529,7 @@ dependencies = [
 [[package]]
 name = "sophia-shell-protocol"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/sophia.git?rev=9fcaec782ce4fe9978568c0466ee17a78b3d4571#9fcaec782ce4fe9978568c0466ee17a78b3d4571"
+source = "git+https://github.com/sophia-org/sophia.git?rev=d20faf3709ae21d94491f7a628ac9a4a86619cdf#d20faf3709ae21d94491f7a628ac9a4a86619cdf"
 dependencies = [
  "sophia-desktop-ids",
 ]
@@ -438,6 +639,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954"
 
 [[package]]
+name = "unicode-width"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
+
+[[package]]
 name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -465,6 +672,49 @@ dependencies = [
 ]
 
 [[package]]
+name = "winnow"
+version = "0.7.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "x11rb"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9993aa5be5a26815fe2c3eacfc1fde061fc1a1f094bf1ad2a18bf9c495dd7414"
+dependencies = [
+ "gethostname",
+ "rustix",
+ "x11rb-protocol",
+]
+
+[[package]]
+name = "x11rb-protocol"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
+
+[[package]]
+name = "xkbcommon"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d66ca9352cbd4eecbbc40871d8a11b4ac8107cfc528a6e14d7c19c69d0e1ac9"
+dependencies = [
+ "libc",
+ "memmap2",
+ "xkeysym",
+]
+
+[[package]]
+name = "xkeysym"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
+
+[[package]]
 name = "xtask"
 version = "0.1.0"
 dependencies = [
@@ -472,6 +722,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sophia-config",
+ "sophia-conformance",
 ]
 
 [[package]]
