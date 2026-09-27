@@ -85,6 +85,30 @@ fi
 )
 "$release/tools/verify_packaged_policy.sh" "$release"
 
+# A release activated before (recorded in the ledger, or the current or
+# previous link of an installation that predates the ledger) keeps its own
+# packaged verifier, so installed schema-6 releases stay valid targets. Every
+# other release is a NEW candidate: it must also pass this repository's
+# current verifier (schema 7), whatever its bundled verifier accepts.
+ACTIVATED_LEDGER="$PREFIX/activated-releases"
+previously_activated() {
+    local link target
+    if [[ -f "$ACTIVATED_LEDGER" ]] && grep -Fqx -- "$release_id" "$ACTIVATED_LEDGER"; then
+        return 0
+    fi
+    for link in current previous; do
+        target="$(readlink -f "$PREFIX/$link" 2>/dev/null || true)"
+        [[ -n "$target" && "$target" == "$release" ]] && return 0
+    done
+    return 1
+}
+if ! previously_activated; then
+    "$ROOT_DIR/tools/verify_packaged_policy.sh" "$release" || {
+        echo "Refusing to activate a new release that fails the current packaged-policy verifier: $release_id" >&2
+        exit 1
+    }
+fi
+
 current_temp=""
 previous_temp=""
 cleanup() {
@@ -110,6 +134,14 @@ if [[ "$old_current_path" != "$release" ]]; then
     current_temp="$PREFIX/.current.$$"
     ln -s "releases/$release_id" "$current_temp"
     mv -Tf "$current_temp" "$PREFIX/current"
+fi
+# Record the activation. Written only after verification and the switch.
+if ! { [[ -f "$ACTIVATED_LEDGER" ]] && grep -Fqx -- "$release_id" "$ACTIVATED_LEDGER"; }; then
+    ledger_temp="$PREFIX/.activated-releases.$$"
+    { [[ ! -f "$ACTIVATED_LEDGER" ]] || cat -- "$ACTIVATED_LEDGER"; printf '%s\n' "$release_id"; } \
+        >"$ledger_temp"
+    chmod 644 "$ledger_temp"
+    mv -Tf "$ledger_temp" "$ACTIVATED_LEDGER"
 fi
 trap - EXIT
 

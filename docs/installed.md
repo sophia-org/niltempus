@@ -47,9 +47,20 @@ vendored SDK manifest as `share/sophia-policy/hagia/c-sdk.manifest.json`.
 sealed file, and the packaged policy verifier (`tools/verify_packaged_policy.sh`,
 run by packaging, installation, activation and rollback) re-checks them. Both
 refuse, with no defaults, a missing, repeated, malformed or mismatched field
-or sealed file. A schema-6 release is refused as a candidate. Historical
-schema-6 releases are readable only through the legacy path of Sophia's Go
-verifier (root). Installation verifies the artifact
+or sealed file. With `hagia_included=false` the SDK fields and the sealed
+manifest must be absent. A schema-6 release is refused as a candidate:
+- Installation runs this repository's current verifier on the staged copy,
+  as well as the candidate's bundled one.
+- Activating a release that was never activated before also runs the
+  current verifier. "Activated before" means recorded in
+  `$PREFIX/activated-releases`, which activation appends to after a
+  successful switch, or linked as `current` or `previous` by an
+  installation that predates that ledger.
+
+A release that was activated before keeps its own packaged verifier, so an
+installed schema-6 release remains a valid rollback target. Historical
+schema-6 releases are otherwise read only through the legacy path of
+Sophia's Go verifier (root). Installation verifies the artifact
 before an atomic `/opt/sophia/current` switch and keeps the former release as
 `previous`. No package contains an X11 WM bridge, an embedded legacy WM or
 bridge-specific configuration. Local installation does not require pushing or

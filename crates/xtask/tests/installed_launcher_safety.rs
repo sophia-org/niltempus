@@ -69,6 +69,21 @@ fn installer_preserves_a_rollback_pointer_before_activation() {
         .unwrap();
     assert!(verify < preserve);
     assert!(preserve < activate);
+    // A never-activated release must also pass this repository's current
+    // verifier before any link changes, and the activation is recorded only
+    // after the switch.
+    let current = ACTIVATOR
+        .find("\"$ROOT_DIR/tools/verify_packaged_policy.sh\" \"$release\"")
+        .unwrap();
+    let ledger = ACTIVATOR
+        .find("mv -Tf \"$ledger_temp\" \"$ACTIVATED_LEDGER\"")
+        .unwrap();
+    assert!(verify < current && current < preserve);
+    assert!(activate < ledger);
+    let installer_current = INSTALLER
+        .find("\"$ROOT_DIR/tools/verify_packaged_policy.sh\" \"$staging\"")
+        .unwrap();
+    assert!(installer_current < INSTALLER.find("mv \"$staging\" \"$target\"").unwrap());
     assert!(INSTALLER.contains("sha256sum -c SHA256SUMS"));
     assert!(INSTALLER.contains("activate_live_session_release.sh"));
 }

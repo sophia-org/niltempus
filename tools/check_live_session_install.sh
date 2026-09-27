@@ -311,6 +311,37 @@ if env "${proof_env[@]}" "$ROOT_DIR/tools/install_live_session.sh" \
 fi
 [[ ! -e "$proof_prefix/releases/0006" ]]
 
+# Installed but never activated: a schema-6 release placed in the immutable
+# release directory (as a staged or interrupted install would leave it) cannot
+# be activated, even though its own bundled verifier accepts it.
+legacy_prefix="$TEMP_DIR/legacy/prefix"
+legacy_env=(
+    SOPHIA_INSTALL_PREFIX="$legacy_prefix"
+    SOPHIA_SESSION_DIR="$TEMP_DIR/legacy/sessions"
+    SOPHIA_COMMAND_DIR="$TEMP_DIR/legacy/commands"
+)
+env "${legacy_env[@]}" "$ROOT_DIR/tools/install_live_session.sh" "$hagia_artifact"
+grep -Fqx 0003 "$legacy_prefix/activated-releases"
+cp -a "$old_candidate" "$legacy_prefix/releases/0006"
+if env "${legacy_env[@]}" "$ROOT_DIR/tools/activate_live_session_release.sh" \
+    "$legacy_prefix/releases/0006" >/dev/null 2>&1; then
+    echo "activation accepted a never-activated schema-6 release" >&2
+    exit 1
+fi
+[[ "$(readlink "$legacy_prefix/current")" == releases/0003 ]]
+if grep -Fqx 0006 "$legacy_prefix/activated-releases"; then
+    echo "a refused activation was recorded in the ledger" >&2
+    exit 1
+fi
+# An installed schema-6 release that WAS active before (here the previous
+# link of an installation predating the ledger) stays a valid rollback target
+# under its own verifier, and re-activating it is not a new candidate.
+ln -sfn releases/0006 "$legacy_prefix/previous"
+env "${legacy_env[@]}" "$TEMP_DIR/legacy/commands/sophia-rollback" >/dev/null
+[[ "$(readlink "$legacy_prefix/current")" == releases/0006 ]]
+env "${legacy_env[@]}" "$ROOT_DIR/tools/activate_live_session_release.sh" \
+    "$legacy_prefix/releases/0006" >/dev/null
+
 if env "${hagia_env[@]}" "$ROOT_DIR/tools/activate_live_session_release.sh" \
     "$hagia_artifact" >/dev/null 2>&1; then
     echo "activation accepted an artifact outside the immutable install prefix" >&2
