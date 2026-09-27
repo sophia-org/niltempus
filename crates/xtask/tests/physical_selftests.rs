@@ -120,3 +120,27 @@ fn physical_gate_identity() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+/// Sophia's `cargo xtask check` ran `tools/run_sophia_terminal_gate_tty3.sh
+/// --self-test` (the single-attempt visual-verdict contract); the script
+/// moved, so its self-test runs here. Pure shell: no device, VT or binary.
+#[test]
+fn run_sophia_terminal_gate_tty3_self_test() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let output = Command::new("timeout")
+        .args(["-s", "KILL", "60", "bash"])
+        .arg(repo.join("tools/run_sophia_terminal_gate_tty3.sh"))
+        .arg("--self-test")
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success()
+            && String::from_utf8_lossy(&output.stdout)
+                .contains("terminal gate single-attempt contract passed"),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
