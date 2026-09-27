@@ -23,10 +23,8 @@ fn copy(repo: &Path, root: &Path, name: &str) {
 #[test]
 fn a_fresh_checkout_without_provision_dir_reaches_cargo_offline() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let scratch = Scratch(std::env::temp_dir().join(format!(
-        "provision-script-{}",
-        std::process::id()
-    )));
+    let scratch =
+        Scratch(std::env::temp_dir().join(format!("provision-script-{}", std::process::id())));
     let root = scratch.0.join("checkout");
     for name in ["tools/provision.sh", "pins/sophia.toml", "Cargo.lock"] {
         copy(&repo, &root, name);
@@ -65,16 +63,19 @@ fn a_fresh_checkout_without_provision_dir_reaches_cargo_offline() {
     assert!(root.join(".provision/provision.log").is_file());
     assert!(!root.join(".provision/accepted").exists());
     let calls = fs::read_to_string(&calls).unwrap();
-    assert_eq!(calls.lines().collect::<Vec<_>>(), ["fetch --locked"], "{calls}");
+    assert_eq!(
+        calls.lines().collect::<Vec<_>>(),
+        ["fetch --locked"],
+        "{calls}"
+    );
 }
 
 #[test]
 fn a_cargo_home_inside_the_checkout_is_refused_before_any_cargo_call() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let scratch = Scratch(std::env::temp_dir().join(format!(
-        "provision-script-inside-{}",
-        std::process::id()
-    )));
+    let scratch = Scratch(
+        std::env::temp_dir().join(format!("provision-script-inside-{}", std::process::id())),
+    );
     let root = scratch.0.join("checkout");
     for name in ["tools/provision.sh", "pins/sophia.toml", "Cargo.lock"] {
         copy(&repo, &root, name);
@@ -85,7 +86,10 @@ fn a_cargo_home_inside_the_checkout_is_refused_before_any_cargo_call() {
     let stub = bin.join("cargo");
     fs::write(
         &stub,
-        format!("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n", calls.display()),
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\n",
+            calls.display()
+        ),
     )
     .unwrap();
     fs::set_permissions(&stub, fs::Permissions::from_mode(0o700)).unwrap();
