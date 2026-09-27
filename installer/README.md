@@ -15,10 +15,10 @@ For the next session, run this as your normal user:
 niltempus install
 ```
 
-It resolves the configured local refs, builds and validates the stack (or
-verifies an already built matching release), then prompts for sudo to install
-it. Select **Sophia niltempus Desktop** at your next login. A failed build or
-validation stops before installation.
+It verifies and installs the prepared release, prompting for sudo. If no release
+has been prepared, it builds from the configured sources first. Select
+**Sophia niltempus Desktop** at your next login. A failed build or validation
+stops before installation.
 
 The normal entry runs Hagia and Bemenu over 9P2000.L. Lom remains on current
 IPC until its SDK adoption. **Sophia niltempus Desktop (current IPC)** runs
@@ -35,11 +35,19 @@ The individual steps remain available:
 ```sh
 niltempus plan
 niltempus build
+niltempus prepare /path/to/an/existing/release
 niltempus verify /path/printed/by/build
 niltempus install /path/printed/by/build
 niltempus status
 niltempus rollback
 ```
+
+`build` automatically selects its verified output for the next `install`.
+`prepare` selects an existing release without rebuilding it. The selection in
+user state binds its path, release ID and manifest digest. `install` verifies
+these again; a missing or changed selected release is refused without silently
+building or choosing a different one. `install DIRECTORY` remains an explicit
+one-off installation and does not change the prepared selection.
 
 `plan` is the default and reads local refs only. It never fetches, pulls,
 checks out a branch in a working repository, or takes uncommitted edits.
@@ -111,8 +119,8 @@ The installer supplies a Hagia-specific policy adapter to Sophia's generic
 `--policy-checker` interface and requires exactly one `policy=validated`
 verdict. Missing validation and explicit deferral both refuse the build.
 
-`install` builds the configured release first; `install DIRECTORY` selects an
-explicit already built release. Installation requests sudo, installs into
+`install` uses the prepared release; `install DIRECTORY` selects an
+explicit already built release for that invocation. Installation requests sudo, installs into
 `/opt/sophia-niltempus-desktop`, and
 registers **Sophia niltempus Desktop** as a separate login choice. It leaves the
 existing `/opt/sophia` installation and session entries in place. The new launcher

@@ -10,9 +10,10 @@ import (
 const help = `niltempus [--config FILE] COMMAND
 
 plan              Inspect local source refs/signatures (default; no git pull)
-build             Build isolated snapshots and validate a full release
+build             Build, validate and prepare a full release for installation
+prepare DIRECTORY Verify and select an existing release for installation
 verify DIRECTORY  Verify a built release's files and hashes
-install           Build, validate and install the configured stack (sudo)
+install           Install the prepared release, or build if none exists (sudo)
 install DIRECTORY Install/activate a specific release for next login (sudo)
 status            Inspect the selected installed release
 rollback          Select the previous desktop release (sudo)
@@ -50,22 +51,42 @@ func run(args []string) error {
 		case "help", "--help", "-h":
 			fmt.Print(help)
 			return nil
-		case "plan", "build", "install":
+		case "plan":
 			plan, err := createPlan(loc)
 			if err != nil {
 				return err
 			}
-			if args[0] == "plan" {
-				return printJSON(plan)
-			}
+			return printJSON(plan)
+		case "build", "install":
 			// One build owns the shared Cargo/Nim caches at a time.
 			unlock, err := buildLock(loc)
 			if err != nil {
 				return err
 			}
 			defer unlock()
+			if args[0] == "install" {
+				path, err := preparedRelease(loc)
+				if err == nil {
+					return installRelease(path, loc)
+				}
+				// Only an absent selection allows a first build. A selected but
+				// missing or damaged release must fail before invoking sudo.
+				if !os.IsNotExist(err) {
+					return err
+				}
+				if _, markerErr := os.Lstat(filepath.Join(loc.State, "prepared.json")); !os.IsNotExist(markerErr) {
+					return err
+				}
+			}
+			plan, err := createPlan(loc)
+			if err != nil {
+				return err
+			}
 			path, err := buildRelease(plan, loc)
 			if err != nil {
+				return err
+			}
+			if err := selectPreparedRelease(path, loc); err != nil {
 				return err
 			}
 			fmt.Printf("Built and verified: %s\n", path)
@@ -113,6 +134,17 @@ func run(args []string) error {
 	}
 	if len(args) == 2 {
 		switch args[0] {
+		case "prepare":
+			unlock, err := buildLock(loc)
+			if err != nil {
+				return err
+			}
+			defer unlock()
+			if err := selectPreparedRelease(args[1], loc); err != nil {
+				return err
+			}
+			fmt.Println("Release prepared. Run niltempus install.")
+			return nil
 		case "install":
 			unlock, err := buildLock(loc)
 			if err != nil {
