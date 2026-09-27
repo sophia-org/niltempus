@@ -54,6 +54,35 @@ impl Wire {
     }
 }
 
+const MIB: u64 = 1024 * 1024;
+/// The shared registry's aggregate budget (Sophia's maximum).
+const REGISTRY_BYTES: u64 = 64 * MIB;
+
+/// The launcher's content envelope beside a bar, exactly as Session reserves
+/// it: 4 MiB staging, 12 MiB resident, 8 MiB retiring. Sophia keeps these in
+/// the private `role_limits` of crates/sophia-session/src/
+/// shell_component_connections.rs at d20faf3709ae21d94491f7a628ac9a4a86619cdf
+/// (no public accessor), so they are restated here; `launcher_limits` checks
+/// that this envelope plus the bar's prototype fits the registry, so a pin
+/// move that changes either fails loudly.
+fn launcher_limits(grant: ContentGrant) -> ContentLimits {
+    let mut limits = ContentLimits::prototype(grant);
+    limits.max_staging_bytes = 4 * MIB;
+    limits.max_resident_bytes = 12 * MIB;
+    limits.max_retiring_bytes = 8 * MIB;
+    let total =
+        |l: &ContentLimits| l.max_staging_bytes + l.max_resident_bytes + l.max_retiring_bytes;
+    let bar = ContentLimits::prototype(grant);
+    assert_eq!(total(&limits), 24 * MIB, "launcher envelope beside a bar");
+    assert!(
+        total(&limits) + total(&bar) <= REGISTRY_BYTES,
+        "launcher envelope {} + bar prototype {} exceed the {REGISTRY_BYTES}-byte registry",
+        total(&limits),
+        total(&bar)
+    );
+    limits
+}
+
 // The output the fixture publishes; allocation requests must fit in it.
 const OUTPUT_WIDTH: u32 = 1280;
 const OUTPUT_HEIGHT: u32 = 720;
@@ -154,7 +183,7 @@ impl Fixture {
                 rustix::process::geteuid().as_raw(),
             )
             .unwrap(),
-            registry: ContentEpochRegistry::new(64 * 1024 * 1024).unwrap(),
+            registry: ContentEpochRegistry::new(REGISTRY_BYTES).unwrap(),
             grant: ContentGrant {
                 connection_epoch: EPOCH,
                 content_grant_epoch: 1,
@@ -191,7 +220,9 @@ impl Fixture {
         self.transport
             .reserve_content_with_profile(
                 &mut self.registry,
-                ContentLimits::prototype(self.grant),
+                // The gate always runs beside a neighbouring bar, so the
+                // launcher gets the production envelope for that case.
+                launcher_limits(self.grant),
                 ContentStoreProfile::NativeLauncher,
             )
             .unwrap();
