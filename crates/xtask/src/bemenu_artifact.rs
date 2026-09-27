@@ -10,9 +10,9 @@
 //! keyring. The source checkout is only read: the build runs in a fresh
 //! scratch tree extracted from `git archive` of the signed commit, and that
 //! tree must hash to exactly the commit's tree before anything is compiled.
-use rustix::process::{Pid, Signal, kill_process_group, test_kill_process_group};
+use rustix::process::{Pid, Signal, WaitId, WaitIdOptions, WaitIdStatus, kill_process_group};
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -316,13 +316,15 @@ fn git(repo: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
 /// most OUTPUT_CAP per stream. Output collection is bounded too: a descendant
 /// still holding a pipe after the direct child exits ends the run and its group.
 pub fn bounded(command: &mut Command, limit: Duration, what: &str) -> Result<Vec<u8>, String> {
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0)
-        .spawn()
-        .map_err(|e| format!("{what}: {e}"))?;
+    let mut child = ProcessGroup(
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .map_err(|e| format!("{what}: {e}"))?,
+    );
     let drain = |pipe: Option<Box<dyn Read + Send>>| {
         let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || {
@@ -337,53 +339,45 @@ pub fn bounded(command: &mut Command, limit: Duration, what: &str) -> Result<Vec
     };
     let stdout = drain(
         child
+            .0
             .stdout
             .take()
             .map(|p| Box::new(p) as Box<dyn Read + Send>),
     );
     let stderr = drain(
         child
+            .0
             .stderr
             .take()
             .map(|p| Box::new(p) as Box<dyn Read + Send>),
     );
-    let status = match wait(&mut child, limit) {
-        Ok(status) => status,
-        Err(error) => {
-            stop_group(&mut child);
-            return Err(format!("{what}: {error}"));
-        }
-    };
+    let status = wait(&child, limit).map_err(|error| format!("{what}: {error}"))?;
     let deadline = Instant::now() + PIPE_GRACE;
     let collect = |receiver: &mpsc::Receiver<std::io::Result<Vec<u8>>>| {
         receiver.recv_timeout(deadline.saturating_duration_since(Instant::now()))
     };
     let (Ok(stdout), Ok(stderr)) = (collect(&stdout), collect(&stderr)) else {
-        stop_group(&mut child);
         return Err(format!("{what}: a descendant kept its output open"));
     };
     let (Ok(stdout), Ok(stderr)) = (stdout, stderr) else {
-        stop_group(&mut child);
         return Err(format!("{what}: could not read command output"));
     };
     if stdout.len() as u64 > OUTPUT_CAP || stderr.len() as u64 > OUTPUT_CAP {
-        stop_group(&mut child);
         return Err(format!("{what}: output exceeds {OUTPUT_CAP} bytes"));
     }
-    if !status.success() {
-        stop_group(&mut child);
+    if status.exit_status() != Some(0) {
         return Err(format!(
-            "{what}: {status}: {}",
+            "{what}: {status:?}: {}",
             String::from_utf8_lossy(&stderr)
         ));
     }
     Ok(stdout)
 }
 
-fn wait(child: &mut Child, limit: Duration) -> Result<std::process::ExitStatus, String> {
+fn wait(child: &ProcessGroup, limit: Duration) -> Result<WaitIdStatus, String> {
     let deadline = Instant::now() + limit;
     loop {
-        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+        if let Some(status) = child.status()? {
             return Ok(status);
         }
         if Instant::now() >= deadline {
@@ -393,61 +387,85 @@ fn wait(child: &mut Child, limit: Duration) -> Result<std::process::ExitStatus, 
     }
 }
 
-/// SIGTERM the child's private group, allow GROUP_GRACE, then SIGKILL the
-/// group and reap the direct child. Only this group is signalled: a daemon
-/// that left it (for example with setsid) is never searched for or touched.
-fn stop_group(child: &mut Child) {
-    let Some(group) = i32::try_from(child.id()).ok().and_then(Pid::from_raw) else {
-        let _ = child.kill();
-        let _ = child.wait();
-        return;
-    };
-    let _ = kill_process_group(group, Signal::TERM);
-    let deadline = Instant::now() + GROUP_GRACE;
-    loop {
-        // Reap the leader so a zombie does not keep the group observable.
-        let _ = child.try_wait();
-        if test_kill_process_group(group).is_err() {
-            break;
-        }
-        if Instant::now() >= deadline {
-            let _ = kill_process_group(group, Signal::KILL);
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(10));
+/// The leader stays waitable until the last group signal, pinning the PGID
+/// against reuse. Cleanup also runs on successful exit and I/O errors. Only
+/// this group is signalled: trusted build tools must not escape with setsid or
+/// a different process group.
+struct ProcessGroup(Child);
+
+impl ProcessGroup {
+    fn pid(&self) -> Pid {
+        Pid::from_raw(self.0.id() as i32).expect("spawned child has a process ID")
     }
-    let _ = child.wait();
+
+    fn status(&self) -> Result<Option<WaitIdStatus>, String> {
+        match rustix::process::waitid(
+            WaitId::Pid(self.pid()),
+            WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,
+        ) {
+            Ok(status) => Ok(status),
+            Err(rustix::io::Errno::INTR) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
+    }
 }
 
-pub(crate) fn wait_logged(
-    mut child: Child,
-    log: &Path,
-    limit: Duration,
-    what: &str,
-) -> Result<(), String> {
+impl Drop for ProcessGroup {
+    fn drop(&mut self) {
+        let group = self.pid();
+        let _ = kill_process_group(group, Signal::TERM);
+        // Existence probes include the unreaped leader, so they cannot prove
+        // that descendants have exited. Keep the leader until after KILL.
+        std::thread::sleep(GROUP_GRACE);
+        let _ = kill_process_group(group, Signal::KILL);
+        let _ = self.0.wait();
+    }
+}
+
+/// Own a build child spawned with `process_group(0)`, bounding its runtime and
+/// log. The caller must not reap it elsewhere. Cleanup precedes the final log
+/// check, so successful exit cannot hide an overflow or a lingering writer.
+pub fn wait_logged(child: Child, log: &Path, limit: Duration, what: &str) -> Result<(), String> {
+    let child = ProcessGroup(child);
     let deadline = Instant::now() + limit;
-    loop {
-        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
-            if status.success() {
-                return Ok(());
-            }
-            stop_group(&mut child);
-            return Err(format!("{what}: {status}"));
-        }
-        let size = std::fs::metadata(log).map(|m| m.len()).unwrap_or(0);
+    let status = loop {
+        let size = std::fs::metadata(log)
+            .map_err(|e| format!("{what} log: {e}"))?
+            .len();
         if Instant::now() >= deadline || size > BUILD_LOG_CAP {
-            stop_group(&mut child);
             return Err(format!(
                 "{what} stopped (limit {limit:?}, log {size} bytes)"
             ));
         }
+        if let Some(status) = child.status()? {
+            break status;
+        }
         std::thread::sleep(Duration::from_millis(50));
+    };
+    drop(child);
+    let size = std::fs::metadata(log)
+        .map_err(|e| format!("{what} log: {e}"))?
+        .len();
+    if size > BUILD_LOG_CAP {
+        return Err(format!("{what} log exceeds {BUILD_LOG_CAP} bytes ({size})"));
     }
+    if status.exit_status() != Some(0) {
+        return Err(format!("{what}: {status:?}"));
+    }
+    Ok(())
 }
 
 pub(crate) fn tail(log: &Path) -> String {
-    let bytes = std::fs::read(log).unwrap_or_default();
-    String::from_utf8_lossy(&bytes[bytes.len().saturating_sub(4096)..]).into_owned()
+    let mut bytes = Vec::new();
+    if let Ok(mut file) = File::open(log)
+        && let Ok(size) = file.metadata().map(|m| m.len())
+        && file
+            .seek(SeekFrom::Start(size.saturating_sub(4096)))
+            .is_ok()
+    {
+        let _ = file.take(4096).read_to_end(&mut bytes);
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 pub(crate) fn absolute(path: &Path) -> Result<PathBuf, String> {
