@@ -1,0 +1,22 @@
+# Provenance: the desktop-comparison modules moved from Sophia's
+# sophia-conformance crate at de776c68afdf9a133818f86917893c3362dc9fb7 (the pin)
+# (Sophia rule 13), with the dependencies they use there.
+[package]
+name = "desktop-comparison"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+drm = { version = "0.15", default-features = false }
+niri-ipc = "=26.4.0"
+rustix.workspace = true
+sha2.workspace = true
+sophia-engine.workspace = true
+x11rb = "0.13.1"
+
+[lints]
+workspace = true

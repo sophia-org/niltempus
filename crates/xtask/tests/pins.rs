@@ -40,6 +40,7 @@ fn the_committed_pins_agree() {
     for name in [
         "crates/xtask/Cargo.toml",
         "crates/live-tests/Cargo.toml",
+        "crates/desktop-comparison/Cargo.toml",
         ".cargo/config.toml",
     ] {
         check_manifest(name, &text(name), false).unwrap();
