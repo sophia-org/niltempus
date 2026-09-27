@@ -1,15 +1,18 @@
 // Provenance: moved from Sophia crates/sophia-conformance/src/direct_scanout_gate.rs
 // at de776c68afdf9a133818f86917893c3362dc9fb7 (the pin) (Sophia rule 13). Changes: Sophia is the explicit pinned
-// checkout SOPHIA_SOURCE (never this repository): built there, its
-// direct-scanout fixtures read from there (they stay in Sophia), and it is the
-// repository the archive binds. This repository is bound too; the session starts
+// checkout SOPHIA_SOURCE (never this repository), the repository the archive
+// binds. Nothing is built: the release binary and the exact pinned tree come
+// from prepared physical inputs (SOPHIA_PHYSICAL_INPUTS with its manifest
+// sha256 SOPHIA_PHYSICAL_INPUTS_SHA256, made by `xtask
+// prepare-physical-inputs --sophia-features=atomic-scanout-live`), verified
+// before the session and again before archiving; the direct-scanout fixtures
+// (they stay in Sophia) are read from that staged tree. This repository is bound too; the session starts
 // through this repository's tools/session/start_sophia_tty3.sh with absolute
 // SOPHIA_BIN and SOPHIA_SESSION_PREFLIGHT; the TTY is SOPHIA_SESSION_TTY or the
 // descriptor. Sophia's public direct_scanout, direct_scanout_archive and profile
 // modules do the verification and archiving.
 //! Development orchestration for the direct-scanout physical gate.
 
-use std::ffi::OsString;
 use std::fs;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -28,11 +31,15 @@ pub struct Sources {
     pub preflight: PathBuf,
     /// The absolute recipe tool the launcher's adapter runs.
     pub recipes: PathBuf,
+    /// The prepared physical inputs and their expected manifest sha256.
+    pub inputs: PathBuf,
+    pub inputs_sha256: String,
 }
 
 impl Sources {
-    /// From SOPHIA_SOURCE, SOPHIA_SESSION_PREFLIGHT and
-    /// SOPHIA_INTEGRATION_XTASK, each absolute (no default).
+    /// From SOPHIA_SOURCE, SOPHIA_SESSION_PREFLIGHT, SOPHIA_INTEGRATION_XTASK
+    /// and SOPHIA_PHYSICAL_INPUTS, each absolute, and
+    /// SOPHIA_PHYSICAL_INPUTS_SHA256 (no default for any).
     pub fn from_environment(integration: &Path) -> Result<Self, String> {
         let absolute = |name: &str, executable: bool| -> Result<PathBuf, String> {
             let value = std::env::var_os(name)
@@ -49,6 +56,11 @@ impl Sources {
             sophia: absolute("SOPHIA_SOURCE", false)?,
             preflight: absolute("SOPHIA_SESSION_PREFLIGHT", true)?,
             recipes: absolute("SOPHIA_INTEGRATION_XTASK", true)?,
+            inputs: absolute("SOPHIA_PHYSICAL_INPUTS", false)?,
+            inputs_sha256: std::env::var("SOPHIA_PHYSICAL_INPUTS_SHA256")
+                .ok()
+                .filter(|value| crate::hex(value, 64))
+                .ok_or("SOPHIA_PHYSICAL_INPUTS_SHA256 must be the prepared manifest sha256 (no default)")?,
         })
     }
 }
@@ -182,6 +194,7 @@ impl Probe {
 
 pub fn run_probe(
     sources: &Sources,
+    sophia_root: &Path,
     sophia_binary: &Path,
     probe: &Probe,
     client: Option<&Path>,
@@ -194,7 +207,7 @@ pub fn run_probe(
     );
     command
         .current_dir(&sources.integration)
-        .env("SOPHIA_ROOT", &sources.sophia)
+        .env("SOPHIA_ROOT", sophia_root)
         .env("SOPHIA_BIN", sophia_binary)
         .env("SOPHIA_SESSION_PREFLIGHT", &sources.preflight)
         .env("SOPHIA_INTEGRATION_XTASK", &sources.recipes)
@@ -284,28 +297,30 @@ pub fn run_gate_with(sources: &Sources, probe: &Probe) -> Result<GateReport, Str
     let client = std::env::var_os("SOPHIA_STANDALONE_APP_BIN")
         .map(PathBuf::from)
         .map_or_else(|| find_program("kitty"), Ok)?;
-    let core = repo.join("tools/fixtures/direct_scanout_core.kdl");
-    let desktop = repo.join("tools/fixtures/direct_scanout_desktop.kdl");
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"));
-    let build = Command::new(cargo)
-        .current_dir(repo)
-        .args([
-            "build",
-            "--quiet",
-            "--release",
-            "--offline",
-            "-p",
-            "sophia-cli",
-            "--features",
-            "atomic-scanout-live",
-            "--target-dir",
-        ])
-        .arg(repo.join("target"))
-        .status()
-        .map_err(|error| format!("could not build the physical-proof binary: {error}"))?;
-    if !build.success() {
-        return Err(format!("the physical-proof build exited with {build}"));
+    // The prepared inputs: verified against their manifest, built from this
+    // pinned revision with atomic-scanout-live, from this integration commit.
+    let sealed = crate::physical_inputs::verify(&sources.inputs, &sources.inputs_sha256)?;
+    let field = |kind: &str, key: &str| {
+        sealed
+            .records
+            .iter()
+            .find(|record| record.kind == kind)
+            .and_then(|record| record.fields.iter().find(|(k, _)| k == key))
+            .map(|(_, value)| value.as_str())
+    };
+    if sealed.sophia_commit != source_commit
+        || field("sophia", "features") != Some("atomic-scanout-live")
+        || field("integration", "commit") != Some(integration_commit.as_str())
+    {
+        return Err(
+            "the prepared inputs are not this Sophia commit with atomic-scanout-live from this integration commit"
+                .to_owned(),
+        );
     }
+    let sophia_root = sources.inputs.join(crate::physical_inputs::SOPHIA_TREE);
+    let sophia = sources.inputs.join("bin/sophia");
+    let core = sophia_root.join("tools/fixtures/direct_scanout_core.kdl");
+    let desktop = sophia_root.join("tools/fixtures/direct_scanout_desktop.kdl");
     if git_output(repo, &["rev-parse", "HEAD"])? != source_commit
         || !git_output(repo, &["status", "--short"])?.is_empty()
         || git_output(integration, &["rev-parse", "HEAD"])? != integration_commit
@@ -315,13 +330,12 @@ pub fn run_gate_with(sources: &Sources, probe: &Probe) -> Result<GateReport, Str
         )?
         .is_empty()
     {
-        return Err(
-            "Sophia or integration source identity changed during the physical-proof build"
-                .to_owned(),
-        );
+        return Err("Sophia or integration source identity changed".to_owned());
+    }
+    if !git_status(repo, &["verify-commit", &source_commit])? {
+        return Err("Sophia signature no longer verifies".to_owned());
     }
 
-    let sophia = repo.join("target/release/sophia");
     let sophia_sha256 = direct_scanout_archive::sha256(&sophia)?;
     let client_sha256 = direct_scanout_archive::sha256(&client)?;
 
@@ -337,7 +351,7 @@ pub fn run_gate_with(sources: &Sources, probe: &Probe) -> Result<GateReport, Str
             ));
         }
     }
-    run_probe(sources, &sophia, probe, Some(&client))?;
+    run_probe(sources, &sophia_root, &sophia, probe, Some(&client))?;
     if !session_log.is_file() {
         return Err(format!(
             "the direct-scanout session produced no evidence: {}",
@@ -363,6 +377,8 @@ pub fn run_gate_with(sources: &Sources, probe: &Probe) -> Result<GateReport, Str
         probe.cost,
         probe.cursor,
     )?;
+    // The prepared inputs are verified again before archiving.
+    crate::physical_inputs::verify(&sources.inputs, &sources.inputs_sha256)?;
     let run_root = std::env::var_os("SOPHIA_DIRECT_SCANOUT_RUN_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| state_home.join("sophia/promotion/direct-scanout-runs"));

@@ -74,10 +74,20 @@ const SOURCE_VARIABLES: [&str; 12] = [
     "HAGIA_SOURCE",
 ];
 
-const RULES: [Rule; 7] = [
+const RULES: [Rule; 8] = [
     Rule {
         name: "cargo build/run",
         matches: |l| command_pair(l, "cargo", &["build", "run", "b", "r"]),
+    },
+    Rule {
+        name: "cargo xtask (an alias that builds this checkout)",
+        matches: |l| {
+            let words = words(l);
+            words
+                .iter()
+                .position(|w| *w == "cargo")
+                .is_some_and(|at| words[at..].contains(&"xtask"))
+        },
     },
     Rule {
         name: "nim compile",
@@ -176,6 +186,10 @@ fn relative(path: &Path) -> String {
 fn every_rule_fires_on_a_planted_line() {
     for (line, rule) in [
         (
+            "exec cargo --quiet --offline --locked xtask direct-scanout-gate",
+            "cargo xtask (an alias that builds this checkout)",
+        ),
+        (
             "(cd \"$SOPHIA_SOURCE\" && cargo build --release)",
             "cargo build/run",
         ),
@@ -251,7 +265,7 @@ fn no_runner_builds_or_reads_a_source_target() {
 }
 
 /// The converted runners: each prepares its inputs through the helper.
-const PREPARING: [&str; 17] = [
+const PREPARING: [&str; 18] = [
     "tools/run_current_hagia_native_gate_tty4.sh",
     "tools/run_current_hagia_policy_gate_tty4.sh",
     "tools/run_frame_fed_output_gate_tty4.sh",
@@ -267,6 +281,7 @@ const PREPARING: [&str; 17] = [
     "tools/hagia_live_session_smoke.sh",
     "tools/hagia_client_lifecycle_fault_smoke.sh",
     "tools/hagia_owner_settlement_fault_smoke.sh",
+    "tools/direct_scanout_gate.sh",
     "tools/lib/physical_inputs.sh",
     "tools/lib/physical_runner.sh",
 ];
@@ -274,7 +289,7 @@ const PREPARING: [&str; 17] = [
 #[test]
 fn converted_runners_prepare_through_the_bounded_helper() {
     let root = repo();
-    for path in &PREPARING[..15] {
+    for path in &PREPARING[..16] {
         let text = fs::read_to_string(root.join(path)).unwrap();
         assert!(
             text.contains("physical_inputs_prepare "),
@@ -289,7 +304,7 @@ fn converted_runners_prepare_through_the_bounded_helper() {
             "{path} does not load the runner library"
         );
     }
-    let library = fs::read_to_string(root.join(PREPARING[15])).unwrap();
+    let library = fs::read_to_string(root.join(PREPARING[16])).unwrap();
     // The one invocation of the helper, and its bounds.
     for required in [
         "CARGO_BUILD_JOBS=2 timeout -s KILL \"$PHYSICAL_INPUTS_DEADLINE\"",
@@ -320,7 +335,7 @@ fn converted_runners_prepare_through_the_bounded_helper() {
         .split(' ')
         .collect::<Vec<_>>();
     assert_eq!(keys, xtask::physical_inputs::ENV_KEYS);
-    let runner = fs::read_to_string(root.join(PREPARING[16])).unwrap();
+    let runner = fs::read_to_string(root.join(PREPARING[17])).unwrap();
     assert!(runner.contains(". \"$ROOT_DIR/tools/lib/physical_inputs.sh\""));
 }
 
@@ -371,5 +386,58 @@ fn sophia_session_wrapper_never_builds() {
             .unwrap()
             .contains("SOPHIA_BUILD_SESSION=false"),
         "run_desktop_session.sh must hand Sophia's wrapper SOPHIA_BUILD_SESSION=false"
+    );
+}
+
+/// The Rust side: only the bounded builders spawn a build. The direct-scanout
+/// gate (a Rust runner) takes prepared inputs like the shell runners.
+#[test]
+fn only_the_bounded_builders_spawn_a_build() {
+    const BUILDERS: [&str; 3] = [
+        "crates/xtask/src/package_desktop.rs",
+        "crates/xtask/src/product_artifact.rs",
+        "crates/xtask/src/bemenu_artifact.rs",
+    ];
+    fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                sources(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+    let root = repo();
+    let mut all = Vec::new();
+    for krate in ["crates/xtask/src", "crates/desktop-comparison/src"] {
+        sources(&root.join(krate), &mut all);
+    }
+    let mut found = Vec::new();
+    for path in &all {
+        let name = relative(path);
+        if BUILDERS.contains(&name.as_str()) {
+            continue;
+        }
+        let compact = fs::read_to_string(path)
+            .unwrap()
+            .split_whitespace()
+            .collect::<String>();
+        for pattern in [
+            "\"cargo\",\"build\"",
+            "var_os(\"CARGO\")",
+            "\"--target-dir\"",
+            "\"nim\",\"c\"",
+            "Command::new(\"nimble\")",
+        ] {
+            if compact.contains(pattern) {
+                found.push(format!("{name}: {pattern}"));
+            }
+        }
+    }
+    assert!(found.is_empty(), "{found:#?}");
+    let gate = fs::read_to_string(root.join("crates/xtask/src/direct_scanout_gate.rs")).unwrap();
+    assert!(
+        gate.contains("crate::physical_inputs::verify(&sources.inputs, &sources.inputs_sha256)")
     );
 }
