@@ -137,8 +137,17 @@ done
     echo "The session arguments must carry exactly one --input-seat or --input-devices (found $input_selectors)." >&2
     exit 1
 }
-# The workload benchmark identity belongs to this adapter's record now.
-[[ -z "$session_benchmark" ]] || printf '%s\n' "$session_benchmark"
+# Workload benchmark identities are this adapter's records (Sophia keeps no
+# product record channel). Readers look for them in the adapter log, which is
+# explicit (SOPHIA_DESKTOP_ADAPTER_LOG) or the per-profile default below.
+ADAPTER_LOG="${SOPHIA_DESKTOP_ADAPTER_LOG:-${XDG_STATE_HOME:-$HOME/.local/state}/sophia/desktop-session/${SESSION_PROFILE}-adapter.log}"
+[[ "$ADAPTER_LOG" == /* ]] || { echo "SOPHIA_DESKTOP_ADAPTER_LOG must be absolute." >&2; exit 2; }
+mkdir -p "$(dirname "$ADAPTER_LOG")"
+chmod 700 "$(dirname "$ADAPTER_LOG")"
+printf 'sophia_desktop_adapter schema=1 status=starting profile=%s label=%s started_at_utc=%s\n' \
+    "$SESSION_PROFILE" "$SESSION_LABEL" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$ADAPTER_LOG"
+[[ -z "$session_benchmark" ]] || printf '%s\n' "$session_benchmark" >>"$ADAPTER_LOG"
+chmod 600 "$ADAPTER_LOG"
 
 if [[ "$SESSION_PROFILE" == standalone ]]; then
     echo "Starting Sophia's standalone single-application proof."

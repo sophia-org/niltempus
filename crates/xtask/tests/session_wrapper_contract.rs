@@ -44,6 +44,7 @@ impl Fixture {
             .env_clear()
             .env("PATH", "/usr/bin:/bin")
             .env("XDG_RUNTIME_DIR", self.0.join("runtime"))
+            .env("XDG_STATE_HOME", self.0.join("state"))
             .env("TMPDIR", self.0.join("runtime"))
             .env("RECORD", self.0.join("record"))
             .env("SOPHIA_ROOT", self.0.join("sophia"))
@@ -160,6 +161,29 @@ fn the_caller_supplies_the_product_environment() {
     assert_eq!(record[0], "label=managed");
     // Sophia's wrapper inherits the recipe environment from its caller.
     assert_eq!(record[1], "probe_slice=selection");
+}
+
+#[test]
+fn benchmark_records_go_to_the_adapter_log_not_to_sophia() {
+    let f = Fixture::new("benchmark");
+    let output = f.run(
+        &xtask(),
+        &[],
+        &[
+            ("SOPHIA_TTY_PROFILE", "standalone"),
+            ("SOPHIA_STANDALONE_WORKLOAD", "glxgears"),
+            ("SOPHIA_STANDALONE_APP_BIN", "/bin/true"),
+        ],
+    );
+    assert!(output.status.success(), "{output:?}");
+    let log = fs::read_to_string(f.0.join("state/sophia/desktop-session/standalone-adapter.log"))
+        .unwrap();
+    assert!(log.contains(
+        "sophia_desktop_adapter schema=1 status=starting profile=standalone label=standalone"
+    ));
+    assert!(log.contains("sophia_glxgears_benchmark schema=1 duration_seconds=20 surface_width=500 surface_height=500 swap_interval=1"));
+    // Nothing product-specific is handed to Sophia's wrapper for its logs.
+    assert!(!f.record().iter().any(|l| l.contains("benchmark")));
 }
 
 #[test]
