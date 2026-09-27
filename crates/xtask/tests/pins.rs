@@ -23,7 +23,9 @@ fn lock(runtime: &str, protocol: &str, extra: &str) -> String {
          [[package]]\nname = \"sophia-conformance\"\nversion = \"0.1.0\"\nsource = \"{conformance}\"\n\n\
          [[package]]\nname = \"sophia-config\"\nversion = \"0.1.0\"\nsource = \"{conformance}\"\n\n\
          [[package]]\nname = \"sophia-engine\"\nversion = \"0.1.0\"\nsource = \"{conformance}\"\n\n\
-         [[package]]\nname = \"sophia-shell-client\"\nversion = \"0.1.0\"\nsource = \"{conformance}\"\n{extra}"
+         [[package]]\nname = \"sophia-shell-client\"\nversion = \"0.1.0\"\nsource = \"{conformance}\"\n\n\
+         [[package]]\nname = \"sophia-x-authority\"\nversion = \"0.1.0\"\nsource = \"{conformance}\"\n\n\
+         [[package]]\nname = \"sophia-backend-live\"\nversion = \"0.1.0\"\nsource = \"{conformance}\"\n{extra}"
     )
 }
 
@@ -39,6 +41,7 @@ fn the_committed_pins_agree() {
         "crates/xtask/Cargo.toml",
         "crates/live-tests/Cargo.toml",
         "crates/desktop-comparison/Cargo.toml",
+        "crates/quickshell-probe/Cargo.toml",
         ".cargo/config.toml",
     ] {
         check_manifest(name, &text(name), false).unwrap();

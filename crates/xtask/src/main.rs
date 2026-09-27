@@ -17,6 +17,9 @@ const USAGE: &str = "usage:
   xtask check-provision
   xtask dock profile LOM LOM_CONFIG BEMENU PROVLITA DOCK_CONFIG
   xtask dock verify HOST_LOG
+  xtask panel --probe --renderer=software --quickshell=/ABS --wm=/ABS --sophia=/ABS [--display=:N] [--output=/ABS/NEW]
+  xtask panel [--renderer=gpu|software] [--quickshell=/ABS] [--output=/ABS/NEW]   (operator-only: attaches to the current session)
+  xtask panel verify SESSION_LOG
   xtask audit-pins ABSOLUTE-SOPHIA-REPO";
 
 fn main() -> std::process::ExitCode {
@@ -74,6 +77,21 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
                 "usage: xtask dock profile LOM CONFIG BEMENU PROVLITA CONFIG | dock verify LOG"
                     .into(),
             ),
+        },
+        // Moved from Sophia crates/xtask/src/main.rs (`panel` and
+        // `conformance verify panel`) at the pin.
+        Some("panel") => match &arguments[1..] {
+            [command, path] if command == "verify" => {
+                use std::io::Read;
+                let mut text = String::new();
+                std::fs::File::open(path)
+                    .map_err(|e| e.to_string())?
+                    .take(4 * 1024 * 1024 + 1)
+                    .read_to_string(&mut text)
+                    .map_err(|e| e.to_string())?;
+                Ok(vec![xtask::panel::verify(&text)?])
+            }
+            rest => xtask::panel::run(&repo, rest),
         },
         Some("check-pins") if arguments.len() == 1 => xtask::pins::check(&repo),
         Some("check-provision") if arguments.len() == 1 => xtask::pins::check_provision(&repo),

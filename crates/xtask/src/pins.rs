@@ -14,13 +14,15 @@ use std::time::Duration;
 pub const SOPHIA_URL: &str = "https://github.com/sophia-org/sophia.git";
 pub const SOPHIA_REV: &str = "de776c68afdf9a133818f86917893c3362dc9fb7";
 /// The Sophia crates this repository names directly.
-pub const SOPHIA_CRATES: [&str; 6] = [
+pub const SOPHIA_CRATES: [&str; 8] = [
+    "sophia-backend-live",
     "sophia-config",
     "sophia-conformance",
     "sophia-engine",
     "sophia-protocol",
     "sophia-runtime",
     "sophia-shell-client",
+    "sophia-x-authority",
 ];
 
 pub const FONT: &str = "assets/fonts/JetBrainsMonoNL-Regular.ttf";
@@ -30,11 +32,12 @@ pub const SDK_MANIFEST_SHA256: &str =
     "9da6ca11f381cb18d1772f5b6656a6e6a32dc003502daf53ce6d220e67e3b28e";
 const SOPHIA_PIN: &str = "pins/sophia.toml";
 const CONTRACTS: &str = "pins/contracts.sha256";
-const MANIFESTS: [&str; 5] = [
+const MANIFESTS: [&str; 6] = [
     "Cargo.toml",
     "crates/xtask/Cargo.toml",
     "crates/live-tests/Cargo.toml",
     "crates/desktop-comparison/Cargo.toml",
+    "crates/quickshell-probe/Cargo.toml",
     ".cargo/config.toml",
 ];
 

@@ -58,19 +58,25 @@ and `check_live_session_milestone5_verifier.sh` (`physical_selftests`).
 | `session_launcher_recovery.rs` `tty_adapter_refuses_controls_before_queries_or_privileged_handoff` | E `session_tty3_launcher.rs`; S keeps the generic recovery tests |
 | `xtask` `bemenu_artifact` tests | E `xtask/tests/bemenu_artifact.rs` |
 | `sophia-runtime/tests/shell_bemenu_files.rs` | E `live-tests/tests/bemenu_files.rs` (9P only; asserts no `SOPHIA_SHELL_SOCKET` in Bemenu's environment and `wire=9p` on the negotiated line) |
+| `sophia-conformance/tests/panel.rs` (3) | E `xtask/tests/panel.rs` (the same 3, on `xtask::panel::verify`) |
+| `sophia x-authority-quickshell-smoke`, `x-authority-quickshell-software-smoke` (no test target; manual commands) | E `quickshell-probe` (`crates/quickshell-probe`; offline: `tests/evaluate.rs`, `tests/runner.rs`; the run itself needs an execution grant) and S `present_msc_ordering.rs` `present_selection_after_destroy_reports_bad_window_and_keeps_serving` (`6fda6f3b`) for the generic teardown answer ([quickshell](quickshell.md)) |
+| `shell_descriptor_conformance_host` `--proof`, `--serve`, `--bar-proof` | S `shell_descriptor_modes.rs` (root `9bc6bb7`, 4 tests); Narthex product coverage waits on a 9P descriptor host (seam); `--serve` and `--bar-proof` have no independent generic peer (flagged) ([E1](E1-descriptor-hosts.md)) |
 | `sophia-session/tests/shell_component_processes.rs` Bemenu tests (3) | Retired with product IPC (Bemenu 536d6b2), together with the interim external twins `bemenu_ipc`, `bemenu_session_ipc` and the IPC launch diagnostic `diag_bemenu_session_launch`; generic shell-component coverage stays S |
 
 The live tests' Session-layer pins (`sophia-session`, `sophia-backend-live`)
 and the shell client's `ipc-compat` feature went with the IPC twins; the
-remaining pinned Sophia crates are `sophia-config`, `sophia-conformance`,
+remaining pinned Sophia crates were `sophia-config`, `sophia-conformance`,
 `sophia-engine`, `sophia-protocol`, `sophia-runtime` and `sophia-shell-client`.
+The Quickshell probe adds `sophia-x-authority` and `sophia-backend-live`
+(feature `gbm-probe`, the GPU variant's measurement and allocator), used only
+by `crates/quickshell-probe`.
 
 New external tests with no Sophia predecessor: `session_preflight`,
 `session_host_paths`, `session_reap_last`, `session_wrapper_contract`,
 `profile_mode`, `wm_default`, `wm_pair`, `package_desktop`, `installed_xtask`,
 `product_artifact`, `nim_deps`, `nim_install`, `physical_inputs`,
 `physical_runner_bounds`, `verify_archives`, `pins`, `provision_script`,
-`xtask_alias`.
+`xtask_alias`, and `quickshell-probe`'s `evaluate` and `runner`.
 
 ## Recipes (justfile) and xtask commands
 
@@ -83,6 +89,9 @@ New external tests with no Sophia predecessor: `session_preflight`,
 | `just direct-scanout-*-gate`, `cargo xtask conformance gate direct-scanout` | `tools/direct_scanout_gate.sh` (prepared inputs; `xtask direct-scanout-gate`) |
 | `just direct-scanout-probe`, `cargo xtask conformance run direct-scanout` (an unarchived probe run) | the gate runs the same probe (`direct_scanout_gate::run_probe`) and archives it; the unarchived probe entry is not kept |
 | `just direct-scanout-archive`, `direct-scanout-verify` | S |
+| `cargo xtask panel` | `cargo xtask panel` (the probe takes an explicit prepared `--sophia`; live mode is operator-only) |
+| `cargo xtask conformance verify panel LOG` | `cargo xtask panel verify LOG` |
+| `sophia x-authority-quickshell-smoke`, `x-authority-quickshell-software-smoke` | `quickshell-probe --renderer=gpu --render-node=...`, `--renderer=software` (device-hidden) |
 | `just glxgears-benchmark`, `glxgears-shake` | `tools/benchmark_sophia_glxgears_tty3.sh`, `..._shake_tty3.sh` |
 
 ## Physical and operator gates

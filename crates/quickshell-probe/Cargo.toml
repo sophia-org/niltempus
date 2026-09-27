@@ -1,0 +1,25 @@
+# Provenance: the Quickshell trace probes (`sophia x-authority-quickshell-smoke`
+# and `x-authority-quickshell-software-smoke`) moved from Sophia's sophia-cli
+# at de776c68afdf9a133818f86917893c3362dc9fb7 (the pin) (Sophia rule 13),
+# rebuilt on sophia-x-authority's public frontend API. See docs/quickshell.md.
+# A separate package so the GBM/EGL stack the GPU variant needs never enters
+# the packaged xtask binary.
+[package]
+name = "quickshell-probe"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+rustix = { workspace = true, features = ["process"] }
+sha2.workspace = true
+sophia-backend-live = { workspace = true, features = ["gbm-probe"] }
+sophia-protocol.workspace = true
+sophia-x-authority.workspace = true
+xtask = { path = "../xtask" }
+
+[lints]
+workspace = true

@@ -12,7 +12,7 @@ retained Sophia coverage: every inbound reference in retained Sophia code is
 listed under [Inbound hunks](#inbound-hunks) and changes in the same commit
 (the live-record reader registry fails otherwise).
 
-Counts: 290 whole-file deletions, 20 moved-then-kept files that stay in Sophia by ruling, 34 files already deleted at the pin, plus the reductions and inbound hunks below. Lom and Bemenu
+Counts: 297 whole-file deletions (290 from S5 plus 7 from the Quickshell closure, [quickshell](quickshell.md)), 20 moved-then-kept files that stay in Sophia by ruling, 34 files already deleted at the pin, plus the reductions and inbound hunks below. Lom and Bemenu
 product IPC coverage is recorded as retired with product IPC in
 [GATE-MAPPING](GATE-MAPPING.md), not moved.
 
@@ -88,7 +88,7 @@ pin-reads them from the staged tree.
 | `crates/sophia-cli/tests/fixtures/session_inputs_before_t027.sh` | `crates/xtask/tests/fixtures/session_inputs_before_t027.sh` |
 | `crates/sophia-cli/tests/session_application_arguments.rs` | `crates/xtask/tests/session_recipe_application.rs` |
 
-### `crates/sophia-conformance` (20)
+### `crates/sophia-conformance` (22)
 
 | Sophia path | Moved to |
 | --- | --- |
@@ -110,14 +110,23 @@ pin-reads them from the staged tree.
 | `crates/sophia-conformance/src/desktop_comparison/sample_record.rs` | `crates/desktop-comparison/src/sample_record.rs` |
 | `crates/sophia-conformance/src/desktop_comparison/storage.rs` | `crates/desktop-comparison/src/storage.rs` |
 | `crates/sophia-conformance/src/direct_scanout_gate.rs` | `crates/xtask/src/direct_scanout_gate.rs` |
+| `crates/sophia-conformance/src/panel.rs` | `crates/xtask/src/panel.rs` (`verify`) |
 | `crates/sophia-conformance/tests/direct_scanout.rs` | `crates/xtask/tests/direct_scanout_gate.rs` |
+| `crates/sophia-conformance/tests/panel.rs` | `crates/xtask/tests/panel.rs` |
 | `crates/sophia-conformance/tests/support/desktop_comparison.rs` | `crates/desktop-comparison/tests/support/desktop_comparison.rs` |
 
-### `docs` (1)
+### `crates/xtask` (1)
+
+| Sophia path | Moved to |
+| --- | --- |
+| `crates/xtask/src/panel.rs` | `crates/xtask/src/panel.rs` (`run`) |
+
+### `docs` (2)
 
 | Sophia path | Moved to |
 | --- | --- |
 | `docs/operations.md` | `docs/operations.md` |
+| `docs/quickshell-x11-panel.md` | `docs/quickshell.md` ("Running") |
 
 ### `tools` (172)
 
@@ -304,7 +313,7 @@ pin-reads them from the staged tree.
 | `tools/config/proof_helpers.sh` | `tools/config/proof_helpers.sh` |
 | `tools/config/sophia-uinput.conf` | `tools/config/sophia-uinput.conf` |
 
-### `tools/fixtures` (60)
+### `tools/fixtures` (63)
 
 | Sophia path | Moved to |
 | --- | --- |
@@ -359,6 +368,9 @@ pin-reads them from the staged tree.
 | `tools/fixtures/physical_firefox_session_pass.log` | `tools/fixtures/physical_firefox_session_pass.log` |
 | `tools/fixtures/physical_native_chrome_pass.log` | `tools/fixtures/physical_native_chrome_pass.log` |
 | `tools/fixtures/physical_native_chrome_sequence_pass.log` | `tools/fixtures/physical_native_chrome_sequence_pass.log` |
+| `tools/fixtures/quickshell_sophia/core.kdl` | `tools/fixtures/quickshell_sophia/core.kdl` |
+| `tools/fixtures/quickshell_sophia/desktop.kdl` | `tools/fixtures/quickshell_sophia/desktop.kdl` |
+| `tools/fixtures/quickshell_sophia/shell.qml` | `tools/fixtures/quickshell_sophia/shell.qml` |
 | `tools/fixtures/rendering_performance_pass.log` | `tools/fixtures/rendering_performance_pass.log` |
 | `tools/fixtures/sophia_glxgears_performance_pass.log` | `tools/fixtures/sophia_glxgears_performance_pass.log` |
 | `tools/fixtures/sophia_terminal_performance_pass.log` | `tools/fixtures/sophia_terminal_performance_pass.log` |
@@ -451,6 +463,17 @@ pin-reads them from the staged tree.
   `build_release_sophia` (:270), `run_direct_scanout` (:293),
   `gate_direct_scanout` (:323) and usage lines :505-506 and :519-532.
   Direct-scanout verify, bind, archive and archive-verify stay.
+- Quickshell ([quickshell](quickshell.md), "Root deletion boundary"):
+  `crates/sophia-cli/src/commands/x_authority.rs:76-88` (the two named arms);
+  `crates/sophia-cli/src/commands/help.rs:57-58`;
+  `run_x_authority_quickshell_smoke` and `run_x_authority_quickshell_software_smoke`
+  in `crates/sophia-cli/src/commands/x_authority/basic_smokes.rs` (:522-652);
+  the `"quickshell"` stage entry in `external_probe.rs:347` and
+  `probe_tolerates_client_error` (:538-549), which has no other caller. Keep
+  the shared observer's null-window pre-filter, the render-device helpers and
+  every other probe. `crates/sophia-conformance/src/lib.rs:27`
+  (`pub mod panel`). `crates/xtask/src/main.rs:22` (`mod panel`), :45 (the
+  `panel` dispatch), :94-97 (`conformance verify panel`) and usage :447-449.
 
 ## Inbound hunks
 
@@ -471,6 +494,8 @@ Retained Sophia files that name a deleted path (line numbers at the pin):
 | `tools/remote_target.sh` | :101 | point the physical-proof hint at the integration repository |
 | `crates/sophia-session/tests/support/live_session/session_config_tests.rs` | :1323 | comment: the cursor-path line is required by the external `verify_hagia_native_session.sh` |
 | `tools/probes/run_bounded_xterm.sh` | :7 | comment: the report consumer is external |
+| `docs/README.md` | :22-23 | drop the Quickshell X11 panel entry (moved to this repository's `docs/quickshell.md`) |
+| `docs/x11-compatibility-matrix.md` | rows at :81, :101, :102 | stop citing `x-authority-quickshell-smoke` and `-software-smoke`; cite `present_msc_ordering.rs` (`present_selection_after_destroy_reports_bad_window_and_keeps_serving`) and the x11_wire SHAPE tests, and point to this repository for the client trace; do not carry over the unasserted GLX/DRI3/Present and "no server refusal" claims ([quickshell](quickshell.md)) |
 | `crates/sophia-conformance/src/direct_scanout_gate.rs` | whole file | moved (listed above); `profile::check_every_profile` stays in Sophia |
 
 Orphans to delete with the move (they only drive moved scripts):

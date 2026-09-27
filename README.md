@@ -20,6 +20,10 @@ native launcher gate over Sophia's production 9P file export.
 - [Narthex reference sheets](docs/narthex-reference-sheets.md).
 - [Same-hardware desktop comparison](docs/desktop-comparison.md).
 - [Lom content](docs/lom-content.md) (pending the Lom 9P seams).
+- [Quickshell](docs/quickshell.md): the X11 trace probe and panel probe, with
+  the old coverage map.
+- [E1 descriptor hosts](docs/E1-descriptor-hosts.md): retained coverage of the
+  descriptor host modes (a 9P seam for the Narthex half).
 - [Gate mapping](docs/GATE-MAPPING.md): where every moved Sophia gate and test
   lives now, and what is retired with product IPC.
 - [Sophia deletion list](docs/SOPHIA-DELETION-LIST.md): the Sophia-side half of

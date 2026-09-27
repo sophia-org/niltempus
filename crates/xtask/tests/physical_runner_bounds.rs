@@ -410,7 +410,11 @@ fn only_the_bounded_builders_spawn_a_build() {
     }
     let root = repo();
     let mut all = Vec::new();
-    for krate in ["crates/xtask/src", "crates/desktop-comparison/src"] {
+    for krate in [
+        "crates/xtask/src",
+        "crates/desktop-comparison/src",
+        "crates/quickshell-probe/src",
+    ] {
         sources(&root.join(krate), &mut all);
     }
     let mut found = Vec::new();

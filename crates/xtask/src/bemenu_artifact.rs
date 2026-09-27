@@ -421,15 +421,23 @@ fn wait(child: &ProcessGroup, limit: Duration) -> Result<WaitIdStatus, String> {
 /// The leader stays waitable until the last group signal, pinning the PGID
 /// against reuse. Cleanup also runs on successful exit and I/O errors. Only
 /// this group is signalled: trusted build tools must not escape with setsid or
-/// a different process group.
-struct ProcessGroup(Child);
+/// a different process group. Public so the Quickshell probe
+/// (crates/quickshell-probe) reuses this custody rather than a copy.
+pub struct ProcessGroup(Child);
 
 impl ProcessGroup {
-    fn pid(&self) -> Pid {
+    /// Take custody of a child spawned with `process_group(0)`. The caller
+    /// must not reap it elsewhere; dropping the value stops and reaps the group.
+    pub fn new(child: Child) -> Self {
+        Self(child)
+    }
+
+    pub fn pid(&self) -> Pid {
         Pid::from_raw(self.0.id() as i32).expect("spawned child has a process ID")
     }
 
-    fn status(&self) -> Result<Option<WaitIdStatus>, String> {
+    /// The leader's exit, observed without reaping it (WNOWAIT).
+    pub fn status(&self) -> Result<Option<WaitIdStatus>, String> {
         match rustix::process::waitid(
             WaitId::Pid(self.pid()),
             WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,

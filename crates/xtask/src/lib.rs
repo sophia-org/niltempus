@@ -12,6 +12,7 @@ pub mod git_tree;
 pub mod nim_deps;
 pub mod nim_install;
 pub mod package_desktop;
+pub mod panel;
 pub mod physical_inputs;
 pub mod pins;
 pub mod product_artifact;
