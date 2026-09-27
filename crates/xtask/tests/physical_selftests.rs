@@ -76,9 +76,6 @@ self_test!(check_installed_watchdog_recovery);
 self_test!(check_installed_xterm_verifier);
 self_test!(check_keyboard_independence_session_verifier);
 self_test!(check_keyboard_independence_verifier);
-self_test!(check_live_session_milestone4_verifier);
-self_test!(check_live_session_milestone5_verifier);
-self_test!(check_retired_milestone_launchers);
 self_test!(check_sophia_firefox_dialog_verifier);
 self_test!(check_sophia_firefox_lifecycle_verifier);
 self_test!(check_sophia_firefox_physical_verifier);
@@ -89,6 +86,7 @@ self_test!(check_sophia_glxgears_performance_reporter);
 self_test!(check_sophia_native_chrome_verifier);
 self_test!(check_sophia_rendering_performance_reporter);
 self_test!(check_sophia_standalone_vkcube_verifier);
+self_test!(check_session_terminal_arguments);
 self_test!(check_sophia_terminal_performance_reporter);
 self_test!(check_truecolor_verifier);
 self_test!(check_xserver_rendering_performance_reporter);
@@ -96,7 +94,9 @@ self_test!(check_xserver_rendering_performance_reporter);
 pinned_self_test!(check_frame_fed_output_verifier);
 pinned_self_test!(check_hagia_native_matchers);
 pinned_self_test!(check_hagia_physical_matchers);
+pinned_self_test!(check_live_session_milestone5_verifier);
 pinned_self_test!(check_mirror_group_physical_verifier);
+pinned_self_test!(check_retired_milestone_launchers);
 pinned_self_test!(test_verify_mixed_output_evidence);
 
 /// The production preflights and the native dry run of the Hagia gates
@@ -115,6 +115,33 @@ fn physical_gate_identity() {
         .unwrap();
     assert!(
         output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Sophia's `cargo xtask check` ran `tools/run_sophia_terminal_gate_tty3.sh
+/// --self-test` (the single-attempt visual-verdict contract); the script
+/// moved, so its self-test runs here. Pure shell: no device, VT or binary.
+#[test]
+fn run_sophia_terminal_gate_tty3_self_test() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let output = Command::new("timeout")
+        .args(["-s", "KILL", "60", "bash"])
+        .arg(repo.join("tools/run_sophia_terminal_gate_tty3.sh"))
+        .arg("--self-test")
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        // The script resolves its state directory from HOME before the
+        // self-test branch (nothing is written there).
+        .env("HOME", std::env::var_os("HOME").unwrap_or_default())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success()
+            && String::from_utf8_lossy(&output.stdout)
+                .contains("terminal gate single-attempt contract passed"),
         "{}\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)

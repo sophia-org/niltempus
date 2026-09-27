@@ -4,10 +4,15 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Changes: Sophia is the explicit pinned checkout SOPHIA_SOURCE (never this
-# repository): built there and its atomic-scanout preflight read from it; the
-# proof runs the absolute SOPHIA_BIN it built.
+# repository). Nothing is built here or there: the binary and the exact pinned
+# tree come from prepared physical inputs built from the signed tree in the
+# private SOPHIA_GATE_BUILD_DIR (tools/lib/physical_inputs.sh; this repository
+# is bound), the atomic-scanout preflight is read from that staged tree, and
+# the proof runs the absolute prepared SOPHIA_BIN.
 # shellcheck source=tools/lib/sophia_source.sh
 source "$ROOT_DIR/tools/lib/sophia_source.sh"
+# shellcheck source=tools/lib/physical_runner.sh
+source "$ROOT_DIR/tools/lib/physical_runner.sh"
 sophia_source="$(sophia_source_repo)" || exit 2
 EVIDENCE_DIR="${SOPHIA_M4_EVIDENCE_DIR:-${XDG_STATE_HOME:-${HOME}/.local/state}/sophia/milestone4}"
 DISPLAY_NAME="${SOPHIA_M4_DISPLAY:-:184}"
@@ -56,14 +61,20 @@ echo "Sophia Milestone 4 software + Vulkan hardware proof"
 echo "This proof requires exclusive DRM/KMS ownership on the active TTY."
 echo "Evidence: $EVIDENCE_DIR"
 
-cargo build --quiet --release --offline --manifest-path "$sophia_source/Cargo.toml" \
-    -p sophia-cli --features "atomic-scanout-live" --target-dir "$sophia_source/target"
-"$sophia_source/tools/atomic_scanout_preflight.sh"
-SOPHIA_BIN="$sophia_source/target/release/sophia"
+integration_commit="$(runner_integration_commit)"
+physical_inputs_prepare --sophia-features=atomic-scanout-live
+physical_inputs_bound "$integration_commit"
+[[ "${PI[SOPHIA_COMMIT]}" == "$(git -C "$sophia_source" rev-parse HEAD)" ]] || {
+    echo "The prepared inputs are not the Sophia checkout's pinned commit." >&2
+    exit 1
+}
+SOPHIA_ROOT="${PI[SOPHIA_ROOT]}"
+export SOPHIA_ROOT
+SOPHIA_BIN="${PI[SOPHIA_BIN]}"
 export SOPHIA_BIN
+physical_inputs_preflight "$SOPHIA_BIN" "$SOPHIA_ROOT" "$EVIDENCE_DIR/preflight.log"
 
 SOPHIA_ATOMIC_SCANOUT_SKIP_PREFLIGHT=1 \
-SOPHIA_LIVE_SESSION_SKIP_BUILD=1 \
 SOPHIA_LIVE_SESSION_PERSISTENT_EVIDENCE="$SOFTWARE_EVIDENCE" \
 SOPHIA_LIVE_SESSION_DISPLAY="$DISPLAY_NAME" \
 SOPHIA_LIVE_SESSION_RUNTIME_MSEC="$RUNTIME_MSEC" \
@@ -72,7 +83,7 @@ SOPHIA_LIVE_SESSION_RUNTIME_MSEC="$RUNTIME_MSEC" \
 
 set +e
 (
-    cd "$sophia_source"
+    cd "$SOPHIA_ROOT"
     SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \
         "$SOPHIA_BIN" session run \
         --display="$DISPLAY_NAME" --native-scanout \
@@ -89,7 +100,7 @@ fi
 set -e
 
 if (( proof_status == 0 )); then
-    "$ROOT_DIR/tools/verify_live_session_milestone4_evidence.sh" "$GPU_EVIDENCE"
+    "$SOPHIA_ROOT/tools/verify_live_session_milestone4_evidence.sh" "$GPU_EVIDENCE"
 fi
 
 exit "$proof_status"

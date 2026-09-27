@@ -62,6 +62,10 @@ fi
     sha256sum -c SHA256SUMS
 )
 "$staging/tools/verify_packaged_policy.sh" "$staging"
+# The installer's own verifier too: a candidate's packaged verifier may be an
+# older one (for example one that accepts schema 6), and a candidate must
+# satisfy this repository's current release schema.
+"$ROOT_DIR/tools/verify_packaged_policy.sh" "$staging"
 mv "$staging" "$target"
 "$ROOT_DIR/tools/activate_live_session_release.sh" "$target"
 trap - EXIT

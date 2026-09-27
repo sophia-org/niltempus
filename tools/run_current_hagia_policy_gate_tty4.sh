@@ -6,6 +6,11 @@ set -euo pipefail
 # repository), Hagia and Narthex are explicit checkouts (no sibling default),
 # this repository is bound too, and Sophia's launcher receives absolute
 # SOPHIA_BIN and SOPHIA_SESSION_PREFLIGHT (tools/lib/physical_runner.sh).
+# Nothing is built here or in any checkout: the three binaries, Hagia's default
+# profile and the pinned Sophia tree come from prepared physical inputs built
+# from the signed trees in the private SOPHIA_GATE_BUILD_DIR, Hagia and Narthex
+# from their REVIEWED dependency manifests (SOPHIA_HAGIA_NIM_DEPS[_SHA256],
+# SOPHIA_NARTHEX_NIM_DEPS[_SHA256]); tools/lib/physical_inputs.sh.
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=tools/lib/proof_checkout.sh
 source "$ROOT_DIR/tools/lib/proof_checkout.sh"
@@ -60,46 +65,35 @@ for repo_and_commit in "$SOPHIA_SOURCE:$sophia_commit" "$HAGIA_ROOT:$hagia_commi
     }
     # The archive verifies this exact signed identity, not its publication state.
 done
-hagia_bin="${TMPDIR:-/tmp}/hagia-policy-${hagia_commit:0:12}"
-hagia_shell_bin="${TMPDIR:-/tmp}/narthex-${narthex_commit:0:12}"
-hagia_nimcache="${TMPDIR:-/tmp}/hagia-policy-nimcache-${hagia_commit:0:12}"
-hagia_shell_nimcache="${TMPDIR:-/tmp}/narthex-nimcache-${narthex_commit:0:12}"
-
-# These proofs build, hash and run the host executable at
-# SOPHIA_SOURCE/target/release/sophia. A cross-compilation target would put the
-# build elsewhere and leave that path bound to whatever was there before.
-if [[ -n "${CARGO_BUILD_TARGET:-}" ]]; then
-    echo "Unset CARGO_BUILD_TARGET: this physical proof builds the host Sophia binary it binds." >&2
-    exit 1
-fi
-echo "Building exact physical-proof binaries before DRM takeover..."
+echo "Preparing exact physical-proof binaries before DRM takeover..."
 echo "Sophia: $sophia_commit"
 echo "Hagia:  $hagia_commit"
 echo "Narthex: $narthex_commit"
-(
-    cd "$HAGIA_ROOT"
-    nim c -d:release --path:src --nimcache:"$hagia_nimcache" \
-        -o:"$hagia_bin" src/hagia.nim
-)
-(
-    cd "$NARTHEX_ROOT"
-    nim c -d:release --path:src --nimcache:"$hagia_shell_nimcache" \
-        -o:"$hagia_shell_bin" src/narthex.nim
-)
-(
-    cd "$SOPHIA_SOURCE"
-    # The executable hashed and run below, whatever CARGO_TARGET_DIR says.
-    cargo build --quiet --release --offline -p sophia-cli \
-        --features native-session --target-dir "$SOPHIA_SOURCE/target"
-)
-desktop_profile="$HAGIA_ROOT/examples/config/default.kdl"
+nim_options="$(physical_inputs_nim_options hagia "$HAGIA_ROOT" &&
+    physical_inputs_nim_options narthex "$NARTHEX_ROOT")" || exit 2
+mapfile -t nim_options <<<"$nim_options"
+physical_inputs_prepare --sophia-features=native-session "${nim_options[@]}" \
+    --profile=hagia:examples/config/default.kdl
+physical_inputs_bound "$integration_commit"
+if [[ "${PI[SOPHIA_COMMIT]}" != "$sophia_commit" || "${PI[SOPHIA_HAGIA_COMMIT]}" != "$hagia_commit" \
+    || "${PI[SOPHIA_NARTHEX_COMMIT]}" != "$narthex_commit" ]]; then
+    echo "The prepared inputs are not the bound Sophia, Hagia and Narthex commits." >&2
+    exit 1
+fi
+sophia_bin="${PI[SOPHIA_BIN]}"
+hagia_bin="${PI[SOPHIA_HAGIA_BIN]}"
+hagia_shell_bin="${PI[SOPHIA_NARTHEX_BIN]}"
+# The launcher reads Sophia's retained files from the staged pinned tree.
+SOPHIA_ROOT="${PI[SOPHIA_ROOT]}"
+export SOPHIA_ROOT
+# Hagia's canonical default profile, from Hagia's staged signed tree.
+desktop_profile="${PI[SOPHIA_PROFILE_DIR]}/hagia/examples/config/default.kdl"
 [[ -f "$desktop_profile" ]] || {
     echo "Hagia's canonical default profile is missing: $desktop_profile" >&2
     exit 1
 }
 "$hagia_bin" config check --config="$desktop_profile"
-"$SOPHIA_SOURCE/target/release/sophia" config check \
-    --desktop-profile="$desktop_profile"
+"$sophia_bin" config check --desktop-profile="$desktop_profile"
 
 if [[ -n "$(git -C "$SOPHIA_SOURCE" status --short)" \
     || -n "$(git -C "$ROOT_DIR" status --short)" \
@@ -109,19 +103,18 @@ if [[ -n "$(git -C "$SOPHIA_SOURCE" status --short)" \
     || "$(git -C "$ROOT_DIR" rev-parse HEAD)" != "$integration_commit" \
     || "$(git -C "$HAGIA_ROOT" rev-parse HEAD)" != "$hagia_commit" \
     || "$(git -C "$NARTHEX_ROOT" rev-parse HEAD)" != "$narthex_commit" ]]; then
-    echo "Sophia, integration, Hagia, or Narthex source identity changed during the physical-proof build." >&2
+    echo "Sophia, integration, Hagia, or Narthex source identity changed while the physical inputs were prepared." >&2
     exit 1
 fi
 git -C "$SOPHIA_SOURCE" verify-commit "$sophia_commit" >/dev/null 2>&1 || {
-    echo "Sophia signature no longer verifies after the build." >&2
+    echo "Sophia signature no longer verifies after the inputs were prepared." >&2
     exit 1
 }
 git -C "$HAGIA_ROOT" verify-commit "$hagia_commit" >/dev/null 2>&1 || {
-    echo "Hagia signature no longer verifies after the build." >&2
+    echo "Hagia signature no longer verifies after the inputs were prepared." >&2
     exit 1
 }
 
-sophia_bin="$SOPHIA_SOURCE/target/release/sophia"
 sophia_sha256="$(sha256sum "$sophia_bin" | awk '{ print $1 }')"
 hagia_sha256="$(sha256sum "$hagia_bin" | awk '{ print $1 }')"
 hagia_shell_sha256="$(sha256sum "$hagia_shell_bin" | awk '{ print $1 }')"
@@ -145,7 +138,6 @@ export SOPHIA_HAGIA_PHYSICAL_SOPHIA_SHA256="$sophia_sha256"
 export SOPHIA_HAGIA_PHYSICAL_HAGIA_SHA256="$hagia_sha256"
 export SOPHIA_HAGIA_PHYSICAL_NARTHEX_SHA256="$hagia_shell_sha256"
 export SOPHIA_HAGIA_PHYSICAL_NARTHEX_COMMIT="$narthex_commit"
-export SOPHIA_LIVE_SESSION_SKIP_BUILD=1
-# Sophia's launcher receives the binary this run built and bound, absolute.
+# Sophia's launcher receives the prepared binary this run bound, absolute.
 export SOPHIA_BIN="$sophia_bin"
 exec "$ROOT_DIR/tools/start_sophia_hagia_policy_tty4.sh"

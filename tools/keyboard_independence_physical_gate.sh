@@ -12,6 +12,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # binary is the absolute SOPHIA_BIN it built and hashed.
 # shellcheck source=tools/lib/sophia_source.sh
 source "$ROOT_DIR/tools/lib/sophia_source.sh"
+# The run's prepared physical inputs are verified again before archiving.
+# shellcheck source=tools/lib/physical_inputs.sh
+source "$ROOT_DIR/tools/lib/physical_inputs.sh"
 sophia_source="$(sophia_source_repo)" || exit 2
 kitty_bin="${SOPHIA_TERMINAL_BIN:-$(command -v kitty || true)}"
 sophia_bin="${SOPHIA_BIN:-}"
@@ -233,6 +236,7 @@ printf 'sophia_keyboard_independence_identity schema=1 status=bound sophia_commi
     "$source_commit" "$sophia_sha256" | tee -a "$session_log"
 
 "$ROOT_DIR/tools/verify_keyboard_independence_physical.sh" "$evidence_dir" "$proof_text"
+physical_inputs_verify_exported
 SOPHIA_KEYBOARD_INDEPENDENCE_SOPHIA_BIN="$sophia_bin" \
     "$ROOT_DIR/tools/archive_keyboard_independence_physical_run.sh" "$evidence_dir" "$proof_text"
 echo "Keyboard independence physical gate passed"

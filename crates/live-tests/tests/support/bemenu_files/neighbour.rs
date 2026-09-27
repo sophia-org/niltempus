@@ -1,8 +1,8 @@
 //! A neighbouring bar on its own ShellComponentTransport in the SAME
 //! ContentEpochRegistry as the Bemenu launcher: the production Rust shell
 //! client (`sophia_shell_client::ShellConnection`, from the SDK Sophia vendors
-//! at the pinned revision; `connect_files` on the file wire, `connect` with
-//! `ipc-compat` on the socket wire) negotiates revision 6 with a content grant
+//! at the pinned revision; `connect_files` on the file wire) negotiates
+//! revision 6 with a content grant
 //! on the launcher's wire and is then serviced in lockstep with the launcher. It uploads nothing; its role is to prove that Bemenu's
 //! whole lifecycle (opening, rasters, input, activation, close, retirement,
 //! reopen, stop) leaves a neighbour's connection and exact content usage in
@@ -73,13 +73,6 @@ impl Bar {
                     std::thread::spawn(move || ShellConnection::connect_files(&path, options));
                 transport
                     .begin_file_negotiation(registry, BAR_EPOCH, HANDSHAKE, policy)
-                    .unwrap();
-                client
-            }
-            crate::fixture::Wire::Ipc => {
-                let client = std::thread::spawn(move || ShellConnection::connect(&path, options));
-                transport
-                    .begin_negotiation(registry, BAR_EPOCH, HANDSHAKE, policy)
                     .unwrap();
                 client
             }

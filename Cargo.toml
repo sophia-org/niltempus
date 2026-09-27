@@ -1,5 +1,10 @@
 [workspace]
-members = ["crates/xtask", "crates/live-tests"]
+members = [
+    "crates/xtask",
+    "crates/live-tests",
+    "crates/desktop-comparison",
+    "crates/quickshell-probe",
+]
 resolver = "3"
 
 [workspace.package]
@@ -36,10 +41,13 @@ sophia-config = { git = "https://github.com/sophia-org/sophia.git", rev = "de776
 sophia-protocol = { git = "https://github.com/sophia-org/sophia.git", rev = "de776c68afdf9a133818f86917893c3362dc9fb7" }
 sophia-runtime = { git = "https://github.com/sophia-org/sophia.git", rev = "de776c68afdf9a133818f86917893c3362dc9fb7" }
 # The Rust desktop SDK's shell client, as vendored by Sophia at the same pin:
-# the neighbour bar in the live Bemenu gates (both wires).
+# the neighbour bar in the live Bemenu gate (9P).
 sophia-shell-client = { git = "https://github.com/sophia-org/sophia.git", rev = "de776c68afdf9a133818f86917893c3362dc9fb7" }
-# Sophia's Session-layer owners, for the bemenu_session_ipc smoke (G2 U1-U3),
-# at the same pin.
-sophia-backend-live = { git = "https://github.com/sophia-org/sophia.git", rev = "de776c68afdf9a133818f86917893c3362dc9fb7" }
+# The Engine's public types, for the desktop comparison, at the same pin.
 sophia-engine = { git = "https://github.com/sophia-org/sophia.git", rev = "de776c68afdf9a133818f86917893c3362dc9fb7" }
-sophia-session = { git = "https://github.com/sophia-org/sophia.git", rev = "de776c68afdf9a133818f86917893c3362dc9fb7" }
+# The public X server frontend, for the moved Quickshell trace probe
+# (crates/quickshell-probe, docs/quickshell.md).
+sophia-x-authority = { git = "https://github.com/sophia-org/sophia.git", rev = "de776c68afdf9a133818f86917893c3362dc9fb7" }
+# The public render-node measurement and buffer allocator (feature gbm-probe),
+# for the probe's GPU variant only, as the old probe used them.
+sophia-backend-live = { git = "https://github.com/sophia-org/sophia.git", rev = "de776c68afdf9a133818f86917893c3362dc9fb7" }

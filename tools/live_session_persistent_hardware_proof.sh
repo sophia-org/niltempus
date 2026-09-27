@@ -3,17 +3,18 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# Sophia is the explicit pinned checkout (SOPHIA_SOURCE): built there unless a
-# caller already built and bound the absolute SOPHIA_BIN (SKIP_BUILD=1), and
-# its atomic-scanout preflight is read from there.
+# Nothing is built here: the caller hands over the absolute SOPHIA_BIN it bound
+# from its prepared physical inputs (tools/lib/physical_inputs.sh), and the
+# atomic-scanout preflight is read from the pinned Sophia tree SOPHIA_ROOT.
 # shellcheck source=tools/lib/sophia_source.sh
 source "$ROOT_DIR/tools/lib/sophia_source.sh"
-sophia_source="$(sophia_source_repo)" || exit 2
+# shellcheck source=tools/lib/physical_inputs.sh
+source "$ROOT_DIR/tools/lib/physical_inputs.sh"
+sophia_root="$(sophia_pinned_root)" || exit 2
 EVIDENCE_FILE="${SOPHIA_LIVE_SESSION_PERSISTENT_EVIDENCE:-/tmp/sophia-live-session-persistent.log}"
 DISPLAY_NAME="${SOPHIA_LIVE_SESSION_DISPLAY:-:181}"
 RUNTIME_MSEC="${SOPHIA_LIVE_SESSION_RUNTIME_MSEC:-5000}"
 SKIP_PREFLIGHT="${SOPHIA_ATOMIC_SCANOUT_SKIP_PREFLIGHT:-0}"
-SKIP_BUILD="${SOPHIA_LIVE_SESSION_SKIP_BUILD:-0}"
 VERIFY_MODE="${SOPHIA_LIVE_SESSION_VERIFY_MODE:-generic}"
 
 case "$VERIFY_MODE" in
@@ -31,16 +32,11 @@ echo "Sophia persistent live-session hardware proof"
 echo "This proof requires exclusive DRM/KMS ownership on the active TTY."
 echo "Evidence: $EVIDENCE_FILE"
 
-# Compile before taking DRM/KMS ownership so build time is never presented as
-# a blank native frame. Persistent rendering evidence must measure optimized
-# code; the debug CPU compositor is intentionally not a performance target.
-if [[ "$SKIP_BUILD" != "1" ]]; then
-    cargo build --quiet --release --offline --manifest-path "$sophia_source/Cargo.toml" -p sophia-cli \
-        --features "atomic-scanout-live" --target-dir "$sophia_source/target"
-    SOPHIA_BIN="$sophia_source/target/release/sophia"
-fi
+# The prepared release binary (built before any DRM/KMS ownership, so build
+# time is never presented as a blank native frame; persistent rendering
+# evidence measures optimized code).
 [[ "${SOPHIA_BIN:-}" == /* && -x "${SOPHIA_BIN:-}" ]] || {
-    echo "SOPHIA_BIN must name an absolute Sophia binary (set it, or let this proof build one)." >&2
+    echo "SOPHIA_BIN must name an absolute Sophia binary from the prepared physical inputs (no default)." >&2
     exit 2
 }
 
@@ -54,12 +50,12 @@ for arg in "$@"; do
 done
 
 if [[ "$SKIP_PREFLIGHT" != "1" ]]; then
-    "$sophia_source/tools/atomic_scanout_preflight.sh"
+    physical_inputs_preflight "$SOPHIA_BIN" "$sophia_root" "$EVIDENCE_FILE.preflight.log"
 fi
 
 set +e
 (
-    cd "$sophia_source"
+    cd "$sophia_root"
     SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \
         "$SOPHIA_BIN" \
         session run --display="$DISPLAY_NAME" --native-scanout \
@@ -69,7 +65,7 @@ proof_status="${PIPESTATUS[0]}"
 set -e
 
 if [[ "$proof_status" -eq 0 && "$VERIFY_MODE" == generic ]]; then
-    "$ROOT_DIR/tools/verify_live_session_persistent_evidence.sh" "$EVIDENCE_FILE"
+    "$sophia_root/tools/verify_live_session_persistent_evidence.sh" "$EVIDENCE_FILE"
 fi
 
 exit "$proof_status"

@@ -4,11 +4,19 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Changes: Sophia is the explicit pinned checkout SOPHIA_SOURCE (never this
-# repository): built there, and its atomic-scanout preflight and TTY-mode helper
-# read from it; the proof runs the absolute SOPHIA_BIN it built.
+# repository). Nothing is built here or there: the binary and the exact pinned
+# tree come from prepared physical inputs built from the signed tree in the
+# private SOPHIA_GATE_BUILD_DIR (tools/lib/physical_inputs.sh; this repository
+# is bound); the atomic-scanout preflight and TTY-mode helper are read from
+# that staged tree (the checkout's copy only until the inputs are prepared);
+# the proof runs the absolute prepared SOPHIA_BIN.
 # shellcheck source=tools/lib/sophia_source.sh
 source "$root/tools/lib/sophia_source.sh"
-sophia_root="$(sophia_source_repo)" || exit 2
+ROOT_DIR="$root"
+# shellcheck source=tools/lib/physical_runner.sh
+source "$root/tools/lib/physical_runner.sh"
+sophia_source="$(sophia_source_repo)" || exit 2
+sophia_root="$sophia_source"
 state_dir="${XDG_STATE_HOME:-${HOME}/.local/state}/sophia/milestone5-gtk"
 runtime_dir="${XDG_RUNTIME_DIR:-/tmp}/sophia-milestone5-gtk-${UID}"
 classic="${SOPHIA_M5_GTK_CLASSIC_EVIDENCE:-$state_dir/classic.log}"
@@ -111,7 +119,9 @@ cleanup() {
             keyd_restored=false
         fi
         processes=0
-        if pgrep -af 'target/release/sophia session (run|input-guard)' >/dev/null 2>&1; then
+        # The prepared binary this proof ran (its path, regex-escaped).
+        sophia_pattern="$(printf '%s' "${SOPHIA_BIN:-/nonexistent/sophia}" | sed 's/[.+]/\\&/g')"
+        if pgrep -af "$sophia_pattern session (run|input-guard)" >/dev/null 2>&1; then
             processes=1
         fi
         recovery_status=complete
@@ -138,7 +148,7 @@ if [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]]; then
     echo "Run this proof from a dedicated text TTY with no graphical session." >&2
     exit 1
 fi
-for command in cargo zenity python3 stty setsid; do
+for command in zenity python3 stty setsid; do
     command -v "$command" >/dev/null || {
         echo "Missing required command: $command" >&2
         exit 1
@@ -210,12 +220,20 @@ for log in "$classic" "$confined" "$guard_log" "$recovery_log"; do
 done
 rm -f "$guard_armed_file" "$guard_triggered_file"
 
+integration_commit="$(runner_integration_commit)"
+physical_inputs_prepare --sophia-features=native-session
+physical_inputs_bound "$integration_commit"
+[[ "${PI[SOPHIA_COMMIT]}" == "$(git -C "$sophia_source" rev-parse HEAD)" ]] || {
+    echo "The prepared inputs are not the Sophia checkout's pinned commit." >&2
+    exit 1
+}
+SOPHIA_ROOT="${PI[SOPHIA_ROOT]}"
+export SOPHIA_ROOT
+sophia_root="$SOPHIA_ROOT"
 cd "$sophia_root"
-cargo build --quiet --release --offline -p sophia-cli --features native-session \
-    --target-dir "$sophia_root/target"
-tools/atomic_scanout_preflight.sh
-SOPHIA_BIN="$sophia_root/target/release/sophia"
+SOPHIA_BIN="${PI[SOPHIA_BIN]}"
 export SOPHIA_BIN
+physical_inputs_preflight "$SOPHIA_BIN" "$SOPHIA_ROOT" "$state_dir/preflight.log"
 
 tty_state="$(stty -g)"
 kd_mode="$(python3 "$sophia_root/tools/sophia_tty_mode.py" get)"
@@ -272,7 +290,7 @@ run_profile() {
     fi
     setsid env SOPHIA_LIVE_SESSION_PERSISTENT_EVIDENCE="$evidence" \
       SOPHIA_LIVE_SESSION_RUNTIME_MSEC="$runtime_msec" \
-      SOPHIA_LIVE_SESSION_SKIP_BUILD=1 SOPHIA_ATOMIC_SCANOUT_SKIP_PREFLIGHT=1 \
+      SOPHIA_ATOMIC_SCANOUT_SKIP_PREFLIGHT=1 \
       "${diagnostic_env[@]}" \
       "$root/tools/live_session_persistent_hardware_proof.sh" \
       --namespace-profile="$profile" --software-client-rendering --client=zenity --client-arg=--entry \
@@ -309,7 +327,7 @@ case "$mode" in
 esac
 cleanup 0
 if [[ "$mode" == paired ]]; then
-    "$root/tools/verify_live_session_milestone5_gtk_evidence.sh" "$classic" "$confined"
+    "$sophia_root/tools/verify_live_session_milestone5_gtk_evidence.sh" "$classic" "$confined"
 else
     echo "Milestone 5 GTK diagnostic profile completed: $mode"
 fi

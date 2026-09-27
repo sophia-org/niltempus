@@ -26,9 +26,16 @@ require_sha256() {
     }
 }
 
+field_count() {
+    grep -c "^$1=" "$manifest" || true
+}
+
+# Schema 7 binds Hagia's vendored C SDK. A schema-6 release is refused as a
+# candidate here; historical schema-6 releases are read only by the Go
+# verifier's legacy path in Sophia, never accepted by this repository.
 manifest_schema="$(field schema)"
-[[ "$manifest_schema" == 6 ]] || {
-    echo "Packaged policy requires native-only release manifest schema 6." >&2
+[[ "$manifest_schema" == 7 && "$(field_count schema)" == 1 ]] || {
+    echo "Packaged policy requires native-only release manifest schema 7." >&2
     exit 1
 }
 for legacy_field in \
@@ -78,6 +85,33 @@ case "$(field hagia_included)" in
         }
         require_sha256 hagia_default_profile_sha256 \
             "$(sha256sum "$hagia_profile" | awk '{print $1}')"
+        # Hagia's vendored C SDK: both fields present once and well formed,
+        # the sealed manifest hashes to the recorded digest and names the
+        # recorded revision.
+        sdk_manifest="$release/share/sophia-policy/hagia/c-sdk.manifest.json"
+        [[ -f "$sdk_manifest" && ! -L "$sdk_manifest" ]] || {
+            echo "Packaged Hagia C SDK manifest is missing: $sdk_manifest" >&2
+            exit 1
+        }
+        for sdk_field in hagia_c_sdk_revision hagia_c_sdk_manifest_sha256; do
+            [[ "$(field_count "$sdk_field")" == 1 ]] || {
+                echo "Packaged policy needs exactly one $sdk_field." >&2
+                exit 1
+            }
+        done
+        sdk_revision="$(field hagia_c_sdk_revision)"
+        [[ "$sdk_revision" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "Packaged Hagia C SDK revision is invalid." >&2
+            exit 1
+        }
+        require_sha256 hagia_c_sdk_manifest_sha256 \
+            "$(sha256sum "$sdk_manifest" | awk '{print $1}')"
+        named_revisions="$(grep -oE '"revision"[[:space:]]*:[[:space:]]*"[0-9a-f]{40}"' \
+            "$sdk_manifest" | grep -oE '[0-9a-f]{40}' || true)"
+        [[ "$named_revisions" == "$sdk_revision" ]] || {
+            echo "Packaged Hagia C SDK manifest does not name revision $sdk_revision." >&2
+            exit 1
+        }
         "$hagia" config check --config="$hagia_profile" >/dev/null
         "$release/target/release/sophia" config check \
             --desktop-profile="$hagia_profile" >/dev/null
@@ -86,9 +120,16 @@ case "$(field hagia_included)" in
         for absent in \
             "$release/target/release/hagia" \
             "$release/target/release/narthex" \
-            "$release/share/sophia-policy/hagia/default.kdl"; do
+            "$release/share/sophia-policy/hagia/default.kdl" \
+            "$release/share/sophia-policy/hagia/c-sdk.manifest.json"; do
             [[ ! -e "$absent" ]] || {
                 echo "Package declares hagia_included=false but contains: $absent" >&2
+                exit 1
+            }
+        done
+        for sdk_field in hagia_c_sdk_revision hagia_c_sdk_manifest_sha256; do
+            [[ "$(field_count "$sdk_field")" == 0 ]] || {
+                echo "Package declares hagia_included=false but records $sdk_field." >&2
                 exit 1
             }
         done

@@ -5,7 +5,10 @@
 set -euo pipefail
 
 # Changes: Sophia is the explicit pinned checkout SOPHIA_SOURCE (never this
-# repository) and is built there; this repository is bound too; the console is
+# repository); nothing is built here or there: the binary and the pinned tree
+# come from prepared physical inputs built from the signed tree in the private
+# SOPHIA_GATE_BUILD_DIR (tools/lib/physical_inputs.sh); this repository is
+# bound too; the console is
 # SOPHIA_SESSION_TTY or the controlling terminal; Sophia's launcher receives
 # absolute SOPHIA_BIN and SOPHIA_SESSION_PREFLIGHT (tools/lib/physical_runner.sh).
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -53,29 +56,34 @@ git -C "$SOPHIA_SOURCE" verify-commit "$sophia_commit" >/dev/null 2>&1 || {
     exit 1
 }
 
-echo "Building the exact physical-proof binary before DRM takeover..."
+echo "Preparing the exact physical-proof binary before DRM takeover..."
 echo "Sophia: $sophia_commit"
-(
-    cd "$SOPHIA_SOURCE"
-    cargo build --quiet --release --offline -p sophia-cli \
-        --features native-session --target-dir "$SOPHIA_SOURCE/target"
-)
-
+physical_inputs_prepare --sophia-features=native-session
+physical_inputs_bound "$integration_commit"
+[[ "${PI[SOPHIA_COMMIT]}" == "$sophia_commit" ]] || {
+    echo "The prepared inputs are not the bound Sophia commit." >&2
+    exit 1
+}
+sophia_bin="${PI[SOPHIA_BIN]}"
+# The launcher reads Sophia's retained files from the staged pinned tree.
+SOPHIA_ROOT="${PI[SOPHIA_ROOT]}"
+export SOPHIA_ROOT
 if [[ -n "$(git -C "$SOPHIA_SOURCE" status --short)" \
-    || -n "$(git -C "$ROOT_DIR" status --short)" \
-    || "$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)" != "$sophia_commit" \
-    || "$(git -C "$ROOT_DIR" rev-parse HEAD)" != "$integration_commit" ]]; then
-    echo "Sophia or integration source identity changed during the physical-proof build." >&2
+    || "$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)" != "$sophia_commit" ]]; then
+    echo "Sophia source identity changed while the physical inputs were prepared." >&2
     exit 1
 fi
 git -C "$SOPHIA_SOURCE" verify-commit "$sophia_commit" >/dev/null 2>&1 || {
-    echo "Sophia signature no longer verifies after the build." >&2
+    echo "Sophia signature no longer verifies after the inputs were prepared." >&2
     exit 1
 }
 
-sophia_bin="$SOPHIA_SOURCE/target/release/sophia"
 sophia_sha256="$(sha256sum "$sophia_bin" | awk '{ print $1 }')"
 echo "Sophia binary: $sophia_sha256"
+# The launcher never builds, so the atomic-scanout preflight runs here, by the
+# prepared binary (its log stays in the private build directory).
+physical_inputs_preflight "$sophia_bin" "$SOPHIA_ROOT" \
+    "$SOPHIA_GATE_BUILD_DIR/preflight-$(date -u +%Y%m%dT%H%M%SZ)-$$.log"
 
 export SOPHIA_TTY_PROFILE=keyboard-independence
 export SOPHIA_TTY_NUMBER="$console_vt"
@@ -83,7 +91,6 @@ export SOPHIA_KEYBOARD_INDEPENDENCE_ARM=1
 export SOPHIA_KEYBOARD_INDEPENDENCE_SEAT="${SOPHIA_KEYBOARD_INDEPENDENCE_SEAT:-seat0}"
 export SOPHIA_KEYBOARD_INDEPENDENCE_SOURCE_COMMIT="$sophia_commit"
 export SOPHIA_KEYBOARD_INDEPENDENCE_SOPHIA_SHA256="$sophia_sha256"
-export SOPHIA_LIVE_SESSION_SKIP_BUILD=1
-# Sophia's launcher receives the binary this run built and bound, absolute.
+# Sophia's launcher receives the prepared binary this run bound, absolute.
 export SOPHIA_BIN="$sophia_bin"
 exec "$ROOT_DIR/tools/session/start_sophia_tty3.sh"

@@ -21,8 +21,8 @@ pub const SOPHIA_CRATES: [&str; 8] = [
     "sophia-engine",
     "sophia-protocol",
     "sophia-runtime",
-    "sophia-session",
     "sophia-shell-client",
+    "sophia-x-authority",
 ];
 
 pub const FONT: &str = "assets/fonts/JetBrainsMonoNL-Regular.ttf";
@@ -32,10 +32,12 @@ pub const SDK_MANIFEST_SHA256: &str =
     "9da6ca11f381cb18d1772f5b6656a6e6a32dc003502daf53ce6d220e67e3b28e";
 const SOPHIA_PIN: &str = "pins/sophia.toml";
 const CONTRACTS: &str = "pins/contracts.sha256";
-const MANIFESTS: [&str; 4] = [
+const MANIFESTS: [&str; 6] = [
     "Cargo.toml",
     "crates/xtask/Cargo.toml",
     "crates/live-tests/Cargo.toml",
+    "crates/desktop-comparison/Cargo.toml",
+    "crates/quickshell-probe/Cargo.toml",
     ".cargo/config.toml",
 ];
 

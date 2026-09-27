@@ -2,8 +2,8 @@
 // crates/sophia-runtime/tests/support/shell_bemenu_files/sandbox.rs at
 // 9fcaec782ce4fe9978568c0466ee17a78b3d4571 (Sophia rule 13), with de11d9404
 // (wait for argv to become visible during exec) and a stderr diagnostic on a
-// failed cmdline read. Extended (G2): the endpoint variable follows the wire
-// under test (SOPHIA_SHELL_9P_SOCKET or SOPHIA_SHELL_SOCKET), still exactly one.
+// failed cmdline read. Extended (G2): the endpoint variable is the 9P one
+// (SOPHIA_SHELL_9P_SOCKET), exactly one, and the retired IPC variable is absent.
 //! The production protected launcher around the verified Bemenu copy:
 //! ProcessSupervisor (Shell role) with a Bubblewrap ProtectionDomainSpec, the
 //! production DEFAULT_BUBBLEWRAP_PATH lookup, and the real supervisor evidence.
@@ -223,6 +223,13 @@ impl Peer {
                 format!("{}={}", wire.socket_env(), socket.display())
             ],
             "bemenu environment: exactly one endpoint"
+        );
+        assert!(
+            !environ.iter().any(|entry| entry
+                .split_once('=')
+                .is_some_and(|(name, _)| { name == crate::fixture::RETIRED_IPC_ENV })),
+            "bemenu environment carries the retired {}",
+            crate::fixture::RETIRED_IPC_ENV
         );
         let stat = std::fs::read_to_string(proc(pid, "stat")).unwrap();
         let fields = stat

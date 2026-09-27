@@ -20,8 +20,11 @@ set -euo pipefail
 # DRM master. Your screens will change for the duration.
 
 # Changes: Sophia is the explicit pinned checkout SOPHIA_SOURCE (never this
-# repository): it is built there and its mirror_group_probe.kdl is read from
-# it (the profile stays in Sophia); this repository is bound too; the TTY comes
+# repository). Nothing is built here or there: the binary and the exact pinned
+# tree come from prepared physical inputs built from the signed tree in the
+# private SOPHIA_GATE_BUILD_DIR (tools/lib/physical_inputs.sh), and
+# mirror_group_probe.kdl (the profile stays in Sophia) is read from that staged
+# tree into a private 0600 copy; this repository is bound too; the TTY comes
 # from SOPHIA_SESSION_TTY or the controlling terminal; absolute SOPHIA_BIN and
 # SOPHIA_SESSION_PREFLIGHT are exported (tools/lib/physical_runner.sh).
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -30,7 +33,7 @@ source "$ROOT_DIR/tools/lib/physical_runner.sh"
 TTY_REQUIRED="${SOPHIA_MIRROR_TTY:-/dev/tty4}"
 runner_tty "$TTY_REQUIRED"
 runner_inputs
-PROFILE="${SOPHIA_MIRROR_PROFILE:-$SOPHIA_SOURCE/tools/fixtures/mirror_group_probe.kdl}"
+PROFILE_OVERRIDE="${SOPHIA_MIRROR_PROFILE:-}"
 RUNTIME_MSEC="${SOPHIA_MIRROR_RUNTIME_MSEC:-15000}"
 DISPLAY_NAME="${SOPHIA_MIRROR_DISPLAY:-:191}"
 EVIDENCE="${SOPHIA_MIRROR_EVIDENCE:-/tmp/sophia-mirror-group.log}"
@@ -46,23 +49,6 @@ if [[ "$XTERM_BIN" != /* || ! -x "$XTERM_BIN" ]]; then
 fi
 
 echo "=== Sophia mirror-group proof ==="
-echo
-
-if [[ ! -r "$PROFILE" ]]; then
-    echo "Profile not readable: $PROFILE" >&2
-    exit 2
-fi
-
-# The profile carries display configuration, so the loader refuses one that is
-# group- or world-readable. Fix it here rather than failing three steps later.
-mode="$(stat -c '%a' "$PROFILE")"
-if [[ "$mode" != "600" ]]; then
-    echo "Tightening profile permissions ($mode -> 600)"
-    chmod 600 "$PROFILE"
-fi
-
-echo "Profile: $PROFILE"
-sed 's/^/  | /' "$PROFILE"
 echo
 
 echo "Connected connectors, straight from sysfs:"
@@ -101,36 +87,53 @@ if ! git -C "$SOPHIA_SOURCE" verify-commit "$source_commit" >/dev/null 2>&1; the
     exit 2
 fi
 
-echo "Building..."
-(cd "$SOPHIA_SOURCE" && cargo build --quiet --release --offline -p sophia-cli \
-    --features "atomic-scanout-live" --bin sophia --target-dir "$SOPHIA_SOURCE/target")
-echo
+diagnostic_tmp="$(mktemp -d)"
+kernel_before="$diagnostic_tmp/kernel-before.log"
+kernel_after="$diagnostic_tmp/kernel-after.log"
+kernel_delta="$diagnostic_tmp/kernel-delta.log"
+trap 'rm -rf -- "$diagnostic_tmp"' EXIT
 
+echo "Building..."
+physical_inputs_prepare --sophia-features=atomic-scanout-live
+physical_inputs_bound "$integration_commit"
+if [[ "${PI[SOPHIA_COMMIT]}" != "$source_commit" ]]; then
+    echo "The prepared inputs are not the bound Sophia commit." >&2
+    exit 2
+fi
 if [[ -n "$(git -C "$SOPHIA_SOURCE" status --porcelain --untracked-files=all)" ]] \
-    || [[ -n "$(git -C "$ROOT_DIR" status --porcelain --untracked-files=all)" ]] \
-    || [[ "$(git -C "$ROOT_DIR" rev-parse HEAD)" != "$integration_commit" ]] \
     || [[ "$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)" != "$source_commit" ]]; then
-    echo "Sophia source identity changed during the physical-gate build." >&2
+    echo "Sophia source identity changed while the physical inputs were prepared." >&2
     exit 2
 fi
 if ! git -C "$SOPHIA_SOURCE" verify-commit "$source_commit" >/dev/null 2>&1; then
-    echo "Sophia HEAD signature no longer verifies after the physical-gate build." >&2
+    echo "Sophia HEAD signature no longer verifies after the physical inputs were prepared." >&2
     exit 2
 fi
-
-SOPHIA_BIN="$SOPHIA_SOURCE/target/release/sophia"
+SOPHIA_ROOT="${PI[SOPHIA_ROOT]}"
+export SOPHIA_ROOT
+SOPHIA_BIN="${PI[SOPHIA_BIN]}"
 export SOPHIA_BIN
+
+profile_source="${PROFILE_OVERRIDE:-$SOPHIA_ROOT/tools/fixtures/mirror_group_probe.kdl}"
+if [[ ! -r "$profile_source" ]]; then
+    echo "Profile not readable: $profile_source" >&2
+    exit 2
+fi
+# The profile carries display configuration, so the loader refuses one that is
+# group- or world-readable: the session reads a private 0600 copy (the prepared
+# inputs and any operator file stay untouched).
+PROFILE="$diagnostic_tmp/$(basename "$profile_source")"
+install -m 600 "$profile_source" "$PROFILE"
+echo "Profile: $profile_source"
+sed 's/^/  | /' "$PROFILE"
+echo
+
 sophia_sha256="$(sha256sum "$SOPHIA_BIN" | awk '{ print $1 }')"
 profile_sha256="$(sha256sum "$PROFILE" | awk '{ print $1 }')"
 : >"$EVIDENCE"
 printf 'sophia_mirror_group_gate schema=1 status=starting source_commit=%s sophia_sha256=%s profile_sha256=%s\n' \
     "$source_commit" "$sophia_sha256" "$profile_sha256" | tee -a "$EVIDENCE"
 
-diagnostic_tmp="$(mktemp -d)"
-kernel_before="$diagnostic_tmp/kernel-before.log"
-kernel_after="$diagnostic_tmp/kernel-after.log"
-kernel_delta="$diagnostic_tmp/kernel-delta.log"
-trap 'rm -rf -- "$diagnostic_tmp"' EXIT
 
 capture_kernel_snapshot() {
     local destination="$1"
@@ -169,7 +172,9 @@ finish_failed_run() {
     printf 'sophia_mirror_group_kernel schema=1 status=captured %s\n' "$kernel_summary" | tee -a "$EVIDENCE"
     printf 'sophia_mirror_group_gate schema=1 status=failed stage=%s exit=%s signal=%s kernel_capture=%s\n' \
         "$failure_stage" "$failure_exit" "$failure_signal" "$kernel_capture" | tee -a "$EVIDENCE"
-    if ! "$ROOT_DIR/tools/archive_mirror_group_diagnostic_run.sh" "$EVIDENCE" "$kernel_delta"; then
+    if ! (physical_inputs_verify_exported); then
+        echo "The prepared inputs are unavailable or changed; the diagnostic is not archived. Raw evidence remains at $EVIDENCE." >&2
+    elif ! "$ROOT_DIR/tools/archive_mirror_group_diagnostic_run.sh" "$EVIDENCE" "$kernel_delta"; then
         echo "Failed to archive mirror-group diagnostic; raw evidence remains at $EVIDENCE." >&2
     fi
 }
@@ -191,7 +196,7 @@ echo
 
 set +e
 (
-    cd "$SOPHIA_SOURCE"
+    cd "$SOPHIA_ROOT"
     # Native scanout is armed separately from the session itself, because a
     # session that drives real KMS is a different act from one that does not.
     # No session bus exists on this rig, and Kitty's portal lookups behave
@@ -265,5 +270,6 @@ if ! "$ROOT_DIR/tools/verify_mirror_group_physical.sh" --candidate "$EVIDENCE"; 
 fi
 printf '%s\n' 'sophia_mirror_group_gate schema=1 status=passed exit=0' | tee -a "$EVIDENCE"
 "$ROOT_DIR/tools/verify_mirror_group_physical.sh" "$EVIDENCE"
+physical_inputs_verify_exported
 "$ROOT_DIR/tools/archive_mirror_group_physical_run.sh" "$EVIDENCE"
 echo "Full verified log at $EVIDENCE."

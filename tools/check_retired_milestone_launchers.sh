@@ -2,6 +2,13 @@
 # Provenance: moved from Sophia tools/check_retired_milestone_launchers.sh at de776c68afdf9a133818f86917893c3362dc9fb7 (the pin) (Sophia rule 13).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The historical readers and their fixtures stay in Sophia (kept by ruling):
+# they are read from the staged pinned tree.
+tree="${SOPHIA_TEST_TREE:-}"
+[[ "$tree" == /* && -d "$tree/tools" ]] || {
+    echo "SOPHIA_TEST_TREE must name the absolute staged pinned tree." >&2
+    exit 2
+}
 fixture="$(mktemp -d)"
 trap 'rm -rf -- "$fixture"' EXIT
 # Only shell builtins are available. With tracing enabled, even an ignored
@@ -21,10 +28,10 @@ for name in two_xterm milestone3; do
     fi
 done
 # Historical readers must continue to validate their original evidence.
-"$root/tools/verify_live_session_two_xterm_evidence.sh" \
-    "$root/tools/fixtures/live_session_two_xterm_evidence_pass.log" >/dev/null
+"$tree/tools/verify_live_session_two_xterm_evidence.sh" \
+    "$tree/tools/fixtures/live_session_two_xterm_evidence_pass.log" >/dev/null
 sed 's/namespace_profile=classic_shared/namespace_profile=confined/g' \
-    "$root/tools/fixtures/live_session_two_xterm_evidence_pass.log" >"$fixture/confined.log"
-"$root/tools/verify_live_session_milestone3_evidence.sh" \
-    "$root/tools/fixtures/live_session_two_xterm_evidence_pass.log" "$fixture/confined.log" >/dev/null
+    "$tree/tools/fixtures/live_session_two_xterm_evidence_pass.log" >"$fixture/confined.log"
+"$tree/tools/verify_live_session_milestone3_evidence.sh" \
+    "$tree/tools/fixtures/live_session_two_xterm_evidence_pass.log" "$fixture/confined.log" >/dev/null
 printf '%s\n' 'retired launcher and historical evidence checks passed'

@@ -8,8 +8,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Changes: Sophia is the explicit pinned checkout SOPHIA_SOURCE (never this
-# repository): built there, and its atomic-scanout preflight and generic
-# input-latency reporter (both retained in Sophia) read from it; this
+# repository). Nothing is built here or there: the binary and the exact pinned
+# tree come from prepared physical inputs built from the signed tree in the
+# private SOPHIA_GATE_BUILD_DIR (tools/lib/physical_inputs.sh), and the
+# atomic-scanout preflight and generic input-latency reporter (both retained
+# in Sophia) are read from that staged tree; this
 # repository is bound too; the TTY comes from SOPHIA_SESSION_TTY or the
 # controlling terminal (tools/lib/physical_runner.sh).
 # shellcheck source=tools/lib/physical_runner.sh
@@ -393,12 +396,19 @@ cd "$ROOT_DIR"
 tools/probes/uinput_text_injector.py \
     "--key-interval-ms=$KEY_INTERVAL_MSEC" --self-test |
     tee "$PENDING/injector-self-test.log"
-cargo build --quiet --release --offline -p sophia-cli \
-    --features native-session --manifest-path "$SOPHIA_SOURCE/Cargo.toml" \
-    --target-dir "$SOPHIA_SOURCE/target"
-"$SOPHIA_SOURCE/tools/atomic_scanout_preflight.sh" | tee "$PENDING/preflight.log"
-SOPHIA_BIN="$SOPHIA_SOURCE/target/release/sophia"
+physical_inputs_prepare --sophia-features=native-session
+physical_inputs_bound "$integration_commit"
+[[ "${PI[SOPHIA_COMMIT]}" == "$COMMIT" ]] ||
+    fail "the prepared inputs are not the bound Sophia commit"
+[[ -z "$(git -C "$SOPHIA_SOURCE" status --porcelain)" &&
+    "$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)" == "$COMMIT" ]] ||
+    fail "Sophia source identity changed while the physical inputs were prepared"
+printf 'physical_inputs_sha256=%s\n' "$SOPHIA_PHYSICAL_INPUTS_SHA256" >>"$PENDING/source.env"
+SOPHIA_ROOT="${PI[SOPHIA_ROOT]}"
+export SOPHIA_ROOT
+SOPHIA_BIN="${PI[SOPHIA_BIN]}"
 export SOPHIA_BIN
+physical_inputs_preflight "$SOPHIA_BIN" "$SOPHIA_ROOT" "$PENDING/preflight.log"
 
 GUARD_ARMED_FILE="$PENDING/input-guard.armed"
 GUARD_TRIGGERED_FILE="$PENDING/input-guard.triggered"
@@ -456,7 +466,6 @@ for ((sample = 1; sample <= SAMPLES; sample++)); do
     for ((attempt = 1; attempt <= MAX_SESSION_START_ATTEMPTS; attempt++)); do
         SOPHIA_LIVE_SESSION_PERSISTENT_EVIDENCE="$session_log" \
             SOPHIA_LIVE_SESSION_RUNTIME_MSEC=30000 \
-            SOPHIA_LIVE_SESSION_SKIP_BUILD=1 \
             SOPHIA_ATOMIC_SCANOUT_SKIP_PREFLIGHT=1 \
             tools/live_session_persistent_hardware_proof.sh \
             "--input-devices=$input_device" \
@@ -577,11 +586,12 @@ SOPHIA_INPUT_LATENCY_REFRESH_MSEC="$REFRESH_MSEC" \
 SOPHIA_INPUT_LATENCY_MAX_QUEUE_DWELL_MSEC="$MAX_QUEUE_DWELL_MSEC" \
 SOPHIA_INPUT_LATENCY_MAX_DWELL_TO_SUBMIT_MSEC="$MAX_DWELL_TO_SUBMIT_MSEC" \
 SOPHIA_INPUT_LATENCY_MAX_SUBMIT_TO_FLIP_MSEC="$MAX_SUBMIT_TO_FLIP_MSEC" \
-    "$SOPHIA_SOURCE/tools/report_sophia_input_latency.sh" \
+    "$SOPHIA_ROOT/tools/report_sophia_input_latency.sh" \
     "$PENDING"/sample-*/session.log | tee "$PENDING/report.log"
 report_status="${PIPESTATUS[0]}"
 set -e
 
+physical_inputs_verify_exported
 mv "$PENDING" "$FINAL"
 trap - EXIT
 echo "Evidence retained in $FINAL"

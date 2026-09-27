@@ -32,13 +32,22 @@ Package an explicit release from this repository (clean, signed HEAD), the
 pinned Sophia checkout and a prepared Hagia/Narthex pair, then install it:
 
 ```sh
-cargo xtask prepare-wm-pair --hagia /ABS/hagia <commit> --narthex /ABS/narthex <commit> /ABS/wm-pair
+cargo xtask prepare-wm-pair --hagia /ABS/hagia <commit> --narthex /ABS/narthex <commit> /ABS/wm-pair \
+    --build-dir=/ABS/private-build \
+    --hagia-nim-deps=/ABS/hagia.nim-deps --hagia-nim-deps-sha256=<reviewed sha256> \
+    --narthex-nim-deps=/ABS/narthex.nim-deps --narthex-nim-deps-sha256=<reviewed sha256> \
+    --hagia-c-sdk-rev=<the C SDK revision Hagia vendors>
 cargo xtask package-desktop --sophia-root=/ABS/sophia --sophia-rev=<pinned rev> \
     --wm-pair=/ABS/wm-pair --wm-pair-commits=<hagia>,<narthex> \
     --wm-pair-sha256=<hagia>,<narthex> --wm-pair-profile-sha256=<default.kdl> \
+    --wm-pair-c-sdk-rev=<the same C SDK revision> \
     --build-dir=/ABS/private-build --out=/ABS/release
 tools/install_live_session.sh /ABS/release
 ```
+
+Hagia and Narthex build only from REVIEWED Nim dependency manifests (below);
+the pair records both manifests and their digests, plus Hagia's vendored C SDK
+revision and manifest (pair schema 3).
 
 Packaging never switches or overwrites your own default window manager
 (`$XDG_STATE_HOME/sophia/bin/hagia` and its reload workflow); an installed
@@ -49,11 +58,104 @@ updates `current` while retaining the former release as `previous`. Activation
 and rollback validate the complete target surface before changing command links
 or greetd entries.
 
-A native-only schema-6 artifact records the Sophia commit and whether Hagia is
+A native-only schema-7 artifact records the Sophia commit and whether Hagia is
 included. A Hagia artifact additionally records its signed source commit, the
-canonical default-profile digest, and Hagia and Narthex executable digests.
+canonical default-profile digest, Hagia and Narthex executable digests, and
+Hagia's vendored C SDK revision and manifest digest. The SDK manifest itself is
+sealed at `share/sophia-policy/hagia/c-sdk.manifest.json`. A schema-6 artifact
+is not accepted as a candidate.
 Installation rejects missing, non-executable, or mismatched artifacts. Legacy
 WM executables, compatibility configuration, and bridge fields are forbidden.
+
+### Bound Nim dependencies
+
+`prepare-wm-pair`, `prepare-product-artifact hagia` and
+`prepare-physical-inputs` share one builder. A Nim product builds only from a
+reviewed dependency manifest whose sha256 root or the operator supplies
+separately; nothing picks a version or looks packages up implicitly.
+
+1. Draft a closure for review. Every requirement, transitively, needs an
+   explicit `--pin`; `.nimble` files are read as data (nimble never runs), and
+   an unsupported `requires` expression fails by name:
+
+   ```sh
+   cargo xtask nim-deps draft --store=/ABS/.nimble/pkgs2 --source=/ABS/hagia \
+       --commit=<signed commit> --product=hagia --nim=/ABS/nim --nim-lib=/ABS/nim/lib \
+       --gcc=/ABS/gcc --bwrap=/ABS/bwrap --build-dir=/ABS/private-build \
+       --pin=chronicles=<version> ... --out=/ABS/hagia.nim-deps
+   ```
+
+   The printed digest is a DRAFT digest, never an authorization.
+2. Root reviews the file (every package's provenance and complete file
+   inventory, the toolchain records), changes `status=draft` to
+   `status=reviewed`, and supplies the final file's sha256 separately.
+3. The builder refuses a draft, a digest mismatch, or a manifest reviewed for
+   another commit. It stages the closure read-only in a private scratch under
+   `--build-dir` and verifies it before and after the build, and requires the
+   host toolchain to be the reviewed one before and after.
+4. The compiler is a verified, read-only STAGED copy of the reviewed Nim
+   installation (`bin/nim`, its installation configuration `config/` and its
+   stdlib `lib/`) in that scratch; nothing reads the live installation, which
+   is hidden inside bwrap together with /home, /opt, /root and /etc/nim, with
+   no network. The installation configuration is kept (one approach): before
+   the build, `config/nim.cfg` (and every file it `@include`s, which must lie
+   inside the staged configuration) and `config/config.nims` are traced as
+   data, and any directive that applies, or cannot be shown not to apply, to
+   this build and names an ambient or unresolved input (a host path, `$HOME`
+   or another environment expansion, `@putenv`, a tool or compiler path, an
+   implicit import, or in config.nims any file, process or environment call
+   or path switch) is refused. `path="$lib/..."` resolves inside the staged
+   stdlib; `nimblepath` entries are recorded as disabled (`--noNimblePath`).
+   User, parent and project configurations stay skipped
+   (`--skipUserCfg --skipParentCfg --skipProjCfg --clearNimblePath`).
+5. Every artifact records the effective nim command line, the staged
+   configuration and stdlib inventory digests (checked against the reviewed
+   manifest) and each configuration file read, with its sha256.
+
+Host-toolchain identity (nim, its standard library and installation config,
+gcc, cc1, as, ld, bwrap, and the owning host packages) is recorded and
+re-checked; it is NOT a fully reproducible closure. The host toolchain is
+identified, not rebuilt.
+
+### Physical gate inputs
+
+Physical runners never build in a source tree. They take a prepared,
+read-only input directory:
+
+```sh
+cargo xtask prepare-physical-inputs --sophia-root=/ABS/sophia --build-dir=/ABS/private-build \
+    --out=/ABS/NEW --sophia-features=native-session|atomic-scanout-live \
+    [--sophia-packages=sophia-cli,sophia-wm-demo] \
+    [--hagia=/ABS/hagia --hagia-commit=<c> --hagia-nim-deps=/ABS --hagia-nim-deps-sha256=<s>] \
+    [--narthex=/ABS/narthex --narthex-commit=<c> --narthex-nim-deps=/ABS --narthex-nim-deps-sha256=<s>] \
+    [--profile=hagia:examples/config/default.kdl ...]
+cargo xtask prepare-physical-inputs verify --out=/ABS/NEW --manifest-sha256=<printed sha256>
+```
+
+The output holds `bin/`, the exact pinned Sophia tree (`sophia-tree/`, the
+runners' `SOPHIA_ROOT`), profiles copied from their owning staged source,
+the reviewed dependency manifests, `inputs.env` (read by a strict parser,
+never sourced) and `physical-inputs.manifest`. `verify` requires the expected
+manifest sha256.
+
+The physical runners call the helper themselves (tools/lib/physical_inputs.sh)
+and never build: they need the prebuilt recipe tool of this checkout
+(`SOPHIA_INTEGRATION_XTASK`), the pinned checkout (`SOPHIA_SOURCE`), the
+provisioned `CARGO_HOME`, a private `SOPHIA_GATE_BUILD_DIR` (0700, outside
+every source tree) and, for Hagia and Narthex, `SOPHIA_HAGIA_NIM_DEPS`,
+`SOPHIA_HAGIA_NIM_DEPS_SHA256`, `SOPHIA_NARTHEX_NIM_DEPS` and
+`SOPHIA_NARTHEX_NIM_DEPS_SHA256` (reviewed manifests, no default). They read
+Sophia's retained files from the staged tree, run the atomic-scanout
+preflight with the prepared binary (Sophia's own preflight script
+`cargo run`s in its tree and is never called), hand Sophia's session wrapper
+`SOPHIA_BUILD_SESSION=false`, and verify the prepared inputs again before
+archiving. `crates/xtask/tests/physical_runner_bounds.rs` refuses any script
+that builds, reads a source checkout's target, uses a Nim cache or archives
+without that verification. Its pending list (the Lom scripts, frozen for the
+Lom lockstep; provisioning's self-check) may only shrink; its exempt list is
+fixed: tools/reload_policy_client.sh, the operator's own default-WM reload
+tool (not a gate; its conversion belongs with the niltempus prepare/reload
+path).
 
 Every release installs this base entry:
 

@@ -88,12 +88,49 @@ pub struct PairIds {
     pub profile: String,
 }
 
-/// A prepared-pair directory in `prepare-wm-pair`'s layout.
+/// The fixture's reviewed installation-config and stdlib digests.
+pub const NIM_CONFIG_SHA256: &str =
+    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+pub const NIM_STDLIB_SHA256: &str =
+    "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+
+/// A reviewed dependency manifest for a fixture half (no packages; the
+/// toolchain is not probed by the pair verifier, which only cross-checks the
+/// installation-config and stdlib identities).
+pub fn reviewed_deps(product: &str, commit: &str) -> String {
+    let tree = |role: &str, path: &str, digest: &str| {
+        xtask::records::Record::of("tree")
+            .with("role", role)
+            .with("path", path)
+            .with("files", "1")
+            .with("inventory_sha256", digest)
+    };
+    xtask::nim_deps::Manifest {
+        status: "reviewed".into(),
+        product: product.into(),
+        source_commit: commit.into(),
+        source_tree: "1".repeat(40),
+        store: PathBuf::from("/nonexistent-fixture-store"),
+        toolchain: vec![
+            tree("nim-config", "/usr/lib/nim/config", NIM_CONFIG_SHA256),
+            tree("nim-lib", "/usr/lib/nim/lib", NIM_STDLIB_SHA256),
+        ],
+        packages: Vec::new(),
+    }
+    .render()
+    .unwrap()
+}
+
+/// A prepared-pair directory in `prepare-wm-pair`'s layout (schema 3).
+/// The SDK revision the fixture pair's Hagia vendors.
+pub const HAGIA_C_SDK_REV: &str = "841563d614ed8540472f0edfa7f4cddaafe3fdde";
+
 pub fn write_pair(dir: &Path) -> PairIds {
     fs::create_dir(dir).unwrap();
     let mut commits = Vec::new();
     let mut digests = Vec::new();
     let mut trees = Vec::new();
+    let mut deps = Vec::new();
     for name in ["hagia", "narthex"] {
         let (raw, commit) = commit_object(name);
         fs::write(dir.join(format!("{name}.commit")), &raw).unwrap();
@@ -103,13 +140,22 @@ pub fn write_pair(dir: &Path) -> PairIds {
             &format!("# fixture {name}\n[[ \"$1 $2\" == \"config check\" ]]"),
         );
         digests.push(sha256(&fs::read(dir.join(name)).unwrap()));
+        let manifest = reviewed_deps(name, &commit);
+        fs::write(dir.join(format!("{name}-nim-deps.manifest")), &manifest).unwrap();
+        deps.push(sha256(manifest.as_bytes()));
         commits.push(commit);
         trees.push("1".repeat(40));
     }
     let profile = b"schema 1\n";
     fs::write(dir.join("default.kdl"), profile).unwrap();
+    // Hagia's vendored C SDK manifest, carried into the pair.
+    let sdk = format!(
+        "{{\"schema\":1,\"repository\":\"https://github.com/sophia-org/sophia-desktop-sdk-c\",\"revision\":\"{HAGIA_C_SDK_REV}\",\"files\":{{\"README.md\":\"{}\"}}}}\n",
+        "a".repeat(64)
+    );
+    fs::write(dir.join("hagia-c-sdk.manifest.json"), &sdk).unwrap();
     let manifest = [
-        "schema=1".to_owned(),
+        "schema=3".to_owned(),
         format!("hagia_source_commit={}", commits[0]),
         format!("hagia_source_tree={}", trees[0]),
         "hagia_signer_fingerprint=ABCDEF0123".to_owned(),
@@ -121,7 +167,24 @@ pub fn write_pair(dir: &Path) -> PairIds {
         "default_profile=default.kdl".to_owned(),
         "default_profile_source=examples/config/default.kdl".to_owned(),
         format!("default_profile_sha256={}", sha256(profile)),
+        format!("hagia_nim_deps_sha256={}", deps[0]),
+        format!("narthex_nim_deps_sha256={}", deps[1]),
+        "toolchain_identity=recorded-not-a-reproducible-closure".to_owned(),
     ]
+    .into_iter()
+    .chain(["hagia", "narthex"].into_iter().flat_map(|name| {
+        [
+            format!("{name}_nim_config_sha256={NIM_CONFIG_SHA256}"),
+            format!("{name}_nim_config_read=config/nim.cfg:{}", "e".repeat(64)),
+            format!("{name}_nim_stdlib_sha256={NIM_STDLIB_SHA256}"),
+            format!("{name}_nim_command=/b/nim/bin/nim c -d:release src/{name}.nim"),
+        ]
+    }))
+    .chain([
+        format!("hagia_c_sdk_revision={HAGIA_C_SDK_REV}"),
+        format!("hagia_c_sdk_manifest_sha256={}", sha256(sdk.as_bytes())),
+    ])
+    .collect::<Vec<_>>()
     .join("\n")
         + "\n";
     fs::write(dir.join("wm-pair.manifest"), manifest).unwrap();

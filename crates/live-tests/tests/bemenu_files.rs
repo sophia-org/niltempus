@@ -6,10 +6,13 @@
 //! against the production file export and native launcher owners, launched by
 //! the production protected-process supervisor (Bubblewrap, Shell role).
 //!
-//! The body lives in support/bemenu_files/gate.rs and runs unchanged on the
-//! current IPC socket wire too (bemenu_ipc.rs), with a neighbouring bar on a
-//! second transport, allocation and candidate shape checks, and a held
-//! renderer lease across close.
+//! The body lives in support/bemenu_files/gate.rs, with a neighbouring bar on
+//! a second transport, allocation and candidate shape checks, and a held
+//! renderer lease across close. Bemenu is 9P-only (536d6b2 onward): the gate
+//! requires exactly SOPHIA_SHELL_9P_SOCKET in its environment, never the
+//! retired SOPHIA_SHELL_SOCKET, and a negotiated line carrying wire=9p. The
+//! former IPC twins (bemenu_ipc, bemenu_session_ipc) are retired with product
+//! IPC.
 //!
 //! Opt-in: ordinary `cargo test` has no application artifact, so this test is
 //! #[ignore]d. Its dedicated invocation fails closed on any absent or

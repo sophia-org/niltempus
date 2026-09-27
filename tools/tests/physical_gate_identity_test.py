@@ -5,7 +5,10 @@ Changes after the move: Sophia is the explicit checkout SOPHIA_SOURCE, a
 repository separate from this one (ROOT_DIR, "Integration"), which every
 runner also binds; the runners take their TTY from SOPHIA_SESSION_TTY or the
 controlling terminal and require absolute SOPHIA_SESSION_PREFLIGHT and
-SOPHIA_INTEGRATION_XTASK before anything is built."""
+SOPHIA_INTEGRATION_XTASK before anything is prepared. Nothing is built by a
+runner: they take prepared physical inputs from
+`xtask prepare-physical-inputs` (stubbed here), and no file may appear in any
+source checkout."""
 from pathlib import Path
 import os
 import subprocess
@@ -34,10 +37,10 @@ CRITICAL = "run_current_critical_path_tty4.sh"
 PREFLIGHTS = {
     "frame": "\n".join([
         block(FRAME, "refuse() {\n", '[[ "${SOPHIA_FRAME_FED_OUTPUT_ARM'),
-        block(FRAME, "verify_repo() {\n", "check_reference_connectors() {"),
+        block(FRAME, "verify_repo() {\n", 'echo "Preparing exact signed Sophia and Hagia binaries'),
         "PHASE=after",
         block(FRAME, 'verify_repo "$SOPHIA_SOURCE" Sophia\nverify_repo "$ROOT_DIR" Integration\n'
-              'verify_repo "$HAGIA_ROOT" Hagia\n[[', 'sophia_sha256='),
+              'verify_repo "$HAGIA_ROOT" Hagia\n[[', "check_reference_connectors() {"),
     ]),
     "critical": "\n".join([
         'sophia_commit="$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)"',
@@ -51,10 +54,11 @@ PREFLIGHTS = {
     "policy": "\n".join([
         (ROOT / "tools/lib/proof_checkout.sh").read_text(),
         block("lib/physical_runner.sh", "runner_integration_commit() {\n"),
-        block(POLICY, 'if ! proof_checkout_root "$HAGIA_ROOT"', 'hagia_bin='),
+        block(POLICY, 'if ! proof_checkout_root "$HAGIA_ROOT"',
+              'echo "Preparing exact physical-proof binaries'),
         "PHASE=after",
         block(POLICY, 'if [[ -n "$(git -C "$SOPHIA_SOURCE" status --short)" \\\n',
-              'sophia_bin='),
+              'sophia_sha256='),
     ]),
     "reporter": block("check_proof_preconditions.sh", "status=0\n"),
 }
@@ -203,6 +207,7 @@ COPIED = (
     "tools/hagia_policy_physical_gate.sh",
     "tools/lib/proof_checkout.sh",
     "tools/lib/physical_runner.sh",
+    "tools/lib/physical_inputs.sh",
     "tools/lib/artifacts.sh",
     "tools/lib/sophia_source.sh",
     "tools/fixtures/t018_tab_reference.kdl",
@@ -302,6 +307,76 @@ class ProofCheckoutPredicates(unittest.TestCase):
         self.assertEqual(self.predicate(call.format(path=self.repo / "profile.kdl", root=self.repo)), 0)
 
 
+def tree_snapshot(root):
+    """Every path below a checkout (ignored ones included), .git excluded."""
+    return sorted(str(path.relative_to(root)) for path in root.rglob("*")
+                  if ".git" not in path.relative_to(root).parts)
+
+
+HELPER_STUB = r"""#!/bin/bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$MARKS/helper-calls"
+[[ "${1:-}" == prepare-physical-inputs ]] || exit 64
+shift
+if [[ "${1:-}" == verify ]]; then
+    shift
+    for a; do
+        case "$a" in --out=*) out="${a#--out=}" ;; --manifest-sha256=*) sha="${a#--manifest-sha256=}" ;; esac
+    done
+    [[ "$(sha256sum "$out/inputs.env" | cut -d' ' -f1)" == "$sha" ]]
+    exit
+fi
+echo prepare >>"$MARKS/build"
+printf 'nice=%s jobs=%s\n' "$(ps -o ni= -p $$ | tr -d ' ')" "${CARGO_BUILD_JOBS:-unset}" >>"$MARKS/bounds"
+hagia= narthex= hc= nc= profiles=()
+for a; do
+    case "$a" in
+        --out=*) out="${a#--out=}" ;;
+        --sophia-root=*) root="${a#--sophia-root=}" ;;
+        --sophia-packages=*) packages="${a#--sophia-packages=}" ;;
+        --hagia=*) hagia="${a#--hagia=}" ;;
+        --hagia-commit=*) hc="${a#--hagia-commit=}" ;;
+        --narthex=*) narthex="${a#--narthex=}" ;;
+        --narthex-commit=*) nc="${a#--narthex-commit=}" ;;
+        --profile=*) profiles+=("${a#--profile=}") ;;
+    esac
+done
+printf '%s\n' "$out" >>"$MARKS/prepared-out"
+mkdir -p "$out/bin" "$out/sophia-tree" "$out/profiles"
+printf '#!/bin/sh\n# fresh build\necho "fresh $*" >>"$MARKS/sophia-invoked"\nexit 0\n' >"$out/bin/sophia"
+chmod 555 "$out/bin/sophia"
+git -C "$root" archive HEAD | tar -x -C "$out/sophia-tree"
+sophia_commit="$(git -C "$root" rev-parse HEAD)"
+{
+    echo "SOPHIA_PHYSICAL_INPUTS=$out"
+    echo "SOPHIA_ROOT=$out/sophia-tree"
+    echo "SOPHIA_COMMIT=$sophia_commit"
+    echo "SOPHIA_INTEGRATION_COMMIT=$(git -C "$STUB_INTEGRATION" rev-parse HEAD)"
+    echo "SOPHIA_BIN=$out/bin/sophia"
+    if [[ -n "$hc" ]]; then
+        printf '#!/bin/sh\n# hagia %s\nexit 0\n' "$hc" >"$out/bin/hagia"
+        chmod 555 "$out/bin/hagia"
+        echo "SOPHIA_HAGIA_BIN=$out/bin/hagia"
+        echo "SOPHIA_HAGIA_COMMIT=$hc"
+    fi
+    if [[ -n "$nc" ]]; then
+        printf '#!/bin/sh\n# narthex %s\nexit 0\n' "$nc" >"$out/bin/narthex"
+        chmod 555 "$out/bin/narthex"
+        echo "SOPHIA_NARTHEX_BIN=$out/bin/narthex"
+        echo "SOPHIA_NARTHEX_COMMIT=$nc"
+    fi
+    echo "SOPHIA_PROFILE_DIR=$out/profiles"
+} >"$out/inputs.env"
+for profile in ${profiles[@]+"${profiles[@]}"}; do
+    owner="${profile%%:*}"
+    path="${profile#*:}"
+    mkdir -p "$out/profiles/$owner/$(dirname "$path")"
+    git -C "$hagia" show "$hc:$path" >"$out/profiles/$owner/$path"
+done
+echo "physical_inputs status=prepared manifest_sha256=$(sha256sum "$out/inputs.env" | cut -d' ' -f1) sophia=$sophia_commit dir=$out"
+"""
+
+
 class NativeReferenceDryRun(unittest.TestCase):
     """The native wrapper and gate, end to end up to the session start."""
 
@@ -315,7 +390,11 @@ class NativeReferenceDryRun(unittest.TestCase):
         # Sophia: an explicit checkout separate from this repository, holding
         # only what the runners read from it.
         self.sophia = commit_tree(self.directory / "sophia", {
+            # Sophia's own preflight `cargo run`s in its tree: never called.
             "tools/atomic_scanout_preflight.sh": (
+                stub.format(name="forbidden-build", code=97), 0o755),
+            # Its retained verifier, which the prepared-binary preflight uses.
+            "tools/verify_atomic_scanout_preflight.sh": (
                 stub.format(name="atomic_scanout_preflight.sh", code=0), 0o755),
             ".gitignore": ("target/\n", 0o644),
         })
@@ -359,37 +438,54 @@ fi
 exec {REAL_GIT} "$@"
 """)
         executable(self.bin / "tty", "#!/bin/sh\necho /dev/tty4\n")
-        executable(self.bin / "nim", """#!/bin/bash
-echo nim >>"$MARKS/build"
-for argument; do
-    case "$argument" in -o:*) out="${argument#-o:}" ;; esac
-done
-printf '#!/bin/sh\\n# %s\\nexit 0\\n' "$out" >"$out"
-chmod 755 "$out"
+        # Runners never build: a Nim or Cargo call is a failure.
+        for tool in ("nim", "nimble", "cargo"):
+            executable(self.bin / tool, f"""#!/bin/sh
+echo "{tool} $*" >>"$MARKS/forbidden-build"
+exit 97
 """)
-        # Cargo honours --target-dir, then an inherited CARGO_TARGET_DIR.
-        executable(self.bin / "cargo", """#!/bin/bash
-echo cargo >>"$MARKS/build"
-out="${CARGO_TARGET_DIR:-target}"
-previous=
-for argument; do
-    case "$argument" in --target-dir=*) out="${argument#--target-dir=}" ;; esac
-    [[ "$previous" == --target-dir ]] && out="$argument"
-    previous="$argument"
-done
-mkdir -p "$out/release"
-printf '#!/bin/sh\\n# fresh build\\necho "fresh $*" >>"$MARKS/sophia-invoked"\\nexit 0\\n' >"$out/release/sophia"
-chmod 755 "$out/release/sophia"
-""")
-        for name in ("kitty", "browser", "preflight", "recipes"):
+        # The helper (xtask prepare-physical-inputs), stubbed: it records its
+        # bounds and arguments and writes a prepared output in the helper's
+        # layout from the named signed trees (nothing in any checkout).
+        executable(self.bin / "helper", HELPER_STUB)
+        self.build = self.directory / "build"
+        self.build.mkdir(mode=0o700)
+        self.deps = {}
+        for name in ("hagia", "narthex"):
+            manifest = self.directory / f"{name}.nim-deps"
+            manifest.write_text(f"nim-deps schema=1 status=reviewed\n# {name}\n")
+            self.deps[name] = (manifest, __import__("hashlib").sha256(manifest.read_bytes()).hexdigest())
+        self.snapshots = {name: tree_snapshot(root) for name, root in self.sources().items()}
+        for name in ("kitty", "browser", "preflight"):
             executable(self.bin / name, "#!/bin/sh\n")
+
+    def sources(self):
+        return {"sophia": self.sophia, "hagia": self.hagia, "narthex": self.narthex,
+                "integration": self.integration}
+
+    def assert_sources_untouched(self):
+        for name, root in self.sources().items():
+            self.assertEqual(tree_snapshot(root), self.snapshots[name], name)
+        self.assertEqual(self.mark("forbidden-build"), "")
+
+    def prepared(self):
+        """The output directory the stub helper last prepared."""
+        return Path(self.mark("prepared-out").splitlines()[-1])
 
     def environment(self, **extra):
         return {
             "PATH": f"{self.bin}:{os.environ['PATH']}", "HOME": str(self.directory),
             "SOPHIA_SOURCE": str(self.sophia),
             "SOPHIA_SESSION_PREFLIGHT": str(self.bin / "preflight"),
-            "SOPHIA_INTEGRATION_XTASK": str(self.bin / "recipes"),
+            "SOPHIA_INTEGRATION_XTASK": str(self.bin / "helper"),
+            "SOPHIA_GATE_BUILD_DIR": str(self.build),
+            "CARGO_HOME": str(self.directory / "cargo-home"),
+            "STUB_INTEGRATION": str(self.integration),
+            "SOPHIA_HAGIA_NIM_DEPS": str(self.deps["hagia"][0]),
+            "SOPHIA_HAGIA_NIM_DEPS_SHA256": self.deps["hagia"][1],
+            "SOPHIA_NARTHEX_NIM_DEPS": str(self.deps["narthex"][0]),
+            "SOPHIA_NARTHEX_NIM_DEPS_SHA256": self.deps["narthex"][1],
+            "SOPHIA_HAGIA_NATIVE_EVIDENCE": str(self.directory / "native-evidence.log"),
             "XDG_STATE_HOME": str(self.directory / "state"), "TMPDIR": str(self.directory),
             "MARKS": str(self.marks), "SOPHIA_HAGIA_ROOT": str(self.hagia),
             "SOPHIA_NARTHEX_ROOT": str(self.narthex),
@@ -425,6 +521,7 @@ chmod 755 "$out/release/sophia"
         self.assertIn("atomic_scanout_preflight.sh", self.mark("atomic_scanout_preflight.sh"))
         self.assertIn(str(self.integration / "tools/session/start_sophia_tty3.sh"),
                       self.mark("start_sophia_tty3.sh"))
+        self.assert_sources_untouched()
 
     def test_profile_refusals_happen_before_any_build(self):
         # Ignored, so the tree stays clean and only the tracked-file check can
@@ -468,24 +565,40 @@ chmod 755 "$out/release/sophia"
         result = self.run_script("run_current_hagia_policy_gate_tty4.sh",
                                  self.environment(**self.inherited_alternatives()))
         self.assertEqual(result.returncode, 3, result.stderr)
-        built = (self.sophia / "target/release/sophia").read_bytes()
+        built = (self.prepared() / "bin/sophia").read_bytes()
         self.assertIn(b"# fresh build", built)
         self.assertEqual(self.mark("policy-bound-sophia").strip(),
                          __import__("hashlib").sha256(built).hexdigest())
 
-    def test_a_cross_compilation_target_refuses_before_any_build(self):
-        # CARGO_BUILD_TARGET moves the output below target/<triple>/, which is
-        # not the executable these host-native proofs hash and run.
+    def test_preparation_is_bounded_and_touches_no_source(self):
+        # The runners never build: they run the helper at nice 19 with two
+        # jobs, with an explicit private build directory and a new output
+        # below it, Hagia and Narthex from their reviewed dependency manifests,
+        # and verify the output before use. No file appears in any checkout.
         profile = self.integration / "tools/fixtures/t018_tab_reference.kdl"
         for script, extra in (("run_current_hagia_native_gate_tty4.sh",
                                {"SOPHIA_HAGIA_NATIVE_PROFILE": str(profile)}),
                               ("run_current_hagia_policy_gate_tty4.sh", {})):
             with self.subTest(script=script):
-                result = self.run_script(script, self.environment(
-                    CARGO_BUILD_TARGET="aarch64-unknown-linux-gnu", **extra))
-                self.assertEqual(result.returncode, 1, result.stderr)
-                self.assertIn("CARGO_BUILD_TARGET", result.stderr)
-                self.assertEqual(self.mark("build"), "")
+                for mark in ("bounds", "helper-calls", "build"):
+                    (self.marks / mark).unlink(missing_ok=True)
+                result = self.run_script(script, self.environment(**extra))
+                self.assertEqual(result.returncode, 3, result.stderr)
+                self.assertEqual(self.mark("bounds").splitlines(), ["nice=19 jobs=2"])
+                calls = self.mark("helper-calls").splitlines()
+                prepare = [c for c in calls if not c.startswith("prepare-physical-inputs verify")]
+                self.assertEqual(len(prepare), 1, calls)
+                for argument in (f"--sophia-root={self.sophia}", f"--build-dir={self.build}",
+                                 f"--out={self.build}/inputs-", "--sophia-features=native-session",
+                                 f"--hagia={self.hagia}", f"--narthex={self.narthex}",
+                                 f"--hagia-nim-deps={self.deps['hagia'][0]}",
+                                 f"--narthex-nim-deps-sha256={self.deps['narthex'][1]}",
+                                 "--profile=hagia:examples/config/default.kdl"):
+                    self.assertIn(argument, prepare[0])
+                self.assertTrue(any(c.startswith("prepare-physical-inputs verify --out=")
+                                    and "--manifest-sha256=" in c for c in calls), calls)
+                self.assertTrue(self.prepared().is_relative_to(self.build))
+                self.assert_sources_untouched()
 
     def test_the_policy_launcher_runs_the_bound_absolute_binary(self):
         # Documentation control: the policy gate's launcher runs the absolute
@@ -494,16 +607,17 @@ chmod 755 "$out/release/sophia"
         # skip; it refuses a relative or missing binary.
         launcher = (ROOT / "tools/live_session_persistent_hardware_proof.sh").read_text()
         self.assertIn('        "$SOPHIA_BIN" \\\n', launcher)
-        self.assertIn('SOPHIA_BIN="$sophia_source/target/release/sophia"', launcher)
         self.assertIn("SOPHIA_BIN must name an absolute Sophia binary", launcher)
         self.assertNotIn("$ROOT_DIR/target", launcher)
+        self.assertNotIn("target/release/sophia", launcher)
+        self.assertNotIn("cargo ", launcher)
 
     def test_the_policy_wrapper_hands_the_launcher_the_binary_it_bound(self):
         result = self.run_script("run_current_hagia_policy_gate_tty4.sh",
                                  self.environment(**self.inherited_alternatives()))
         self.assertEqual(result.returncode, 3, result.stderr)
         self.assertEqual(self.mark("policy-handed-sophia").strip(),
-                         str(self.sophia / "target/release/sophia"))
+                         str(self.prepared() / "bin/sophia"))
 
     def test_explicit_inputs_are_required_before_any_build(self):
         profile = self.integration / "tools/fixtures/t018_tab_reference.kdl"
@@ -522,6 +636,20 @@ chmod 755 "$out/release/sophia"
                         self.assertEqual(result.returncode, 2, result.stderr)
                         self.assertIn(message, result.stderr)
                         self.assertEqual(self.mark("build"), "")
+            for name, value, message in (
+                ("SOPHIA_GATE_BUILD_DIR", "", "SOPHIA_GATE_BUILD_DIR must name an absolute private build directory"),
+                ("SOPHIA_GATE_BUILD_DIR", "relative/build", "SOPHIA_GATE_BUILD_DIR must name an absolute private build directory"),
+                ("SOPHIA_HAGIA_NIM_DEPS", "", "SOPHIA_HAGIA_NIM_DEPS must name the absolute reviewed dependency manifest"),
+                ("SOPHIA_NARTHEX_NIM_DEPS_SHA256", "0" * 63, "SOPHIA_NARTHEX_NIM_DEPS_SHA256 must be the manifest's independently supplied sha256"),
+                ("CARGO_HOME", "", "CARGO_HOME must name the provisioned private CARGO_HOME"),
+            ):
+                with self.subTest(script=script, name=name, value=value):
+                    environment = self.environment(SOPHIA_HAGIA_NATIVE_PROFILE=str(profile))
+                    environment[name] = value
+                    result = self.run_script(script, environment)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn(message, result.stderr)
+                    self.assertEqual(self.mark("build"), "")
             with self.subTest(script=script, case="another TTY"):
                 result = self.run_script(script, self.environment(
                     SOPHIA_HAGIA_NATIVE_PROFILE=str(profile), SOPHIA_SESSION_TTY="/dev/tty3"))
@@ -560,6 +688,7 @@ chmod 755 "$out/release/sophia"
         digest = lambda path: __import__("hashlib").sha256(path.read_bytes()).hexdigest()
         profile = self.integration / "tools/fixtures/t018_tab_reference.kdl"
         values = {
+            "SOPHIA_ROOT": str(self.sophia),
             "SOPHIA_BIN": str(release),
             "SOPHIA_HAGIA_BIN": str(hagia_bin), "SOPHIA_HAGIA_SHELL_BIN": str(narthex_bin),
             "SOPHIA_DESKTOP_PROFILE": str(profile), "SOPHIA_DESKTOP_PROFILE_SHA256": digest(profile),

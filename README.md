@@ -8,6 +8,27 @@ repository owns what that rule moves out.
 The first slice is Bemenu: signed-revision artifact preparation and the live
 native launcher gate over Sophia's production 9P file export.
 
+## Documentation
+
+- [Operations](docs/operations.md): the installed runbook, bound Nim
+  dependencies and prepared physical inputs.
+- [Installed candidate](docs/installed.md): package, install and verify a
+  release.
+- [Physical runners](docs/physical-runners.md): every attended hardware gate
+  and what it requires.
+- [Hagia gates](docs/hagia-gates.md) and [Hagia workspaces](docs/hagia-workspaces.md).
+- [Narthex reference sheets](docs/narthex-reference-sheets.md).
+- [Same-hardware desktop comparison](docs/desktop-comparison.md).
+- [Lom content](docs/lom-content.md) (pending the Lom 9P seams).
+- [Quickshell](docs/quickshell.md): the X11 trace probe and panel probe, with
+  the old coverage map.
+- [E1 descriptor hosts](docs/E1-descriptor-hosts.md): retained coverage of the
+  descriptor host modes (a 9P seam for the Narthex half).
+- [Gate mapping](docs/GATE-MAPPING.md): where every moved Sophia gate and test
+  lives now, and what is retired with product IPC.
+- [Sophia deletion list](docs/SOPHIA-DELETION-LIST.md): the Sophia-side half of
+  the move, with the inbound hunks.
+
 ## Inputs and pins
 
 - Sophia's public crates (`sophia-runtime`, `sophia-protocol`) come from
@@ -28,12 +49,14 @@ re-derives the copied files and contract digests from a Sophia clone.
 
 ## Attended Lom, launcher and dock gates
 
-Moved from Sophia (rule 13): the Lom GPU/content proof, the tty4 panel,
+Pending the Lom 9P lockstep (see [Lom content](docs/lom-content.md)). Moved
+from Sophia (rule 13): the Lom GPU/content proof, the tty4 panel,
 launcher and dock runners, their transcript verifiers, the workload budgets
 and fixtures, and the `xtask dock` profile generator and verifier. See
 [tools/probes/README.md](tools/probes/README.md). Every input is explicit:
 
-    cargo xtask prepare-product-artifact lom|provlita|hagia REPO SIGNED-COMMIT NEW-DIR
+    cargo xtask prepare-product-artifact lom|provlita|hagia REPO SIGNED-COMMIT NEW-DIR \
+        --build-dir=/ABS [--nim-deps=/ABS --nim-deps-sha256=SHA]   # Hagia: reviewed deps required
     cargo xtask prepare-bemenu-artifact BEMENU-REPO SIGNED-COMMIT NEW-DIR
     SOPHIA_LOM_NATIVE_GATE_ARM=1 SOPHIA_SOURCE=/abs/sophia SOPHIA_GATE_BUILD_DIR=/abs/build \
     SOPHIA_LOM_ARTIFACT=DIR SOPHIA_LOM_COMMIT=REV SOPHIA_LOM_SHA256=SHA SOPHIA_LOM_CONFIG_SHA256=SHA \

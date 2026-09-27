@@ -69,6 +69,32 @@ fn installer_preserves_a_rollback_pointer_before_activation() {
         .unwrap();
     assert!(verify < preserve);
     assert!(preserve < activate);
+    // A never-activated release must also pass this repository's current
+    // verifier before any link changes, and the activation is recorded only
+    // after the switch.
+    let current = ACTIVATOR
+        .find("\"$ROOT_DIR/tools/verify_packaged_policy.sh\" \"$release\"")
+        .unwrap();
+    // Activation history is read (and a recorded ID's contents checked)
+    // before the bundled verifier runs, and recorded only after the switch.
+    let history = ACTIVATOR
+        .find("activation_ledger_status \"$release_id\" \"$release\"")
+        .unwrap();
+    let ledger = ACTIVATOR.find("activation_ledger_record").unwrap();
+    assert!(ACTIVATOR.find("activation_ledger_bootstrap").unwrap() < history);
+    assert!(history < verify);
+    assert!(verify < current && current < preserve);
+    assert!(activate < ledger);
+    // Rollback reaches a target only through a recorded, unchanged entry.
+    let rollback = include_str!("../../../tools/rollback_live_session.sh");
+    let recorded = rollback
+        .find("activation_ledger_status \"$target_id\" \"$target\"")
+        .unwrap();
+    assert!(recorded < rollback.find("sha256sum -c SHA256SUMS").unwrap());
+    let installer_current = INSTALLER
+        .find("\"$ROOT_DIR/tools/verify_packaged_policy.sh\" \"$staging\"")
+        .unwrap();
+    assert!(installer_current < INSTALLER.find("mv \"$staging\" \"$target\"").unwrap());
     assert!(INSTALLER.contains("sha256sum -c SHA256SUMS"));
     assert!(INSTALLER.contains("activate_live_session_release.sh"));
 }
