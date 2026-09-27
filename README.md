@@ -39,16 +39,16 @@ script's own cargo and git children only. Afterwards every command is offline:
 
 ## Gates
 
-    nice -n 19 cargo --config .provision/cargo-config.toml \
+    CARGO_BUILD_JOBS=2 nice -n 19 cargo --config .provision/cargo-config.toml \
         test --workspace --offline --locked
-    nice -n 19 cargo --config .provision/cargo-config.toml \
+    CARGO_BUILD_JOBS=2 nice -n 19 cargo --config .provision/cargo-config.toml \
         clippy --workspace --all-targets --offline --locked -- -D warnings
 
 The live Bemenu gate is ignored by default and fails closed on any missing or
 mismatched input:
 
-    cargo xtask prepare-bemenu-artifact SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR
+    CARGO_BUILD_JOBS=2 nice -n 19 cargo xtask prepare-bemenu-artifact SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR
     SOPHIA_BEMENU_ARTIFACT=OUTPUT-DIR SOPHIA_BEMENU_SHA256=BINARY-SHA256 \
-    SOPHIA_BEMENU_COMMIT=SIGNED-COMMIT nice -n 19 \
+    SOPHIA_BEMENU_COMMIT=SIGNED-COMMIT CARGO_BUILD_JOBS=2 nice -n 19 \
     cargo --config .provision/cargo-config.toml test --offline --locked \
         -p live-tests --test bemenu_files -- --ignored --nocapture
