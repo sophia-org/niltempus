@@ -20,15 +20,18 @@ has been prepared, it builds from the configured sources first. Select
 **Sophia niltempus Desktop** at your next login. A failed build or validation
 stops before installation.
 
-The normal entry runs Hagia and Bemenu over 9P2000.L. Lom remains on current
-IPC until its SDK adoption. **Sophia niltempus Desktop (current IPC)** runs
-the same binaries with both WM and shell roles on IPC. The release contains
-separate, preflighted `desktop.kdl` and `desktop-ipc.kdl` profiles; the source
-profile stays unchanged. Log out and select the IPC entry to change wires.
-Installation removes the older **Sophia niltempus Desktop (9P WM)** entry.
-New releases use manifest schema 2, which requires the IPC profile and entry.
-Schema 1 releases remain verifiable for rollback, including releases predating
-the IPC entry; their original files and checksums remain unchanged.
+New releases are 9P-only (plan schema 3). The one login entry, **Sophia
+niltempus Desktop**, runs Hagia, Lom and Bemenu over 9P2000.L. The release
+contains one preflighted `desktop.kdl`. Installation writes no current-IPC
+entry, and removes one left by an older release when that release is not the
+selected one.
+
+Plan schemas 1 and 2 (external release manifest schema 6, with the
+**(current IPC)** entry) remain readable only so that installed releases can
+be verified, re-activated when recorded, and rolled back to. Their original
+files and checksums are unchanged. Plan schema 3 is the Go desktop plan. It
+requires external (Sophia/integration) release manifest schema 7, a
+separate numbering.
 
 The individual steps remain available:
 
@@ -48,6 +51,65 @@ user state binds its path, release ID and manifest digest. `install` verifies
 these again; a missing or changed selected release is refused without silently
 building or choosing a different one. `install DIRECTORY` remains an explicit
 one-off installation and does not change the prepared selection.
+
+**Upgrading from a Plan-2 selection.** A selection made before plan schema 3
+(a Plan-2 release, with the current-IPC entry) is refused by `install`,
+because new installations require plan schema 3. There is no silent
+fallback: `install` neither rebuilds nor picks another release. To move on,
+prepare a Plan-3 release explicitly, either with `niltempus build` using the
+explicit `inputs`, or with `niltempus prepare DIRECTORY` for an existing
+Plan-3 release. Until then, `prepared.json` is left exactly as it is.
+
+### Explicit helper inputs
+
+Plan schema 3 packages with the current helper CLI, so its configuration
+names every input explicitly under `inputs`. There are no defaults:
+
+- `hagia_nim_deps` and `narthex_nim_deps`: each is the path of the REVIEWED
+  Nim dependency manifest plus its sha256, supplied independently of the
+  file.
+- `hagia_c_sdk_revision`: the C SDK revision that Hagia vendors.
+
+`plan` refuses a missing, malformed or mismatched input before anything is
+staged, and `build` checks them again before creating any directory. Each
+manifest must:
+- be a regular file at an absolute path;
+- hash to its supplied digest;
+- start `nim-deps schema=1 status=reviewed`;
+- name its product and the plan's exact source commit.
+
+A draft manifest authorizes nothing. The build copies the reviewed manifests
+into its private directory, checks them again, and passes them to
+`prepare-wm-pair` with `--build-dir`, `--hagia-nim-deps`,
+`--hagia-nim-deps-sha256`, `--narthex-nim-deps`, `--narthex-nim-deps-sha256`
+and `--hagia-c-sdk-rev`. It then runs `package-desktop` with
+`--wm-pair-profile-sha256` and `--wm-pair-c-sdk-rev`. The plan binds the
+paths, the digests and the revision, so they are part of the release
+identity.
+
+### Release verification
+
+A schema-3 release must carry an external manifest of schema 7 that:
+- records `hagia_c_sdk_revision` (equal to the plan's) and
+  `hagia_c_sdk_manifest_sha256`;
+- seals `share/sophia-policy/hagia/c-sdk.manifest.json`, which must hash to
+  that digest and name that revision.
+
+Missing, repeated, malformed or mismatched values are refused. With
+`hagia_included=false`, the SDK fields and the sealed manifest must be
+absent. This installer applies these checks itself; it never relies only on
+a release's bundled verifier.
+
+Activation follows the integration activator's history in
+`/opt/sophia-niltempus-desktop/activated-releases`, whose lines are
+`release_id manifest_sha256 SHA256SUMS_sha256`:
+- A release activated before, and unchanged since, keeps its own
+  verification. This is how an installed legacy release stays a rollback
+  target.
+- A recorded ID whose contents changed is refused.
+- A release never activated must be a plan-schema-3 candidate.
+- An installation without a ledger counts its current and previous
+  releases once. After that, only ledger entries count.
 
 `plan` is the default and reads local refs only. It never fetches, pulls,
 checks out a branch in a working repository, or takes uncommitted edits.
@@ -226,6 +288,12 @@ Tests cover profile preservation, exact executable selection, control opt-in, ov
 conflicts, release tampering, provenance changes, symlink refusal, inherited
 session-variable removal and exclusive build ownership. Headless validation
 does not establish physical GPU or live-session acceptance.
+
+Nested Bubblewrap is **unverified** for a real build. The isolation test
+runs `bwrap` inside a sandboxed test run and passes, but no actual build has
+yet run the helper's own Bubblewrap-isolated Nim build inside this
+installer's `isolated()` Bubblewrap. Treat that combination as unverified
+until a real Plan-3 build exercises it.
 
 Build regressions cover a real Git checkout under umask 0002, safe child output
 permissions, unchanged source inode/mtime retention across commits, dirty-cache

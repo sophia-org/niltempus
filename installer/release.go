@@ -10,14 +10,11 @@ import (
 	"strings"
 )
 
-// sessionLauncher is the default entry: the personal Hagia over the 9P2000.L
-// WM wire, with Bemenu over files. Rollback selects an IPC shell profile too.
+// sessionLauncher is the only entry of a plan-schema-3 release: the personal
+// Hagia over the 9P2000.L WM wire, with the bar and the launcher over files.
+// No current-IPC entry is generated.
 func sessionLauncher() string {
 	return launcher("--wm-transport=9p2000.L", "desktop.kdl")
-}
-
-func ipcSessionLauncher() string {
-	return launcher("--wm-transport=current-ipc", "desktop-ipc.kdl")
 }
 
 func launcher(transport, profile string) string {
@@ -50,11 +47,7 @@ exec "$release/bin/sophia-hagia-session" "--wm-process=$wm" "` + transport + `" 
 }
 
 func desktopEntry() string {
-	return "[Desktop Entry]\nName=Sophia niltempus Desktop\nComment=Hagia and Bemenu over 9P2000.L; Lom over IPC\nExec=" + prefix + "/current/bin/sophia-niltempus-desktop-session\nType=Application\nDesktopNames=Sophia\n"
-}
-
-func ipcDesktopEntry() string {
-	return "[Desktop Entry]\nName=Sophia niltempus Desktop (current IPC)\nComment=The same release with WM and shells over current IPC\nExec=" + prefix + "/current/" + ipcLauncher + "\nType=Application\nDesktopNames=Sophia\n"
+	return "[Desktop Entry]\nName=Sophia niltempus Desktop\nComment=Hagia, Lom and Bemenu over 9P2000.L\nExec=" + prefix + "/current/bin/sophia-niltempus-desktop-session\nType=Application\nDesktopNames=Sophia\n"
 }
 
 func collectFiles(root string) (map[string]FileRecord, error) {
@@ -123,7 +116,7 @@ func verifyRelease(root string) (Manifest, error) {
 	if err := readJSON(filepath.Join(root, "desktop-manifest.json"), &manifest); err != nil {
 		return manifest, err
 	}
-	if (manifest.Plan.Schema != 1 && manifest.Plan.Schema != 2) || manifest.Plan.ReleaseID != releaseID(manifest.Plan) {
+	if manifest.Plan.Schema < 1 || manifest.Plan.Schema > currentPlanSchema || manifest.Plan.ReleaseID != releaseID(manifest.Plan) {
 		return manifest, fmt.Errorf("invalid desktop release identity")
 	}
 	for path := range manifest.Files {
@@ -168,11 +161,32 @@ func verifyRelease(root string) (Manifest, error) {
 		return manifest, err
 	}
 	if bound != nil {
-		if err := verifyIntegrationRelease(metadata, manifest.Plan, actual); err != nil {
+		if err := verifyIntegrationRelease(metadata, manifest.Plan, actual, root); err != nil {
 			return manifest, err
 		}
 		executables = append(executables, "target/release/sophia-integration-xtask", "target/release/active-session-preflight", "tools/session/run_desktop_session.sh", "bin/sophia-session")
 	}
+	if manifest.Plan.Schema == currentPlanSchema {
+		if bound == nil {
+			return manifest, fmt.Errorf("plan schema %d requires the niltempus tooling binding", currentPlanSchema)
+		}
+		if err := verifyNinePOnly(root, actual); err != nil {
+			return manifest, err
+		}
+		files = append(files, "tools/lib/live_session_surface.sh", "tools/lib/activation_ledger.sh", sealedCSDKManifest)
+		for _, name := range executables {
+			if file, ok := actual[name]; !ok || file.Mode&0111 == 0 {
+				return manifest, fmt.Errorf("missing executable: %s", name)
+			}
+		}
+		for _, name := range files {
+			if _, ok := actual[name]; !ok {
+				return manifest, fmt.Errorf("missing release file: %s", name)
+			}
+		}
+		return manifest, nil
+	}
+	// Plan schemas 1 and 2: installed legacy releases, verified for rollback.
 	_, hasIPCLauncher := actual[ipcLauncher]
 	_, hasIPCEntry := actual["share/wayland-sessions/"+ipcDesktopFile]
 	// Old schema-1 releases predate the IPC entry. Keep them verifiable for
@@ -203,4 +217,28 @@ func verifyRelease(root string) (Manifest, error) {
 		}
 	}
 	return manifest, nil
+}
+
+// verifyNinePOnly holds a plan-schema-3 release to its 9P-only shape: no
+// current-IPC launcher, entry or profile; the one launcher selects the
+// 9P2000.L WM wire; and every shell component in the sealed profile uses
+// 9P2000.L.
+func verifyNinePOnly(root string, files map[string]FileRecord) error {
+	for _, name := range []string{ipcLauncher, "share/wayland-sessions/" + ipcDesktopFile, "share/sophia-niltempus-desktop/desktop-ipc.kdl", "share/wayland-sessions/" + retiredNineDesktopFile} {
+		if _, ok := files[name]; ok {
+			return fmt.Errorf("9P-only release contains a current-IPC or retired entry: %s", name)
+		}
+	}
+	launcher, err := os.ReadFile(filepath.Join(root, "bin/sophia-niltempus-desktop-session"))
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(string(launcher), `"--wm-transport=9p2000.L"`) || strings.Contains(string(launcher), "current-ipc") {
+		return fmt.Errorf("the session launcher does not select the 9P2000.L WM wire")
+	}
+	profile, err := os.ReadFile(filepath.Join(root, "share/sophia-niltempus-desktop/desktop.kdl"))
+	if err != nil {
+		return err
+	}
+	return requireNinePProfile(string(profile))
 }

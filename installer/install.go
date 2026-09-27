@@ -34,12 +34,15 @@ func installRelease(artifact string, loc Locations) error {
 		if !maps.Equal(existing.Files, manifest.Files) {
 			return fmt.Errorf("installed release has same identity but different files")
 		}
+		if err := activationAllowed(prefix, target, existing); err != nil {
+			return err
+		}
 		if err := checked(privileged(filepath.Join(target, "tools/activate_live_session_release.sh"), target)); err != nil {
 			return err
 		}
 	} else if os.IsNotExist(err) {
-		if manifest.Plan.Schema != 2 {
-			return fmt.Errorf("new installations require release schema 2; schema 1 is supported only for an already installed release")
+		if manifest.Plan.Schema != currentPlanSchema {
+			return fmt.Errorf("new installations require plan schema %d (9P-only, external manifest schema %s); schemas 1 and 2 are supported only for an already installed, activated release", currentPlanSchema, currentExternalSchema)
 		}
 		if err := checked(privileged(filepath.Join(artifact, "tools/install_live_session.sh"), artifact)); err != nil {
 			return err
@@ -80,6 +83,23 @@ func installRelease(artifact string, loc Locations) error {
 		return err
 	}
 	fmt.Printf("Installed %s. Select 'Sophia niltempus Desktop' at your next login. Running sessions are unchanged.\n", manifest.Plan.ReleaseID)
+	return nil
+}
+
+// activationAllowed applies the activation history to a release that is
+// already under the prefix. A recorded release (unchanged since it was
+// recorded) keeps its own verification, so an installed legacy release stays
+// a rollback target. An unrecorded one is a new candidate: it is admitted
+// only if it satisfies the current schema-3/schema-7 verification this
+// installer applies itself.
+func activationAllowed(prefixDir, target string, manifest Manifest) error {
+	recorded, err := activationRecorded(prefixDir, manifest.Plan.ReleaseID, target)
+	if err != nil {
+		return err
+	}
+	if !recorded && manifest.Plan.Schema != currentPlanSchema {
+		return fmt.Errorf("release %s (plan schema %d) was never activated here; only a plan-schema-%d candidate may be activated for the first time", manifest.Plan.ReleaseID, manifest.Plan.Schema, currentPlanSchema)
+	}
 	return nil
 }
 

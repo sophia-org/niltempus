@@ -3,8 +3,9 @@ package main
 const prefix = "/opt/sophia-niltempus-desktop"
 const desktopFile = "sophia-niltempus-desktop.desktop"
 
-// The default entry runs the WM over 9P2000.L. This entry is its explicit
-// current-IPC rollback, with the same personal Hagia.
+// The current-IPC entry of plan-schema-2 releases. New (schema 3) releases
+// are 9P-only and never generate it; installation removes the entry when the
+// selected release lacks its launcher.
 const ipcDesktopFile = "sophia-niltempus-desktop-ipc.desktop"
 const ipcLauncher = "bin/sophia-niltempus-desktop-ipc-session"
 
@@ -23,6 +24,8 @@ type Config struct {
 	Repositories map[string]Repository `json:"repositories"`
 	Integration  Repository            `json:"integration"`
 	Niltempus    Repository            `json:"niltempus"`
+	// Explicit helper inputs for plan schema 3; no defaults.
+	Inputs *PlanInputs `json:"inputs,omitempty"`
 }
 
 type Source struct {
@@ -40,6 +43,9 @@ type Plan struct {
 	InstallerSHA256 string            `json:"installer_sha256"`
 	Integration     *IntegrationPlan  `json:"integration,omitempty"`
 	Niltempus       *IntegrationPlan  `json:"niltempus,omitempty"`
+	// Plan schema 3: the reviewed Nim dependency manifests (paths and
+	// independently supplied digests) and the Hagia C SDK revision.
+	Inputs *PlanInputs `json:"inputs,omitempty"`
 }
 
 // Omitted on historical plans so their release identities stay unchanged.

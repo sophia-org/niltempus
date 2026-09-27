@@ -70,16 +70,13 @@ func TestFailedPreparationPreservesPreviousSelection(t *testing.T) {
 	if err := selectPreparedRelease(root, loc); err != nil {
 		t.Fatal(err)
 	}
-	bad, plan := fixtureRelease(t)
-	plan.Schema = 1
-	plan.ReleaseID = releaseID(plan)
-	if err := writeFile(filepath.Join(bad, "manifest"), []byte("schema=6\nrelease_id="+plan.ReleaseID+"\n"), 0644); err != nil {
+	// An installed-style legacy (plan schema 2) release verifies, but is not
+	// a new candidate.
+	bad, _ := legacyFixtureRelease(t)
+	if _, err := verifyRelease(bad); err != nil {
 		t.Fatal(err)
 	}
-	if err := sealRelease(bad, plan); err != nil {
-		t.Fatal(err)
-	}
-	if err := selectPreparedRelease(bad, loc); err == nil || !strings.Contains(err.Error(), "schema 2") {
+	if err := selectPreparedRelease(bad, loc); err == nil || !strings.Contains(err.Error(), "plan schema 3") {
 		t.Fatalf("legacy release selected for new install: %v", err)
 	}
 	if selected, err := preparedRelease(loc); err != nil || selected != root {

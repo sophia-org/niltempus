@@ -174,12 +174,26 @@ func packageDesktop(plan Plan, roots map[string]string, work string) (string, er
 			return "", err
 		}
 	}
-	pair := filepath.Join(work, "wm-pair")
-	if err := logged(isolated(root, env, tool, "prepare-wm-pair", "--hagia", roots["hagia"], plan.Sources["hagia"].Commit, "--narthex", roots["narthex"], plan.Sources["narthex"].Commit, pair), filepath.Join(work, "prepare-wm-pair.log")); err != nil {
+	if plan.Schema != currentPlanSchema {
+		return "", fmt.Errorf("new builds require plan schema %d", currentPlanSchema)
+	}
+	if err := validateInputs(plan.Inputs, plan.Sources); err != nil {
 		return "", err
 	}
-	var hashes []string
-	for _, name := range []string{"hagia", "narthex", "default.kdl"} {
+	hagiaDeps, narthexDeps, err := stageInputs(plan.Inputs, work)
+	if err != nil {
+		return "", err
+	}
+	pairBuild := filepath.Join(work, "pair-build")
+	if err := os.Mkdir(pairBuild, 0700); err != nil {
+		return "", err
+	}
+	pair := filepath.Join(work, "wm-pair")
+	if err := logged(isolated(root, env, prepareWMPairArgs(tool, plan, roots, pair, pairBuild, hagiaDeps, narthexDeps)...), filepath.Join(work, "prepare-wm-pair.log")); err != nil {
+		return "", err
+	}
+	var hashes [3]string
+	for i, name := range []string{"hagia", "narthex", "default.kdl"} {
 		path := filepath.Join(pair, name)
 		info, err := os.Lstat(path)
 		if err != nil || !info.Mode().IsRegular() {
@@ -189,23 +203,20 @@ func packageDesktop(plan Plan, roots map[string]string, work string) (string, er
 		if err != nil {
 			return "", err
 		}
-		hashes = append(hashes, hash)
+		hashes[i] = hash
 	}
 	buildDir := filepath.Join(work, "package-build")
 	if err := os.Mkdir(buildDir, 0700); err != nil {
 		return "", err
 	}
 	stage := filepath.Join(work, "package")
-	args := []string{tool, "package-desktop", "--sophia-root=" + roots["sophia"], "--sophia-rev=" + plan.Sources["sophia"].Commit,
-		"--wm-pair=" + pair, "--wm-pair-commits=" + plan.Sources["hagia"].Commit + "," + plan.Sources["narthex"].Commit,
-		"--wm-pair-sha256=" + hashes[0] + "," + hashes[1], "--wm-pair-profile-sha256=" + hashes[2], "--build-dir=" + buildDir, "--out=" + stage}
-	if err := logged(isolated(root, env, args...), filepath.Join(work, "package-desktop.log")); err != nil {
+	if err := logged(isolated(root, env, packageDesktopArgs(tool, plan, roots, pair, hashes, buildDir, stage)...), filepath.Join(work, "package-desktop.log")); err != nil {
 		return "", err
 	}
 	return stage, nil
 }
 
-func verifyIntegrationRelease(metadata []byte, plan Plan, files map[string]FileRecord) error {
+func verifyIntegrationRelease(metadata []byte, plan Plan, files map[string]FileRecord, root string) error {
 	bound, err := toolingBinding(plan)
 	if err != nil {
 		return err
@@ -213,8 +224,20 @@ func verifyIntegrationRelease(metadata []byte, plan Plan, files map[string]FileR
 	if bound == nil {
 		return fmt.Errorf("release has no desktop tooling binding")
 	}
+	schema := legacyExternalSchema
+	if plan.Schema >= currentPlanSchema {
+		// The current verifier: external schema 7 with Hagia's vendored C SDK,
+		// never delegated to the release's bundled verifier.
+		if plan.Niltempus == nil || plan.Inputs == nil {
+			return fmt.Errorf("plan schema %d requires the niltempus binding and explicit inputs", plan.Schema)
+		}
+		if err := verifyExternalSchema7(metadata, root, files, plan.Inputs.HagiaCSDKRevision); err != nil {
+			return err
+		}
+		schema = currentExternalSchema
+	}
 	expected := map[string]string{
-		"schema":                       "6",
+		"schema":                       schema,
 		"commit":                       plan.Sources["sophia"].Commit,
 		"integration_commit":           bound.Source.Commit,
 		"hagia_source_commit":          plan.Sources["hagia"].Commit,

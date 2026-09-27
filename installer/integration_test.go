@@ -135,7 +135,7 @@ func TestPersonalWMPreparationDoesNotRequireIntegrationProvisioning(t *testing.T
 func TestExternalReleaseRequiresItsToolsAndMatchingProvenance(t *testing.T) {
 	for _, damage := range []string{"", "niltempus binding", "ambiguous binding", "missing tool", "wrong integration", "missing source", "wrong pair digest"} {
 		t.Run(damage, func(t *testing.T) {
-			root, plan := fixtureRelease(t)
+			root, plan := legacyFixtureRelease(t)
 			plan.Integration = &IntegrationPlan{Source: Source{Commit: "packager"}, CargoHome: "/cache", CargoLockSHA256: "lock"}
 			if damage == "niltempus binding" {
 				plan.Niltempus, plan.Integration = plan.Integration, nil

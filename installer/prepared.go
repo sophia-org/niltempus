@@ -34,8 +34,8 @@ func preparedIdentity(directory string) (PreparedRelease, error) {
 	if err != nil {
 		return PreparedRelease{}, err
 	}
-	if manifest.Plan.Schema != 2 {
-		return PreparedRelease{}, fmt.Errorf("preparing a new installation requires release schema 2")
+	if manifest.Plan.Schema != currentPlanSchema {
+		return PreparedRelease{}, fmt.Errorf("preparing a new installation requires plan schema %d (9P-only)", currentPlanSchema)
 	}
 	after, err := fileDigest(path)
 	if err != nil {

@@ -46,14 +46,6 @@ func TestDefaultLauncherRunsTheWMOverNineP(t *testing.T) {
 	}
 }
 
-func TestRollbackLauncherRunsTheSameWMOverCurrentIPC(t *testing.T) {
-	root, wm, out := runLauncher(t, ipcLauncher, ipcSessionLauncher())
-	want := strings.Join([]string{wm, filepath.Join(root, "share/sophia-niltempus-desktop/desktop-ipc.kdl"), "unset", "unset", prefix, "--wm-process=" + wm, "--wm-transport=current-ipc", "one argument", "second", ""}, "\n")
-	if out != want {
-		t.Fatalf("got %s; want %s", out, want)
-	}
-}
-
 func TestLauncherRefusesOldOrMismatchedPersonalWM(t *testing.T) {
 	for _, response := range []string{"exit 1", "exit 0", "echo incompatible"} {
 		root := t.TempDir()
@@ -95,7 +87,11 @@ func TestEntriesNameTheirLaunchers(t *testing.T) {
 	if !strings.Contains(desktopEntry(), "Exec="+prefix+"/current/bin/sophia-niltempus-desktop-session\n") {
 		t.Fatalf("default entry: %s", desktopEntry())
 	}
-	if !strings.Contains(ipcDesktopEntry(), "Exec="+prefix+"/current/"+ipcLauncher+"\n") || !strings.Contains(ipcDesktopEntry(), "Name=Sophia niltempus Desktop (current IPC)\n") {
-		t.Fatalf("rollback entry: %s", ipcDesktopEntry())
+	// 9P-only: the one entry never offers a current-IPC variant.
+	if strings.Contains(desktopEntry(), "IPC") || !strings.Contains(desktopEntry(), "9P2000.L") {
+		t.Fatalf("default entry: %s", desktopEntry())
+	}
+	if strings.Contains(sessionLauncher(), "current-ipc") {
+		t.Fatal("the session launcher names the current-IPC wire")
 	}
 }
