@@ -56,12 +56,12 @@ fn release(root: &Path) -> PathBuf {
         "system-profile branch changed"
     );
     let system = root.join("etc/sophia/desktop.kdl");
-    let rewritten = text.replace(
-        branch,
-        &branch.replace("/etc/sophia/desktop.kdl", system.to_str().unwrap()),
-    );
+    let system = system.to_str().unwrap();
+    let rewritten = text.replace(branch, &branch.replace("/etc/sophia/desktop.kdl", system));
+    // The fixture path itself ends in etc/sophia/desktop.kdl; only it may.
+    assert_eq!(rewritten.matches(system).count(), 3);
     assert!(
-        !rewritten.contains("/etc/sophia"),
+        !rewritten.replace(system, "").contains("/etc/sophia"),
         "another system path appeared"
     );
     fs::write(&launcher, rewritten).unwrap();

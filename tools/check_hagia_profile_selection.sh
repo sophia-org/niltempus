@@ -24,7 +24,10 @@ system_set='desktop_profile=/etc/sophia/desktop.kdl'
 [[ "$(grep -c '/etc/sophia' "$launcher")" == 2 ]]
 sed -i -e "s#^\( *\)elif \[\[ -e /etc/sophia/desktop.kdl || -L /etc/sophia/desktop.kdl \]\]; then\$#\1elif [[ -e $system_profile || -L $system_profile ]]; then#" \
     -e "s#^\( *\)desktop_profile=/etc/sophia/desktop.kdl\$#\1desktop_profile=$system_profile#" "$launcher"
-! grep -q '/etc/sophia' "$launcher"
+# The fixture path itself ends in etc/sophia/desktop.kdl; only it may (a
+# bare `! grep` would not stop the script under set -e).
+[[ "$(grep -o -F -- "$system_profile" "$launcher" | wc -l)" == 3 ]]
+[[ "$(sed "s#$system_profile##g" "$launcher" | grep -c '/etc/sophia')" == 0 ]]
 install -m 755 "$ROOT_DIR/tools/installed/sophia-hagia-promotion-session" \
     "$release/bin/sophia-hagia-promotion-session"
 printf 'schema 1\n' >"$release/share/sophia-policy/hagia/default.kdl"
