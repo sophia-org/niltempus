@@ -52,6 +52,14 @@ these again; a missing or changed selected release is refused without silently
 building or choosing a different one. `install DIRECTORY` remains an explicit
 one-off installation and does not change the prepared selection.
 
+**Upgrading from a Plan-2 selection.** A selection made before plan schema 3
+(a Plan-2 release, with the current-IPC entry) is refused by `install`,
+because new installations require plan schema 3. There is no silent
+fallback: `install` neither rebuilds nor picks another release. To move on,
+prepare a Plan-3 release explicitly, either with `niltempus build` using the
+explicit `inputs`, or with `niltempus prepare DIRECTORY` for an existing
+Plan-3 release. Until then, `prepared.json` is left exactly as it is.
+
 ### Explicit helper inputs
 
 Plan schema 3 packages with the current helper CLI, so its configuration
@@ -280,6 +288,12 @@ Tests cover profile preservation, exact executable selection, control opt-in, ov
 conflicts, release tampering, provenance changes, symlink refusal, inherited
 session-variable removal and exclusive build ownership. Headless validation
 does not establish physical GPU or live-session acceptance.
+
+Nested Bubblewrap is **unverified** for a real build. The isolation test
+runs `bwrap` inside a sandboxed test run and passes, but no actual build has
+yet run the helper's own Bubblewrap-isolated Nim build inside this
+installer's `isolated()` Bubblewrap. Treat that combination as unverified
+until a real Plan-3 build exercises it.
 
 Build regressions cover a real Git checkout under umask 0002, safe child output
 permissions, unchanged source inode/mtime retention across commits, dirty-cache
