@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Provenance: moved from Sophia tools/stop_sophia_native_session.sh at
-# a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (pin pending: root's gated boundary head) (Sophia rule 13).
+# a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (original copy; source unchanged at the pin de776c68) (Sophia rule 13).
 # Sophia's retained stop primitive takes the profile as an opaque label.
 set -euo pipefail
 

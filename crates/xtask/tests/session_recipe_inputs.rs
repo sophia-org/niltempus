@@ -1,5 +1,5 @@
 // Provenance: moved from Sophia crates/sophia-cli/tests/session_prepare_inputs.rs
-// at a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (pin pending: root's gated boundary head) (Sophia rule 13):
+// at a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (original copy; source unchanged at the pin de776c68) (Sophia rule 13):
 // discovery, Firefox staging, failed staging, the Kitty parser deadline
 // (process-group reap) and direct-scanout staging. Controls, the legacy
 // launcher refusal and check-launch acceptance stay in Sophia with their

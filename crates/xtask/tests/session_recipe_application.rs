@@ -1,5 +1,5 @@
 // Provenance: moved from Sophia crates/sophia-cli/tests/session_application_arguments.rs
-// at a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (pin pending: root's gated boundary head) (Sophia rule 13). The
+// at a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (original copy; at the pin de776c68 Sophia changed only its slice extraction for its own wrapper's EXPLICIT_ARGV branch, which does not apply to the adapter sliced here) (Sophia rule 13). The
 // assembled blocks now come from tools/session/run_desktop_session.sh and the
 // recipe tool, with every assertion unchanged.
 //! Exercise production fallback selection and argument preparation, excluding

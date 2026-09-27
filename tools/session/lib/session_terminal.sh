@@ -1,5 +1,5 @@
 # Provenance: moved from Sophia tools/lib/session_terminal.sh at
-# a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (pin pending: root's gated boundary head) (Sophia rule 13).
+# a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (original copy; source unchanged at the pin de776c68) (Sophia rule 13).
 # Terminal adapters own client-specific arguments; the session launcher owns
 # only the application role and lifecycle.
 

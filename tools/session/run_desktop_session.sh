@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # The named-recipe half of Sophia's former tools/run_sophia_session.sh at
-# a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (pin pending: root's gated boundary
-# head) (Sophia rule 13): application discovery (prepare-inputs), recipe proof
+# a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (original copy; diffed against the
+# pin de776c68: the recipe half is unchanged there, where root only added the
+# explicit `-- session run` path this adapter targets and moved the recipe
+# steps under its EXPLICIT_ARGV=false branch) (Sophia rule 13): application
+# discovery (prepare-inputs), recipe proof
 # staging (stage-proofs), the profile's `session run` arguments
 # (prepare-arguments), the recipe-only environment, and the profile banners.
 # Sophia's retained generic wrapper then owns everything product-neutral:
 # controls, host preflight (check-host), input guard, keyd, TTY takeover and
 # restore, watchdog, bus, launch acceptance and recovery.
 #
-# Sophia's generic launcher contract (root, pin pending):
+# Sophia's generic launcher contract (root, at the pin de776c68):
 #   SOPHIA_TTY_PROFILE=<opaque label> run_sophia_session.sh -- session run <args...>
 # with a prebuilt absolute SOPHIA_BIN, exactly one --input-seat=VALUE or
 # --input-devices=VALUE among the session arguments (the wrapper hands it to

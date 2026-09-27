@@ -1,7 +1,7 @@
 // Provenance: moved from Sophia
 // crates/sophia-cli/src/commands/session_prepare.rs at
-// a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (pin pending: root's gated boundary
-// head) (session dispatch to Sophia's retained verbs removed; `session-recipe`
+// a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (original copy; source unchanged at
+// the pin de776c68) (session dispatch to Sophia's retained verbs removed; `session-recipe`
 // verbs only) (Sophia rule 13).
 //! Named desktop launch recipes: the product-specific half of Sophia's former
 //! `sophia session prepare-*` commands. They produce plain `session run`

@@ -1,5 +1,5 @@
 # Provenance: frozen oracle moved from Sophia crates/sophia-cli/tests/fixtures/session_environment_before_t027.sh
-# at a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (pin pending: root's gated boundary head) (Sophia rule 13).
+# at a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (original copy; source unchanged at the pin de776c68) (Sophia rule 13).
 # Frozen environment preparation before t027; differential tests only.
 session_environment=(
     SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1

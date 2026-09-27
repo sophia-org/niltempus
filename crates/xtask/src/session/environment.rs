@@ -1,7 +1,7 @@
 // Provenance: moved from Sophia
 // crates/sophia-cli/src/commands/session_prepare/environment.rs at
-// a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (pin pending: root's gated boundary
-// head) (recipe-only: Sophia keeps the TTY, bus and verbose-trace entries)
+// a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (original copy; source unchanged at
+// the pin de776c68) (recipe-only: Sophia keeps the TTY, bus and verbose-trace entries)
 // (Sophia rule 13).
 use super::{BTreeMap, Result, Write, append};
 

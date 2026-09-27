@@ -1,7 +1,7 @@
 // Provenance: moved from Sophia
 // crates/sophia-cli/src/commands/session_prepare/proofs.rs at
-// a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (pin pending: root's gated boundary
-// head) (Sophia keeps private_state for check-launch; the recipe staging
+// a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (original copy; source unchanged at
+// the pin de776c68) (Sophia keeps private_state for check-launch; the recipe staging
 // moves) (Sophia rule 13).
 use super::{BTreeMap, Result, Write, bounded, discovery, enabled, env, required};
 use std::{

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Provenance: moved from Sophia tools/start_sophia_tty3.sh at
-# a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (pin pending: root's gated boundary
-# head) (Sophia rule 13). The display-manager/VT handoff and the named profile
+# a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (original copy; source unchanged at
+# the pin de776c68) (Sophia rule 13). The display-manager/VT handoff and the named profile
 # dispatcher are this host's desktop integration. Changes: every input is
 # explicit and absolute (SOPHIA_ROOT for Sophia's retained primitives,
 # SOPHIA_BIN, SOPHIA_SESSION_PREFLIGHT, SOPHIA_INTEGRATION_XTASK); no source

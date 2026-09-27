@@ -3,8 +3,8 @@
 // crates/sophia-cli/tests/launcher_safety.rs (the TTY3_LAUNCHER parts of
 // tty3_gate_restores_input_before_activating_the_ready_greetd_vt and
 // tty_profile_check_is_independent_of_the_callers_working_directory) at
-// a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (pin pending: root's gated boundary
-// head) (Sophia rule 13). The launcher is now tools/session/start_sophia_tty3.sh.
+// a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (original copy; source unchanged at
+// the pin de776c68) (Sophia rule 13). The launcher is now tools/session/start_sophia_tty3.sh.
 // Sophia's own refusal of invalid controls stays in Sophia with prepare-controls;
 // here a stub `sophia` refuses, and the test proves the launcher asks it before
 // any TTY query or privileged handoff. The desktop-comparison assertions move

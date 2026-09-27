@@ -1,5 +1,5 @@
-//! The external adapter against Sophia's generic launcher contract (root,
-//! pin pending): `run_sophia_session.sh -- session run <args...>`, an opaque
+//! The external adapter against Sophia's generic launcher contract (root, at
+//! the pin de776c68): `run_sophia_session.sh -- session run <args...>`, an opaque
 //! SOPHIA_TTY_PROFILE label, exactly one input selector among the arguments,
 //! the product environment supplied by the caller, and the stop primitive
 //! receiving the same label. A recording stand-in plays Sophia's wrapper.

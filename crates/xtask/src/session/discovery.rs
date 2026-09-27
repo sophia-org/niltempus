@@ -1,7 +1,7 @@
 // Provenance: moved from Sophia
 // crates/sophia-cli/src/commands/session_prepare/discovery.rs at
-// a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (pin pending: root's gated boundary
-// head) (positive stays in Sophia for its controls; copied here for the
+// a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (original copy; source unchanged at
+// the pin de776c68) (positive stays in Sophia for its controls; copied here for the
 // recipes) (Sophia rule 13).
 use super::{BTreeMap, Result, Write, env, required};
 use std::path::Path;

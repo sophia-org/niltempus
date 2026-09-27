@@ -1,5 +1,5 @@
 // Provenance: moved from Sophia crates/sophia-cli/tests/session_prepare_arguments.rs
-// at a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (pin pending: root's gated boundary head) (Sophia rule 13). The
+// at a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (original copy; at the pin de776c68 Sophia changed only its slice extraction for its own wrapper's EXPLICIT_ARGV branch, which does not apply to the adapter sliced here) (Sophia rule 13). The
 // recipes now run as `xtask session-recipe`; the frozen before_t027 oracles
 // moved with them. The adapter test slices tools/session/run_desktop_session.sh,
 // which now assembles the arguments, and the environment test compares only the

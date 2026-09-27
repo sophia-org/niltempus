@@ -1,5 +1,5 @@
 # Provenance: frozen oracle moved from Sophia crates/sophia-cli/tests/fixtures/session_inputs_before_t027.sh
-# at a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (pin pending: root's gated boundary head) (Sophia rule 13).
+# at a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (original copy; source unchanged at the pin de776c68) (Sophia rule 13).
 # Retained discovery oracle; never used by the live launcher.
 hagia_browser_bin=""
 if [[ "$SESSION_PROFILE" == hagia ]]; then

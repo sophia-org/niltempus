@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Provenance: moved from Sophia tools/fixtures/firefox_m10_kitty_probe.sh at
-# a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (pin pending: root's gated boundary head) (Sophia rule 13).
+# a6edbbcad02ad9e9bb4c790e7cfd714cf333d30b (original copy; source unchanged at the pin de776c68) (Sophia rule 13).
 set -euo pipefail
 
 probe_dir="${SOPHIA_FIREFOX_M10_KITTY_PROBE_DIR:-}"
