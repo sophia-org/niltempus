@@ -55,7 +55,7 @@ pin() {
 url=$(pin url)
 rev=$(pin rev)
 
-: "${CARGO_BUILD_JOBS:=8}"
+: "${CARGO_BUILD_JOBS:=2}"
 export CARGO_BUILD_JOBS
 
 if [ -n "$source_repo" ]; then
