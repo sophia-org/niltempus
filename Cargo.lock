@@ -111,6 +111,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "desktop-comparison"
+version = "0.1.0"
+dependencies = [
+ "drm",
+ "niri-ipc",
+ "rustix",
+ "sha2",
+ "sophia-engine",
+ "x11rb",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1667,6 +1679,7 @@ checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "desktop-comparison",
  "rustix",
  "serde",
  "serde_json",
