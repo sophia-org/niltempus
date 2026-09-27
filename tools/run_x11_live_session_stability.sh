@@ -4,9 +4,16 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Changes: Sophia is the explicit pinned checkout SOPHIA_SOURCE (never this
-# repository): built there and its atomic-scanout preflight read from it.
+# repository). Nothing is built here or there: the release binary and the exact
+# pinned tree come from prepared physical inputs built from the signed tree in
+# the private SOPHIA_GATE_BUILD_DIR (tools/lib/physical_inputs.sh; this
+# repository is bound, SOPHIA_INTEGRATION_XTASK prepares them), and the
+# atomic-scanout preflight is read from that staged tree. --diagnostic runs the
+# same prepared release binary under gdb (no separate debug-info build).
 # shellcheck source=tools/lib/sophia_source.sh
 source "$ROOT_DIR/tools/lib/sophia_source.sh"
+# shellcheck source=tools/lib/physical_runner.sh
+source "$ROOT_DIR/tools/lib/physical_runner.sh"
 sophia_source="$(sophia_source_repo)" || exit 2
 STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/sophia"
 EVIDENCE_DIR="$STATE_DIR/x11-live-session-stability"
@@ -59,20 +66,20 @@ fi
 
 mkdir -p "$EVIDENCE_DIR"
 chmod 700 "$STATE_DIR" "$EVIDENCE_DIR"
-cd "$sophia_source"
-
-if [[ "$MODE" == diagnostic ]]; then
-    env RUSTFLAGS="${RUSTFLAGS:-} -C debuginfo=2" CARGO_INCREMENTAL=0 \
-        cargo build --release --offline -p sophia-cli --features native-session \
-        --target-dir "$sophia_source/target"
-else
-    cargo build --release --offline -p sophia-cli --features native-session \
-        --target-dir "$sophia_source/target"
-fi
-tools/atomic_scanout_preflight.sh
+integration_commit="$(runner_integration_commit)"
+physical_inputs_prepare --sophia-features=native-session
+physical_inputs_bound "$integration_commit"
+[[ "${PI[SOPHIA_COMMIT]}" == "$(git -C "$sophia_source" rev-parse HEAD)" ]] || {
+    echo "The prepared inputs are not the Sophia checkout's pinned commit." >&2
+    exit 1
+}
+SOPHIA_ROOT="${PI[SOPHIA_ROOT]}"
+export SOPHIA_ROOT
+cd "$SOPHIA_ROOT"
+physical_inputs_preflight "${PI[SOPHIA_BIN]}" "$SOPHIA_ROOT" "$EVIDENCE_DIR/preflight.log"
 
 session=(
-    "$sophia_source/target/release/sophia"
+    "${PI[SOPHIA_BIN]}"
     session
     run
     --display=:181

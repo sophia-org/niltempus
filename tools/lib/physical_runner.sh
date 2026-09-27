@@ -3,10 +3,13 @@
 # Requires ROOT_DIR (this repository); sources tools/lib/artifacts.sh.
 #
 # SOPHIA_SOURCE            the absolute clean Sophia checkout whose signed HEAD
-#                          is the pinned revision (pins/sophia.toml). It is the
-#                          runner's Sophia: built there, its retained tools and
-#                          fixtures read from there, and handed to Sophia's
-#                          launcher as SOPHIA_ROOT. Never a sibling default.
+#                          is the pinned revision (pins/sophia.toml). Nothing is
+#                          built there: runners that build take their binaries
+#                          and the exact pinned tree from prepared physical
+#                          inputs (tools/lib/physical_inputs.sh), whose staged
+#                          tree becomes SOPHIA_ROOT. Never a sibling default.
+# SOPHIA_GATE_BUILD_DIR    the absolute private build directory the prepared
+#                          inputs are built in (runners that build).
 # SOPHIA_SESSION_PREFLIGHT the absolute host checker, handed to the launcher.
 # SOPHIA_INTEGRATION_XTASK the absolute recipe tool, for launches through
 #                          tools/session.
@@ -17,6 +20,8 @@
 
 # shellcheck source=tools/lib/artifacts.sh
 . "$ROOT_DIR/tools/lib/artifacts.sh"
+# shellcheck source=tools/lib/physical_inputs.sh
+. "$ROOT_DIR/tools/lib/physical_inputs.sh"
 
 runner_inputs() {
     local name

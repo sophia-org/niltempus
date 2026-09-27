@@ -191,6 +191,11 @@ fi
 echo "The outside control plane may run tools/session/stop_sophia_${SESSION_PROFILE}_session.sh."
 
 status=0
-env ${recipe_environment[@]+"${recipe_environment[@]}"} SOPHIA_TTY_PROFILE="$SESSION_LABEL" \
+# This repository never builds Sophia: SOPHIA_BIN is the absolute prepared (or
+# released) binary, so Sophia's wrapper must not build in SOPHIA_ROOT
+# (SOPHIA_BUILD_SESSION=false; its build branch also runs a cargo-based
+# preflight in that tree).
+env ${recipe_environment[@]+"${recipe_environment[@]}"} SOPHIA_BUILD_SESSION=false \
+    SOPHIA_TTY_PROFILE="$SESSION_LABEL" \
     "$SOPHIA_ROOT/tools/run_sophia_session.sh" -- "${session_args[@]}" || status=$?
 exit "$status"

@@ -132,6 +132,23 @@ the reviewed dependency manifests, `inputs.env` (read by a strict parser,
 never sourced) and `physical-inputs.manifest`. `verify` requires the expected
 manifest sha256.
 
+The physical runners call the helper themselves (tools/lib/physical_inputs.sh)
+and never build: they need the prebuilt recipe tool of this checkout
+(`SOPHIA_INTEGRATION_XTASK`), the pinned checkout (`SOPHIA_SOURCE`), the
+provisioned `CARGO_HOME`, a private `SOPHIA_GATE_BUILD_DIR` (0700, outside
+every source tree) and, for Hagia and Narthex, `SOPHIA_HAGIA_NIM_DEPS`,
+`SOPHIA_HAGIA_NIM_DEPS_SHA256`, `SOPHIA_NARTHEX_NIM_DEPS` and
+`SOPHIA_NARTHEX_NIM_DEPS_SHA256` (reviewed manifests, no default). They read
+Sophia's retained files from the staged tree, run the atomic-scanout
+preflight with the prepared binary (Sophia's own preflight script
+`cargo run`s in its tree and is never called), hand Sophia's session wrapper
+`SOPHIA_BUILD_SESSION=false`, and verify the prepared inputs again before
+archiving. `crates/xtask/tests/physical_runner_bounds.rs` refuses any script
+that builds, reads a source checkout's target, uses a Nim cache or archives
+without that verification; its short pending list (the Lom scripts, frozen
+for the Lom lockstep; the operator's own WM reload workflow; provisioning's
+self-check) may only shrink.
+
 Every release installs this base entry:
 
 - `Sophia Kitty (Baseline)` — one application, no WM or shell.

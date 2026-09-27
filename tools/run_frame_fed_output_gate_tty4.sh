@@ -6,8 +6,12 @@ set -euo pipefail
 # Run from a recovery-safe VT: both phases take exclusive DRM and input control.
 
 # Changes: Sophia is the explicit pinned checkout SOPHIA_SOURCE (never this
-# repository): its core.kdl, frame_fed_output_proof.kdl and DRM-master guard
-# are read from it, and it is built there. Hagia is an explicit checkout (no
+# repository). Nothing is built here or in any checkout: Sophia, Hagia (from
+# its REVIEWED dependency manifest, SOPHIA_HAGIA_NIM_DEPS[_SHA256]) and the
+# exact pinned Sophia tree come from prepared physical inputs built from the
+# signed trees in the private SOPHIA_GATE_BUILD_DIR, and core.kdl,
+# frame_fed_output_proof.kdl and the DRM-master guard are read from that staged
+# tree (tools/lib/physical_inputs.sh). Hagia is an explicit checkout (no
 # sibling default); this repository is bound too; the TTY comes from
 # SOPHIA_SESSION_TTY or the controlling terminal; absolute SOPHIA_BIN and
 # SOPHIA_SESSION_PREFLIGHT are exported (tools/lib/physical_runner.sh).
@@ -35,10 +39,6 @@ refuse() {
     || refuse "run this gate from $TTY_REQUIRED so another VT remains available for recovery"
 runner_tty "$TTY_REQUIRED"
 runner_inputs
-CORE_CONFIG="$SOPHIA_SOURCE/tools/config/sophia/core.kdl"
-DESKTOP_PROFILE="$SOPHIA_SOURCE/tools/fixtures/frame_fed_output_proof.kdl"
-# shellcheck source=/dev/null
-. "$SOPHIA_SOURCE/tools/lib/drm_master_guard.sh"
 [[ "$HAGIA_ROOT" == /* && -e "$HAGIA_ROOT/.git" ]] || refuse "Hagia checkout is unavailable (set SOPHIA_HAGIA_ROOT): $HAGIA_ROOT"
 [[ "$KITTY_BIN" == /* && -x "$KITTY_BIN" ]] \
     || refuse "SOPHIA_FRAME_FED_OUTPUT_KITTY must name an absolute executable Kitty path"
@@ -54,9 +54,6 @@ for proof_text in "$SUCCESS_TEXT" "$ROLLBACK_TEXT"; do
         || refuse "proof text must contain 1-24 lowercase ASCII letters"
 done
 [[ "$SUCCESS_TEXT" != "$ROLLBACK_TEXT" ]] || refuse "success and rollback proof text must differ"
-for file in "$CORE_CONFIG" "$DESKTOP_PROFILE"; do
-    [[ -r "$file" ]] || refuse "checked-in proof configuration is missing: $file"
-done
 
 verify_repo() {
     local repo="$1" name="$2" head
@@ -76,6 +73,37 @@ integration_commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
 # Archives bind this signed integration commit of this checkout.
 export SOPHIA_INTEGRATION_COMMIT="$integration_commit" SOPHIA_INTEGRATION_SOURCE="$ROOT_DIR"
 hagia_commit="$(git -C "$HAGIA_ROOT" rev-parse HEAD)"
+
+echo "Preparing exact signed Sophia and Hagia binaries before DRM takeover..."
+nim_options="$(physical_inputs_nim_options hagia "$HAGIA_ROOT")" || exit 2
+mapfile -t nim_options <<<"$nim_options"
+physical_inputs_prepare --sophia-features=native-session "${nim_options[@]}"
+physical_inputs_bound "$integration_commit"
+[[ "${PI[SOPHIA_COMMIT]}" == "$sophia_commit" && "${PI[SOPHIA_HAGIA_COMMIT]}" == "$hagia_commit" ]] \
+    || refuse "the prepared inputs are not the bound Sophia and Hagia commits"
+# Sophia's retained proof files and DRM-master guard: the staged pinned tree.
+SOPHIA_ROOT="${PI[SOPHIA_ROOT]}"
+export SOPHIA_ROOT
+CORE_CONFIG="$SOPHIA_ROOT/tools/config/sophia/core.kdl"
+DESKTOP_PROFILE="$SOPHIA_ROOT/tools/fixtures/frame_fed_output_proof.kdl"
+for file in "$CORE_CONFIG" "$DESKTOP_PROFILE"; do
+    [[ -r "$file" ]] || refuse "checked-in proof configuration is missing: $file"
+done
+# shellcheck source=/dev/null
+. "$SOPHIA_ROOT/tools/lib/drm_master_guard.sh"
+sophia_bin="${PI[SOPHIA_BIN]}"
+hagia_bin="${PI[SOPHIA_HAGIA_BIN]}"
+[[ -x "$sophia_bin" && -x "$hagia_bin" ]] || refuse "a prepared proof binary is missing"
+"$sophia_bin" config check --config="$CORE_CONFIG" >/dev/null
+"$sophia_bin" config check --desktop-profile="$DESKTOP_PROFILE" >/dev/null
+
+verify_repo "$SOPHIA_SOURCE" Sophia
+verify_repo "$ROOT_DIR" Integration
+verify_repo "$HAGIA_ROOT" Hagia
+[[ "$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)" == "$sophia_commit" \
+    && "$(git -C "$ROOT_DIR" rev-parse HEAD)" == "$integration_commit" \
+    && "$(git -C "$HAGIA_ROOT" rev-parse HEAD)" == "$hagia_commit" ]] \
+    || refuse "source identity changed while the physical inputs were prepared"
 
 check_reference_connectors() {
     local facts="$1" connector status name mode
@@ -114,32 +142,6 @@ if ! drm_refusal="$(sophia_require_drm_master_available SOPHIA_FRAME_FED_OUTPUT_
     refuse "$drm_refusal"
 fi
 
-echo "Building exact signed Sophia and Hagia binaries before DRM takeover..."
-hagia_bin="${TMPDIR:-/tmp}/hagia-frame-fed-${hagia_commit:0:12}"
-hagia_nimcache="${TMPDIR:-/tmp}/hagia-frame-fed-nimcache-${hagia_commit:0:12}"
-(
-    cd "$HAGIA_ROOT"
-    nim c -d:release --path:src --nimcache:"$hagia_nimcache" \
-        -o:"$hagia_bin" src/hagia.nim
-)
-(
-    cd "$SOPHIA_SOURCE"
-    cargo build --quiet --release --offline -p sophia-cli --features native-session \
-        --target-dir "$SOPHIA_SOURCE/target"
-)
-sophia_bin="$SOPHIA_SOURCE/target/release/sophia"
-[[ -x "$sophia_bin" && -x "$hagia_bin" ]] || refuse "a proof binary is missing after build"
-"$sophia_bin" config check --config="$CORE_CONFIG" >/dev/null
-"$sophia_bin" config check --desktop-profile="$DESKTOP_PROFILE" >/dev/null
-
-verify_repo "$SOPHIA_SOURCE" Sophia
-verify_repo "$ROOT_DIR" Integration
-verify_repo "$HAGIA_ROOT" Hagia
-[[ "$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)" == "$sophia_commit" \
-    && "$(git -C "$ROOT_DIR" rev-parse HEAD)" == "$integration_commit" \
-    && "$(git -C "$HAGIA_ROOT" rev-parse HEAD)" == "$hagia_commit" ]] \
-    || refuse "source identity changed during the proof build"
-
 sophia_sha256="$(sha256sum "$sophia_bin" | awk '{ print $1 }')"
 hagia_sha256="$(sha256sum "$hagia_bin" | awk '{ print $1 }')"
 core_sha256="$(sha256sum "$CORE_CONFIG" | awk '{ print $1 }')"
@@ -165,7 +167,6 @@ run_phase() {
     set +e
     RUST_LOG="${RUST_LOG:-sophia=info,sophia_backend_live=info}" \
     SOPHIA_FRAME_FED_OUTPUT_ARM=1 \
-    SOPHIA_LIVE_SESSION_SKIP_BUILD=1 \
     SOPHIA_BIN="$sophia_bin" \
     SOPHIA_LIVE_SESSION_VERIFY_MODE=caller \
     SOPHIA_LIVE_SESSION_DISPLAY="$display" \
@@ -225,6 +226,7 @@ cmp -s "$connectors" "$run_dir/connectors-final.txt" \
 
 "$ROOT_DIR/tools/verify_frame_fed_output_evidence.sh" \
     "$success_log" "$rollback_log" "$SUCCESS_TEXT" "$ROLLBACK_TEXT"
+physical_inputs_verify_exported
 archive_output="$(
     SOPHIA_FRAME_FED_OUTPUT_SOPHIA_BIN="$sophia_bin" \
     SOPHIA_FRAME_FED_OUTPUT_HAGIA_BIN="$hagia_bin" \

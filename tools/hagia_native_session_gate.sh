@@ -22,6 +22,9 @@ source "$ROOT_DIR/tools/lib/proof_checkout.sh"
 # launcher also receives the absolute SOPHIA_SESSION_PREFLIGHT.
 # shellcheck source=tools/lib/sophia_source.sh
 source "$ROOT_DIR/tools/lib/sophia_source.sh"
+# The run's prepared physical inputs are verified again before archiving.
+# shellcheck source=tools/lib/physical_inputs.sh
+source "$ROOT_DIR/tools/lib/physical_inputs.sh"
 sophia_source="$(sophia_source_repo)" || exit 2
 [[ "${SOPHIA_BIN:-}" == /* && -x "${SOPHIA_BIN:-}" ]] || {
     echo "SOPHIA_BIN must name the absolute Sophia binary the runner bound." >&2
@@ -179,12 +182,12 @@ echo "  4. Press Super+q once to close the focused terminal."
 echo "  5. Press Ctrl+Alt+Delete once for a normal logout."
 echo "Do not use Ctrl+Alt+Backspace during the normal proof."
 
-# The runner skips its own preflight when it is not building, and this gate
-# deliberately does not let it build: a rebuild between binding the digests and
-# running the session would invalidate the identity the archive rests on. The
-# preflight is a debug-profile check that does not touch target/release/sophia,
-# so it runs here instead of being lost.
-"$sophia_source/tools/atomic_scanout_preflight.sh"
+# The atomic-scanout preflight, run by the bound prepared binary against the
+# staged pinned tree's verifier (nothing is built: a rebuild between binding
+# the digests and running the session would invalidate the identity the
+# archive rests on).
+sophia_pinned_root >/dev/null || exit 2
+physical_inputs_preflight "$sophia_bin" "$(sophia_pinned_root)" "$evidence.preflight.log"
 
 # The startup terminal runs the guide; every terminal the workflow launches must
 # not. The two cannot be separate applications: with a physical text proof
@@ -268,6 +271,7 @@ grep -qE '^sophia_live_cursor_path schema=2 status=selected requested=(atomic_pl
 
 SOPHIA_HAGIA_NATIVE_GUIDE="$guide" \
     "$ROOT_DIR/tools/verify_hagia_native_session.sh" "$evidence" "$proof_text"
+physical_inputs_verify_exported
 SOPHIA_HAGIA_BIN="$hagia_bin" \
 SOPHIA_HAGIA_SHELL_BIN="$hagia_shell_bin" \
 SOPHIA_HAGIA_ROOT="$hagia_root" \

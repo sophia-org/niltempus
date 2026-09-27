@@ -9,6 +9,9 @@ source "$ROOT_DIR/tools/lib/proof_checkout.sh"
 # the Sophia binary is the absolute SOPHIA_BIN it built and hashed.
 # shellcheck source=tools/lib/sophia_source.sh
 source "$ROOT_DIR/tools/lib/sophia_source.sh"
+# The run's prepared physical inputs are verified again before archiving.
+# shellcheck source=tools/lib/physical_inputs.sh
+source "$ROOT_DIR/tools/lib/physical_inputs.sh"
 sophia_source="$(sophia_source_repo)" || exit 2
 [[ "${SOPHIA_BIN:-}" == /* && -x "${SOPHIA_BIN:-}" ]] || {
     echo "SOPHIA_BIN must name the absolute Sophia binary the runner bound." >&2
@@ -182,6 +185,7 @@ printf 'sophia_hagia_policy_identity schema=3 status=bound sophia_commit=%s hagi
     | tee -a "$evidence"
 
 "$ROOT_DIR/tools/verify_hagia_policy_physical.sh" "$evidence" "$proof_text"
+physical_inputs_verify_exported
 SOPHIA_HAGIA_BIN="$hagia_bin" \
 SOPHIA_HAGIA_SHELL_BIN="$hagia_shell_bin" \
 SOPHIA_HAGIA_ROOT="$hagia_root" \

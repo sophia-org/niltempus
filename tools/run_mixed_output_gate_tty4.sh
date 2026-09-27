@@ -8,8 +8,11 @@ set -euo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
 # Changes: Sophia is the explicit pinned checkout SOPHIA_SOURCE (never this
-# repository): built there, its core.kdl, mixed_output_probe.kdl and DRM-master
-# guard read from it; this repository is bound too; the TTY comes from
+# repository). Nothing is built here or there: sophia and sophia-wm-demo and
+# the exact pinned tree come from prepared physical inputs built from the
+# signed tree in the private SOPHIA_GATE_BUILD_DIR (tools/lib/physical_inputs.sh),
+# and core.kdl, mixed_output_probe.kdl and the DRM-master guard are read from
+# that staged tree; this repository is bound too; the TTY comes from
 # SOPHIA_SESSION_TTY or the controlling terminal; absolute SOPHIA_BIN and
 # SOPHIA_SESSION_PREFLIGHT are exported (tools/lib/physical_runner.sh).
 # shellcheck source=tools/lib/physical_runner.sh
@@ -40,8 +43,6 @@ DISPLAY_NAME="${SOPHIA_MIXED_DISPLAY:-:294}"
 EVIDENCE="${SOPHIA_MIXED_EVIDENCE:-}"
 EVIDENCE_LATEST="${SOPHIA_MIXED_EVIDENCE_LATEST:-/tmp/sophia-mixed-output.log}"
 TTY_REQUIRED="${SOPHIA_MIXED_TTY:-/dev/tty4}"
-CORE_CONFIG="$SOPHIA_SOURCE/tools/config/sophia/core.kdl"
-DESKTOP_PROFILE="$SOPHIA_SOURCE/tools/fixtures/mixed_output_probe.kdl"
 
 usage() {
     cat <<USAGE
@@ -131,9 +132,6 @@ refuse() {
     exit 2
 }
 
-# shellcheck source=/dev/null
-. "$SOPHIA_SOURCE/tools/lib/drm_master_guard.sh"
-
 if [[ "$MIRROR_PRIMARY" == "$MIRROR_MEMBER" \
     || "$MIRROR_PRIMARY" == "$EXTENDED" \
     || "$MIRROR_MEMBER" == "$EXTENDED" ]]; then
@@ -141,9 +139,6 @@ if [[ "$MIRROR_PRIMARY" == "$MIRROR_MEMBER" \
 fi
 if [[ "$KITTY_BIN" != /* || ! -x "$KITTY_BIN" ]]; then
     refuse kitty_binary "Set SOPHIA_MIXED_KITTY to an absolute executable Kitty path: $KITTY_BIN"
-fi
-if [[ ! -r "$CORE_CONFIG" || ! -r "$DESKTOP_PROFILE" ]]; then
-    refuse configuration "The mixed-output proof configuration is missing from the signed tree."
 fi
 if [[ ! "$RUNTIME_MSEC" =~ ^[0-9]+$ ]] || (( RUNTIME_MSEC < 15000 )); then
     refuse runtime_msec "SOPHIA_MIXED_RUNTIME_MSEC must be an integer of at least 15000: $RUNTIME_MSEC"
@@ -190,30 +185,36 @@ git -C "$SOPHIA_SOURCE" verify-commit "$source_commit" >/dev/null 2>&1 || {
     refuse unsigned_head "Sophia HEAD must have a valid cryptographic signature."
 }
 
+echo "Preparing the signed mixed-topology candidate..."
+physical_inputs_prepare --sophia-features=atomic-scanout-live --sophia-packages=sophia-cli,sophia-wm-demo
+physical_inputs_bound "$integration_commit"
+if [[ "${PI[SOPHIA_COMMIT]}" != "$source_commit" ]]; then
+    echo "The prepared inputs are not the bound Sophia commit." >&2
+    exit 2
+fi
+if [[ -n "$(git -C "$SOPHIA_SOURCE" status --porcelain --untracked-files=all)" \
+    || "$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)" != "$source_commit" ]]; then
+    echo "Sophia source identity changed while the physical inputs were prepared." >&2
+    exit 2
+fi
+# Sophia's retained proof configuration and DRM-master guard: the staged
+# pinned tree.
+SOPHIA_ROOT="${PI[SOPHIA_ROOT]}"
+export SOPHIA_ROOT
+CORE_CONFIG="$SOPHIA_ROOT/tools/config/sophia/core.kdl"
+DESKTOP_PROFILE="$SOPHIA_ROOT/tools/fixtures/mixed_output_probe.kdl"
+if [[ ! -r "$CORE_CONFIG" || ! -r "$DESKTOP_PROFILE" ]]; then
+    refuse configuration "The mixed-output proof configuration is missing from the signed tree."
+fi
+# shellcheck source=/dev/null
+. "$SOPHIA_ROOT/tools/lib/drm_master_guard.sh"
+
 if ! drm_master_refusal="$(sophia_require_drm_master_available SOPHIA_MIXED_FORCE 2>&1)"; then
     refuse drm_master "$drm_master_refusal"
 fi
 
-echo "Building the signed mixed-topology candidate..."
-(
-    cd "$SOPHIA_SOURCE"
-    cargo build --quiet --release --offline -p sophia-cli -p sophia-wm-demo \
-        --features sophia-cli/atomic-scanout-live --target-dir "$SOPHIA_SOURCE/target"
-)
-if [[ -n "$(git -C "$SOPHIA_SOURCE" status --porcelain --untracked-files=all)" \
-    || -n "$(git -C "$ROOT_DIR" status --porcelain --untracked-files=all)" \
-    || "$(git -C "$ROOT_DIR" rev-parse HEAD)" != "$integration_commit" \
-    || "$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)" != "$source_commit" ]]; then
-    echo "Sophia or integration source identity changed during the physical-gate build." >&2
-    exit 2
-fi
-git -C "$SOPHIA_SOURCE" verify-commit "$source_commit" >/dev/null 2>&1 || {
-    echo "Sophia HEAD signature no longer verifies after the build." >&2
-    exit 2
-}
-
-sophia_bin="$SOPHIA_SOURCE/target/release/sophia"
-wm_bin="$SOPHIA_SOURCE/target/release/sophia-wm-demo"
+sophia_bin="${PI[SOPHIA_BIN]}"
+wm_bin="${PI[SOPHIA_WM_DEMO_BIN]}"
 SOPHIA_BIN="$sophia_bin"
 export SOPHIA_BIN
 sophia_sha256="$(sha256sum "$sophia_bin" | awk '{ print $1 }')"
@@ -232,7 +233,7 @@ echo "only after the marker and windows have settled and the members have conver
 
 set +e
 (
-    cd "$SOPHIA_SOURCE"
+    cd "$SOPHIA_ROOT"
     # No session bus exists on this rig, and Kitty's portal lookups behave
     # differently every run without one: one client fast-failed with
     # ServiceUnknown while another blocked ~30s on a Notify call that never got
@@ -332,6 +333,7 @@ fi
 printf 'sophia_mixed_output_visual schema=1 status=confirmed mirror_content=matched extended_text=sharp resampling=none heads=3 groups=2\n' \
     | tee -a "$EVIDENCE"
 printf 'sophia_mixed_output_gate schema=1 status=passed exit=0\n' | tee -a "$EVIDENCE"
+physical_inputs_verify_exported
 SOPHIA_MIXED_WM_BIN="$wm_bin" \
     "$ROOT_DIR/tools/archive_mixed_output_physical_run.sh" "$EVIDENCE" "$EXTENDED"
 echo "Verified candidate evidence: $EVIDENCE"

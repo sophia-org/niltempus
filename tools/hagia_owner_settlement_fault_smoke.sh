@@ -4,10 +4,15 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Changes: Sophia is the explicit pinned checkout SOPHIA_SOURCE (never this
-# repository), built and run there; the Hagia restart fixture is this
-# repository's.
+# repository). Nothing is built here or there: the release binary and the exact
+# pinned tree come from prepared physical inputs built from the signed tree in
+# the private SOPHIA_GATE_BUILD_DIR (tools/lib/physical_inputs.sh; this
+# repository is bound), and the session runs in that staged tree; the Hagia
+# restart fixture is this repository's.
 # shellcheck source=tools/lib/sophia_source.sh
 source "$ROOT_DIR/tools/lib/sophia_source.sh"
+# shellcheck source=tools/lib/physical_runner.sh
+source "$ROOT_DIR/tools/lib/physical_runner.sh"
 sophia_source="$(sophia_source_repo)" || exit 2
 hagia_bin="${SOPHIA_HAGIA_BIN:-$(command -v hagia || true)}"
 kitty_bin="${SOPHIA_TERMINAL_BIN:-$(command -v kitty || true)}"
@@ -41,16 +46,24 @@ if (( ${#phases[@]} == 0 )); then
     exit 1
 fi
 
-cd "$sophia_source"
-cargo build --quiet --offline -p sophia-cli --features native-session \
-    --target-dir "$sophia_source/target"
+integration_commit="$(runner_integration_commit)"
+physical_inputs_prepare --sophia-features=native-session
+physical_inputs_bound "$integration_commit"
+[[ "${PI[SOPHIA_COMMIT]}" == "$(git -C "$sophia_source" rev-parse HEAD)" ]] || {
+    echo "The prepared inputs are not the Sophia checkout's pinned commit." >&2
+    exit 1
+}
+SOPHIA_ROOT="${PI[SOPHIA_ROOT]}"
+export SOPHIA_ROOT
+sophia_bin="${PI[SOPHIA_BIN]}"
+cd "$SOPHIA_ROOT"
 
 for index in "${!phases[@]}"; do
     phase="${phases[$index]}"
     display=":$((base_display_number + index))"
     evidence="$proof_dir/$phase.log"
     set +e
-    target/debug/sophia session run \
+    "$sophia_bin" session run \
         --no-config \
         --session-mode=normal \
         "--session-app=terminal=$kitty_bin" \

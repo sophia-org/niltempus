@@ -8,8 +8,13 @@ set -euo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
 # Changes: Sophia is the explicit pinned checkout SOPHIA_SOURCE (never this
-# repository): built there, its DRM-master guard read from it; Hagia is an
-# explicit checkout or binary (no sibling default); this repository is bound
+# repository). Nothing is built here or in any checkout: Sophia, Hagia (unless
+# SOPHIA_HAGIA_BIN names an external binary; otherwise from its REVIEWED
+# dependency manifest, SOPHIA_HAGIA_NIM_DEPS[_SHA256]) and the exact pinned
+# tree come from prepared physical inputs built from the signed trees in the
+# private SOPHIA_GATE_BUILD_DIR (tools/lib/physical_inputs.sh), and the
+# DRM-master guard is read from that staged tree; Hagia is an explicit
+# checkout or binary (no sibling default); this repository is bound
 # too; the TTY comes from SOPHIA_SESSION_TTY or the controlling terminal;
 # absolute SOPHIA_BIN and SOPHIA_SESSION_PREFLIGHT are exported
 # (tools/lib/physical_runner.sh).
@@ -84,10 +89,7 @@ else
     HAGIA_SOURCE_COMMIT="$(git -C "$HAGIA_ROOT" rev-parse HEAD)"
     git -C "$HAGIA_ROOT" verify-commit "$HAGIA_SOURCE_COMMIT" >/dev/null 2>&1 ||
         refuse "Hagia HEAD must have a valid cryptographic signature."
-    command -v nim >/dev/null 2>&1 ||
-        refuse "Nim is required to build the current Hagia policy client."
-    HAGIA_BIN="${TMPDIR:-/tmp}/hagia-output-topology-${HAGIA_SOURCE_COMMIT:0:12}"
-    HAGIA_NIMCACHE="${TMPDIR:-/tmp}/hagia-output-topology-nimcache-${HAGIA_SOURCE_COMMIT:0:12}"
+    HAGIA_BIN=
     BUILD_HAGIA=1
 fi
 if (( ! BUILD_HAGIA )) && [[ -z "$HAGIA_BIN" || ! -x "$HAGIA_BIN" ]]; then
@@ -108,41 +110,38 @@ if (( ${#connected_outputs[@]} < 2 )); then
     refuse "connect at least two physical outputs (observed ${#connected_outputs[@]}: ${connected_outputs[*]:-none})."
 fi
 
+echo "Preparing signed Sophia source $source_commit before DRM takeover..."
+hagia_options=()
+if (( BUILD_HAGIA )); then
+    echo "... and signed Hagia source $HAGIA_SOURCE_COMMIT"
+    hagia_options="$(physical_inputs_nim_options hagia "$HAGIA_ROOT")" || exit 2
+    mapfile -t hagia_options <<<"$hagia_options"
+fi
+physical_inputs_prepare --sophia-features=native-session "${hagia_options[@]}"
+physical_inputs_bound "$integration_commit"
+[[ "${PI[SOPHIA_COMMIT]}" == "$source_commit" ]] ||
+    refuse "the prepared inputs are not the bound Sophia commit."
+if (( BUILD_HAGIA )); then
+    [[ "${PI[SOPHIA_HAGIA_COMMIT]:-}" == "$HAGIA_SOURCE_COMMIT" ]] ||
+        refuse "the prepared inputs are not the bound Hagia commit."
+    HAGIA_BIN="${PI[SOPHIA_HAGIA_BIN]}"
+    if [[ -n "$(git -C "$HAGIA_ROOT" status --porcelain --untracked-files=all)" \
+        || "$(git -C "$HAGIA_ROOT" rev-parse HEAD)" != "$HAGIA_SOURCE_COMMIT" ]]; then
+        refuse "Hagia source identity changed while the physical inputs were prepared."
+    fi
+fi
+if [[ -n "$(git -C "$SOPHIA_SOURCE" status --porcelain --untracked-files=all)" \
+    || "$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)" != "$source_commit" ]]; then
+    refuse "Sophia source identity changed while the physical inputs were prepared."
+fi
+SOPHIA_ROOT="${PI[SOPHIA_ROOT]}"
+export SOPHIA_ROOT
+
 # shellcheck source=/dev/null
-. "$SOPHIA_SOURCE/tools/lib/drm_master_guard.sh"
+. "$SOPHIA_ROOT/tools/lib/drm_master_guard.sh"
 if ! drm_master_refusal="$(sophia_require_drm_master_available SOPHIA_OUTPUT_TOPOLOGY_FORCE 2>&1)"; then
     refuse "$drm_master_refusal"
 fi
-
-if (( BUILD_HAGIA )); then
-    echo "Building signed Hagia source $HAGIA_SOURCE_COMMIT before DRM takeover..."
-    (
-        cd "$HAGIA_ROOT"
-        nim c -d:release --path:src --nimcache:"$HAGIA_NIMCACHE" \
-            -o:"$HAGIA_BIN" src/hagia.nim
-    )
-    if [[ -n "$(git -C "$HAGIA_ROOT" status --porcelain --untracked-files=all)" \
-        || "$(git -C "$HAGIA_ROOT" rev-parse HEAD)" != "$HAGIA_SOURCE_COMMIT" ]]; then
-        refuse "Hagia source identity changed during the physical-gate build."
-    fi
-    git -C "$HAGIA_ROOT" verify-commit "$HAGIA_SOURCE_COMMIT" >/dev/null 2>&1 ||
-        refuse "Hagia HEAD signature no longer verifies after the build."
-fi
-
-echo "Building signed Sophia source $source_commit before DRM takeover..."
-(
-    cd "$SOPHIA_SOURCE"
-    cargo build --quiet --release --offline -p sophia-cli \
-        --features native-session --target-dir "$SOPHIA_SOURCE/target"
-)
-if [[ -n "$(git -C "$SOPHIA_SOURCE" status --porcelain --untracked-files=all)" \
-    || -n "$(git -C "$ROOT_DIR" status --porcelain --untracked-files=all)" \
-    || "$(git -C "$ROOT_DIR" rev-parse HEAD)" != "$integration_commit" \
-    || "$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)" != "$source_commit" ]]; then
-    refuse "Sophia or integration source identity changed during the physical-gate build."
-fi
-git -C "$SOPHIA_SOURCE" verify-commit "$source_commit" >/dev/null 2>&1 ||
-    refuse "Sophia HEAD signature no longer verifies after the build."
 
 mkdir -p "$(dirname "$EVIDENCE")"
 if [[ -n "$EVIDENCE_LATEST" && "$EVIDENCE_LATEST" != "$EVIDENCE" ]]; then
@@ -156,9 +155,8 @@ export SOPHIA_OUTPUT_TOPOLOGY_ARM=1
 export SOPHIA_OUTPUT_TOPOLOGY_SEAT="$SEAT"
 export SOPHIA_OUTPUT_TOPOLOGY_EVIDENCE="$EVIDENCE"
 export SOPHIA_HAGIA_BIN="$HAGIA_BIN"
-export SOPHIA_LIVE_SESSION_SKIP_BUILD=1
-# The persistent proof runs the binary this run built and bound, absolute.
-export SOPHIA_BIN="$SOPHIA_SOURCE/target/release/sophia"
+# The persistent proof runs the prepared binary this run bound, absolute.
+export SOPHIA_BIN="${PI[SOPHIA_BIN]}"
 
 "$ROOT_DIR/tools/output_topology_physical_gate.sh"
 

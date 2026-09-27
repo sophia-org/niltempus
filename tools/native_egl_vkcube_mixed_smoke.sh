@@ -4,10 +4,15 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Changes: Sophia is the explicit pinned checkout SOPHIA_SOURCE (never this
-# repository): built there, and its atomic-scanout preflight and generic
-# native-EGL mixed-evidence verifier (retained in Sophia) read from it.
+# repository). Nothing is built here or there: the binary and the exact pinned
+# tree come from prepared physical inputs built from the signed tree in the
+# private SOPHIA_GATE_BUILD_DIR (tools/lib/physical_inputs.sh; this repository
+# is bound), and the atomic-scanout preflight and generic native-EGL
+# mixed-evidence verifier (retained in Sophia) are read from that staged tree.
 # shellcheck source=tools/lib/sophia_source.sh
 source "$ROOT_DIR/tools/lib/sophia_source.sh"
+# shellcheck source=tools/lib/physical_runner.sh
+source "$ROOT_DIR/tools/lib/physical_runner.sh"
 sophia_source="$(sophia_source_repo)" || exit 2
 DISPLAY_NAME="${SOPHIA_M4_DISPLAY:-:184}"
 RUNTIME_MSEC="${SOPHIA_M4_RUNTIME_MSEC:-6000}"
@@ -30,19 +35,25 @@ command -v vkcube >/dev/null || {
     exit 1
 }
 
-cargo build --quiet --release --offline --manifest-path "$sophia_source/Cargo.toml" \
-    -p sophia-cli --features "atomic-scanout-live" --target-dir "$sophia_source/target"
-"$sophia_source/tools/atomic_scanout_preflight.sh"
-
+integration_commit="$(runner_integration_commit)"
+physical_inputs_prepare --sophia-features=atomic-scanout-live
+physical_inputs_bound "$integration_commit"
+[[ "${PI[SOPHIA_COMMIT]}" == "$(git -C "$sophia_source" rev-parse HEAD)" ]] || {
+    echo "The prepared inputs are not the Sophia checkout's pinned commit." >&2
+    exit 1
+}
+SOPHIA_ROOT="${PI[SOPHIA_ROOT]}"
+export SOPHIA_ROOT
 mkdir -p "$(dirname "$EVIDENCE_FILE")"
+physical_inputs_preflight "${PI[SOPHIA_BIN]}" "$SOPHIA_ROOT" "$EVIDENCE_FILE.preflight.log"
 set +e
 SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \
-    "$sophia_source/target/release/sophia" native-egl-vkcube-mixed-smoke \
+    "${PI[SOPHIA_BIN]}" native-egl-vkcube-mixed-smoke \
         --display="$DISPLAY_NAME" --max-runtime-ms="$RUNTIME_MSEC" \
     2>&1 | tee "$EVIDENCE_FILE"
 smoke_status="${PIPESTATUS[0]}"
 set -e
 if (( smoke_status == 0 )); then
-    "$sophia_source/tools/verify_native_egl_mixed_evidence.sh" "$EVIDENCE_FILE"
+    "$SOPHIA_ROOT/tools/verify_native_egl_mixed_evidence.sh" "$EVIDENCE_FILE"
 fi
 exit "$smoke_status"
