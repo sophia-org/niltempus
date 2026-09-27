@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 const USAGE: &str = "usage:
   xtask prepare-bemenu-artifact SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR
   xtask prepare-product-artifact lom|provlita|hagia SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR
+  xtask prepare-wm-pair --hagia REPO COMMIT --narthex REPO COMMIT NEW-OUTPUT-DIR
+  xtask package-desktop --sophia-root=/ABS --sophia-rev=SHA --wm-pair=/ABS --wm-pair-commits=H,N --wm-pair-sha256=H,N --build-dir=/ABS --out=/ABS/NEW
   xtask session-recipe prepare-arguments|prepare-inputs|stage-proofs|prepare-environment --name=value ... -- [session arguments]
   xtask check-pins
   xtask check-provision
@@ -32,6 +34,8 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
     match arguments.first().map(String::as_str) {
         Some("prepare-bemenu-artifact") => xtask::bemenu_artifact::run(&repo, &arguments[1..]),
         Some("prepare-product-artifact") => xtask::product_artifact::run(&arguments[1..]),
+        Some("prepare-wm-pair") => xtask::wm_pair::run(&arguments[1..]),
+        Some("package-desktop") => xtask::package_desktop::run(&repo, &arguments[1..]),
         // Moved from Sophia crates/xtask/src/main.rs:53-70 at 9fcaec782.
         Some("dock") => match &arguments[1..] {
             [command, paths @ ..] if command == "profile" => Ok(xtask::dock::profile(paths)?

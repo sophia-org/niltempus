@@ -10,7 +10,7 @@ fn args(values: &[&str]) -> Vec<String> {
 #[test]
 fn every_product_has_one_recipe() {
     let names = PRODUCTS.iter().map(|p| p.name).collect::<Vec<_>>();
-    assert_eq!(names, ["lom", "provlita", "hagia"]);
+    assert_eq!(names, ["lom", "provlita", "hagia", "narthex"]);
     assert_eq!(
         product("lom").unwrap().config,
         Some("examples/minimal/live-shell.kdl")
@@ -26,6 +26,12 @@ fn every_product_has_one_recipe() {
 fn unknown_product_ambiguous_revision_and_existing_destination_are_refused() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).display().to_string();
     assert!(run(&[]).unwrap_err().contains("usage"));
+    // Narthex ships only with Hagia, as one pair.
+    assert!(
+        run(&args(&["narthex", &root, &"0".repeat(40), "unused"]))
+            .unwrap_err()
+            .contains("prepare-wm-pair")
+    );
     let zero = "0".repeat(40);
     assert!(
         run(&args(&["firefox", &root, &zero, "unused"]))

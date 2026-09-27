@@ -8,10 +8,12 @@ pub mod bemenu_artifact;
 pub mod c_sdk_pin;
 pub mod dock;
 pub mod git_tree;
+pub mod package_desktop;
 pub mod pins;
 pub mod product_artifact;
 pub mod session;
 pub mod session_preflight;
+pub mod wm_pair;
 
 pub(crate) fn hex(value: &str, length: usize) -> bool {
     value.len() == length

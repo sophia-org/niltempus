@@ -45,7 +45,7 @@ enum Kind {
     Nim { main: &'static str },
 }
 
-pub const PRODUCTS: [Product; 3] = [
+pub const PRODUCTS: [Product; 4] = [
     Product {
         name: "lom",
         binary: "lom",
@@ -66,6 +66,16 @@ pub const PRODUCTS: [Product; 3] = [
             main: "src/hagia.nim",
         },
     },
+    // Hagia's shell partner; packaged with it as the WM pair
+    // (`prepare-wm-pair`), never selectable for the tty4 gates on its own.
+    Product {
+        name: "narthex",
+        binary: "narthex",
+        config: None,
+        kind: Kind::Nim {
+            main: "src/narthex.nim",
+        },
+    },
 ];
 
 pub fn product(name: &str) -> Result<&'static Product, String> {
@@ -80,15 +90,19 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
         return Err(USAGE.into());
     };
     let product = product(name)?;
+    if product.name == "narthex" {
+        return Err("narthex is packaged with Hagia: use prepare-wm-pair".into());
+    }
     let (source, output) = inputs(source, commit, output)?;
+    let built = build(product, &source, commit)?;
     let SignedTree {
-        scratch,
-        _scratch,
-        tree_dir,
         raw,
         tree,
         signer,
-    } = signed_tree(&source, commit, product.name)?;
+        tree_dir,
+        ..
+    } = &built.tree;
+    let binary = &built.binary;
 
     let config = match product.config {
         Some(path) => {
@@ -101,57 +115,9 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
         None => None,
     };
 
-    // Low-priority, two-job build inside the scratch tree only.
-    let log = scratch.join("build.log");
-    let log_file = File::create(&log).map_err(|e| e.to_string())?;
-    let out = scratch.join("out");
-    std::fs::create_dir(&out).map_err(|e| e.to_string())?;
-    let (mut command, binary, limit) = match product.kind {
-        Kind::Cargo => {
-            let mut command = Command::new("nice");
-            command
-                .args(["-n", "19", "cargo", "build", "--offline", "--locked"])
-                .args(["--release", "--jobs", "2"])
-                .env("CARGO_TARGET_DIR", &out)
-                .env("CARGO_BUILD_JOBS", "2")
-                .env_remove("RUSTFLAGS")
-                .env_remove("CARGO_ENCODED_RUSTFLAGS")
-                .env_remove("CARGO_BUILD_TARGET");
-            let binary = out.join("release").join(product.binary);
-            (command, binary, CARGO_TIMEOUT)
-        }
-        Kind::Nim { main } => {
-            let binary = out.join(product.binary);
-            let mut command = Command::new("nice");
-            command
-                .args(["-n", "19", "nim", "c", "-d:release", "--hints:off"])
-                .args(["--path:src", "--parallelBuild:2"])
-                .arg(format!("--nimcache:{}", scratch.join("nimcache").display()))
-                .arg(format!("-o:{}", binary.display()))
-                .arg(main);
-            (command, binary, NIM_TIMEOUT)
-        }
-    };
-    let child = command
-        .current_dir(&tree_dir)
-        .process_group(0)
-        .env("GIT_DIR", scratch.join("no-git"))
-        .stdin(Stdio::null())
-        .stdout(log_file.try_clone().map_err(|e| e.to_string())?)
-        .stderr(log_file)
-        .spawn()
-        .map_err(|e| format!("build {}: {e}", product.name))?;
-    let what = format!("build {}", product.name);
-    if let Err(error) = wait_logged(child, &log, limit, &what) {
-        return Err(format!("{error}\n{}", tail(&log)));
-    }
-    if !std::fs::symlink_metadata(&binary).is_ok_and(|m| m.is_file()) {
-        return Err(format!("build produced no regular {}", product.binary));
-    }
-
     // Immutable output: created last, removed again if any step fails.
     std::fs::create_dir(&output).map_err(|e| format!("{}: {e}", output.display()))?;
-    let written = write_output(product, &output, &binary, &raw, config.as_deref())
+    let written = write_output(product, &output, binary, raw, config.as_deref())
         .map(|(binary_sha256, config_sha256)| {
             [
                 "schema=1".to_owned(),
@@ -199,6 +165,68 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
             Err(error)
         }
     }
+}
+
+/// A product built from its signed tree; the scratch (and binary) live until
+/// this value is dropped.
+pub struct Built {
+    pub(crate) tree: SignedTree,
+    pub binary: std::path::PathBuf,
+}
+
+/// Signer authorization and the exact signed tree (`signed_tree`), then the
+/// product's low-priority, two-job, bounded build inside that scratch tree.
+pub(crate) fn build(product: &Product, source: &Path, commit: &str) -> Result<Built, String> {
+    let tree = signed_tree(source, commit, product.name)?;
+    let (scratch, tree_dir) = (tree.scratch.clone(), tree.tree_dir.clone());
+    // Low-priority, two-job build inside the scratch tree only.
+    let log = scratch.join("build.log");
+    let log_file = File::create(&log).map_err(|e| e.to_string())?;
+    let out = scratch.join("out");
+    std::fs::create_dir(&out).map_err(|e| e.to_string())?;
+    let (mut command, binary, limit) = match product.kind {
+        Kind::Cargo => {
+            let mut command = Command::new("nice");
+            command
+                .args(["-n", "19", "cargo", "build", "--offline", "--locked"])
+                .args(["--release", "--jobs", "2"])
+                .env("CARGO_TARGET_DIR", &out)
+                .env("CARGO_BUILD_JOBS", "2")
+                .env_remove("RUSTFLAGS")
+                .env_remove("CARGO_ENCODED_RUSTFLAGS")
+                .env_remove("CARGO_BUILD_TARGET");
+            let binary = out.join("release").join(product.binary);
+            (command, binary, CARGO_TIMEOUT)
+        }
+        Kind::Nim { main } => {
+            let binary = out.join(product.binary);
+            let mut command = Command::new("nice");
+            command
+                .args(["-n", "19", "nim", "c", "-d:release", "--hints:off"])
+                .args(["--path:src", "--parallelBuild:2"])
+                .arg(format!("--nimcache:{}", scratch.join("nimcache").display()))
+                .arg(format!("-o:{}", binary.display()))
+                .arg(main);
+            (command, binary, NIM_TIMEOUT)
+        }
+    };
+    let child = command
+        .current_dir(&tree_dir)
+        .process_group(0)
+        .env("GIT_DIR", scratch.join("no-git"))
+        .stdin(Stdio::null())
+        .stdout(log_file.try_clone().map_err(|e| e.to_string())?)
+        .stderr(log_file)
+        .spawn()
+        .map_err(|e| format!("build {}: {e}", product.name))?;
+    let what = format!("build {}", product.name);
+    if let Err(error) = wait_logged(child, &log, limit, &what) {
+        return Err(format!("{error}\n{}", tail(&log)));
+    }
+    if !std::fs::symlink_metadata(&binary).is_ok_and(|m| m.is_file()) {
+        return Err(format!("build produced no regular {}", product.binary));
+    }
+    Ok(Built { tree, binary })
 }
 
 /// Copy the binary, config and raw commit; returns (binary, config) digests.
