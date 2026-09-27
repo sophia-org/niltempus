@@ -14,11 +14,15 @@ use std::time::Duration;
 pub const SOPHIA_URL: &str = "https://github.com/sophia-org/sophia.git";
 pub const SOPHIA_REV: &str = "d20faf3709ae21d94491f7a628ac9a4a86619cdf";
 /// The Sophia crates this repository names directly.
-pub const SOPHIA_CRATES: [&str; 4] = [
+pub const SOPHIA_CRATES: [&str; 8] = [
+    "sophia-backend-live",
     "sophia-config",
     "sophia-conformance",
+    "sophia-engine",
     "sophia-protocol",
     "sophia-runtime",
+    "sophia-session",
+    "sophia-shell-client",
 ];
 
 pub const FONT: &str = "assets/fonts/JetBrainsMonoNL-Regular.ttf";
@@ -327,7 +331,21 @@ pub fn check_manifest(name: &str, text: &str, root: bool) -> Result<(), String> 
                 .map(|(_, v)| v.trim())
                 .unwrap_or_default();
             let member = compact == format!("{key}.workspace=true")
-                || compact == format!("{key}={{workspace=true}}");
+                || compact == format!("{key}={{workspace=true}}")
+                || compact
+                    .strip_prefix(&format!("{key}={{workspace=true,features=["))
+                    .and_then(|rest| rest.strip_suffix("]}"))
+                    .is_some_and(|features| {
+                        !features.is_empty()
+                            && features.split(',').all(|f| {
+                                f.len() > 2
+                                    && f.starts_with('"')
+                                    && f.ends_with('"')
+                                    && f[1..f.len() - 1]
+                                        .bytes()
+                                        .all(|b| b.is_ascii_lowercase() || b == b'-')
+                            })
+                    });
             if root && SOPHIA_CRATES.contains(&key) && value == pinned {
                 found.push(key);
             } else if root || !member {

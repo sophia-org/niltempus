@@ -1,6 +1,9 @@
 // Provenance: moved from Sophia
 // crates/sophia-runtime/tests/support/shell_bemenu_files/fixture.rs at
-// 9fcaec782ce4fe9978568c0466ee17a78b3d4571 (Sophia rule 13).
+// 9fcaec782ce4fe9978568c0466ee17a78b3d4571 (Sophia rule 13). Extended (G2):
+// wire-parametrised (9P file export or the current IPC socket), a neighbour
+// bar on a second transport in the same registry, allocation/candidate shape
+// assertions, and an optional held renderer lease across close.
 //! Real ShellComponentTransport (native launcher profile) and its real content,
 //! candidate, allocation and native launcher control owners, serving the live
 //! Bemenu executable. Session decisions are scripted here and scoped: catalog
@@ -21,6 +24,39 @@ use sophia_protocol::*;
 use sophia_runtime::*;
 use std::path::Path;
 use std::time::Duration;
+
+/// The component wire under test. Both run the same owners and assertions;
+/// only negotiation and the endpoint variable differ.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[allow(dead_code)] // Each test binary constructs only its own wire.
+pub enum Wire {
+    /// `sophia_shell_fs_v1` over 9P2000.L.
+    Files,
+    /// The current `sophia_shell_v1` socket wire (today's rollback path).
+    Ipc,
+}
+
+impl Wire {
+    /// The only endpoint variable the application may see.
+    pub fn socket_env(self) -> &'static str {
+        match self {
+            Self::Files => "SOPHIA_SHELL_9P_SOCKET",
+            Self::Ipc => "SOPHIA_SHELL_SOCKET",
+        }
+    }
+
+    /// Bemenu's negotiated-record suffix for this wire.
+    pub fn negotiated_suffix(self) -> &'static str {
+        match self {
+            Self::Files => " wire=9p",
+            Self::Ipc => "",
+        }
+    }
+}
+
+// The output the fixture publishes; allocation requests must fit in it.
+const OUTPUT_WIDTH: u32 = 1280;
+const OUTPUT_HEIGHT: u32 = 720;
 
 const NOW: u64 = 10;
 const FACTS: u64 = 3;
@@ -58,6 +94,7 @@ pub struct Shown {
 }
 
 pub struct Fixture {
+    wire: Wire,
     transport: ShellComponentTransport,
     registry: ContentEpochRegistry,
     grant: ContentGrant,
@@ -67,6 +104,14 @@ pub struct Fixture {
     permit: u64,
     allocations: u64,
     prepared: Option<u64>,
+    /// Greatest candidate generation seen; each new one must exceed it.
+    last_generation: u64,
+    /// Keep the next prepared candidate's renderer lease instead of retiring
+    /// it (the held-lease phase), until `release`.
+    pub hold_next: bool,
+    held: Option<ContentRenderBundle>,
+    /// A neighbouring bar in the same registry (see neighbour.rs).
+    bar: Option<super::neighbour::Bar>,
     pub shown: Vec<Shown>,
     pub granted: Vec<ContentAllocationId>,
     pub input_acks: usize,
@@ -101,8 +146,9 @@ fn catalog() -> ShellPersistentCatalog {
     }
 }
 impl Fixture {
-    pub fn new(root: &Path) -> Self {
+    pub fn new(root: &Path, wire: Wire) -> Self {
         Self {
+            wire,
             transport: ShellComponentTransport::bind_for_supervised_uid(
                 root.join("export"),
                 rustix::process::geteuid().as_raw(),
@@ -119,6 +165,10 @@ impl Fixture {
             permit: 0,
             allocations: 0,
             prepared: None,
+            last_generation: 0,
+            hold_next: false,
+            held: None,
+            bar: None,
             shown: Vec::new(),
             granted: Vec::new(),
             input_acks: 0,
@@ -145,16 +195,48 @@ impl Fixture {
                 ContentStoreProfile::NativeLauncher,
             )
             .unwrap();
+        let policy = ShellContentAdmissionPolicy::Granted {
+            discrete_input: true,
+        };
+        let timeout = Duration::from_secs(15);
+        match self.wire {
+            Wire::Files => self
+                .transport
+                .begin_file_negotiation(&self.registry, EPOCH, timeout, policy),
+            Wire::Ipc => self
+                .transport
+                .begin_negotiation(&self.registry, EPOCH, timeout, policy),
+        }
+        .unwrap();
+    }
+
+    /// Connect the neighbouring bar on a second transport in this registry.
+    pub fn connect_neighbour(&mut self, root: &Path) {
+        let bar = super::neighbour::Bar::connect(root, &mut self.registry, self.wire);
+        assert_ne!(bar.grant, self.grant, "neighbour and launcher share a grant");
+        self.bar = Some(bar);
+    }
+
+    /// The neighbour's exact content usage in the shared registry.
+    pub fn neighbour_usage(&self) -> Option<ContentMemoryUsage> {
+        self.bar.as_ref().expect("neighbour").usage(&self.registry)
+    }
+
+    /// Bytes the launcher retired while a renderer lease still holds them.
+    pub fn retiring(&self) -> u64 {
         self.transport
-            .begin_file_negotiation(
-                &self.registry,
-                EPOCH,
-                Duration::from_secs(15),
-                ShellContentAdmissionPolicy::Granted {
-                    discrete_input: true,
-                },
-            )
-            .unwrap();
+            .content_usage(&self.registry)
+            .map_or(0, |usage| usage.retiring)
+    }
+
+    /// End the held-lease phase: the renderer releases its bytes.
+    pub fn release(&mut self) {
+        let held = self.held.take().expect("a held renderer lease");
+        for placement in &held.placements {
+            let lease = held.resource(placement.resource).expect("held resource");
+            assert!(!lease.bytes().is_empty(), "held lease lost its bytes");
+        }
+        drop(held);
     }
     pub fn live(&self) -> bool {
         self.live
@@ -241,6 +323,10 @@ impl Fixture {
         self.transport
             .close_native_launcher(&mut self.registry, opening, tx, ContentReason::Revoked)
             .unwrap();
+        assert!(
+            self.transport.native_launcher_focus().is_none(),
+            "focus survived close"
+        );
         // Scripted: the old pixels are gone. The real owner invalidates.
         let allocation = *self.granted.last().expect("granted allocation");
         let tx = self.tx();
@@ -263,7 +349,11 @@ impl Fixture {
                 .unwrap()
     }
     pub fn tick(&mut self) -> Result<(), String> {
-        self.service().map_err(|e| format!("owner error: {e:?}"))
+        self.service().map_err(|e| format!("owner error: {e:?}"))?;
+        if let Some(bar) = self.bar.as_mut() {
+            bar.tick(&mut self.registry)?;
+        }
+        Ok(())
     }
     fn service(&mut self) -> Result<(), ShellTransportError> {
         if !self.live {
@@ -309,6 +399,19 @@ impl Fixture {
             .transport
             .next_content_allocation_request(&self.registry)
         {
+            // The native launcher's own request: role 3 (launcher), operation
+            // 1 (open), a positive size inside the published output.
+            assert_eq!(request.role, 3, "allocation role");
+            assert_eq!(request.operation, 1, "allocation operation");
+            assert!(
+                request.desired_width > 0
+                    && request.desired_height > 0
+                    && request.desired_width <= OUTPUT_WIDTH
+                    && request.desired_height <= OUTPUT_HEIGHT,
+                "allocation {}x{} outside the {OUTPUT_WIDTH}x{OUTPUT_HEIGHT} output",
+                request.desired_width,
+                request.desired_height
+            );
             self.allocations += 1;
             let allocation = ContentAllocationId {
                 id: self.allocations,
@@ -370,6 +473,14 @@ impl Fixture {
             )?;
             let binding = render.native_launcher.expect("native binding");
             assert!(!render.placements.is_empty(), "candidate without pixels");
+            assert_eq!(render.grant, self.grant, "candidate grant");
+            assert_eq!(render.surfaces.len(), 1, "native launcher surfaces");
+            assert!(
+                generation > self.last_generation,
+                "candidate generation {generation} not after {}",
+                self.last_generation
+            );
+            self.last_generation = generation;
             let pixels = render
                 .placements
                 .iter()
@@ -380,6 +491,7 @@ impl Fixture {
                     let description = lease.description();
                     assert!(description.width_px > 0 && description.height_px > 0);
                     assert_eq!(lease.bytes().len() as u64, description.total_bytes);
+                    assert!(lease.bytes().len() > 1024, "raster of {} bytes", lease.bytes().len());
                     lease.bytes().to_vec()
                 })
                 .collect::<Vec<_>>();
@@ -392,8 +504,14 @@ impl Fixture {
                 8,
                 NOW,
             )?;
-            // Scripted renderer retirement: the pixels were copied above.
-            drop(render);
+            // Scripted renderer retirement: the pixels were copied above. In
+            // the held-lease phase the lease is kept until `release`.
+            if std::mem::take(&mut self.hold_next) {
+                assert!(self.held.is_none(), "one held lease at a time");
+                self.held = Some(render);
+            } else {
+                drop(render);
+            }
             self.shown.push(Shown {
                 generation,
                 opening: binding.opening,
@@ -447,6 +565,12 @@ impl Fixture {
         Ok(())
     }
     pub fn cleanup(&mut self) {
+        assert!(self.held.is_none(), "a renderer lease is still held");
+        // The registry is shared: the neighbour leaves first, so the final
+        // snapshot covers both connections.
+        if let Some(bar) = self.bar.take() {
+            bar.close(&mut self.registry);
+        }
         self.transport.disconnect(&mut self.registry).unwrap();
         self.registry.collect();
         assert!(

@@ -2,14 +2,15 @@
 // crates/sophia-runtime/tests/support/shell_bemenu_files/sandbox.rs at
 // 9fcaec782ce4fe9978568c0466ee17a78b3d4571 (Sophia rule 13), with de11d9404
 // (wait for argv to become visible during exec) and a stderr diagnostic on a
-// failed cmdline read.
+// failed cmdline read. Extended (G2): the endpoint variable follows the wire
+// under test (SOPHIA_SHELL_9P_SOCKET or SOPHIA_SHELL_SOCKET), still exactly one.
 //! The production protected launcher around the verified Bemenu copy:
 //! ProcessSupervisor (Shell role) with a Bubblewrap ProtectionDomainSpec, the
 //! production DEFAULT_BUBBLEWRAP_PATH lookup, and the real supervisor evidence.
 //!
 //! ProcessLaunchSpec cannot redirect stdio, so the program is /usr/bin/sh with
 //! quoted positional arguments that only exec: `env -i` leaves exactly PATH and
-//! SOPHIA_SHELL_9P_SOCKET (no shell-added PWD/SHLVL), then `nice -n 19` execs
+//! the wire's one endpoint variable (no shell-added PWD/SHLVL), then `nice -n 19` execs
 //! the binary with stdout/stderr on files in a bound log directory. Every exec
 //! keeps the PID, so the evidence's peer PID is Bemenu's; `verify_domain`
 //! proves that after exec rather than assuming it.
@@ -33,7 +34,7 @@ const LOCAL_FONTS: &str = "/usr/local/share/fonts";
 const LOG_CAP: u64 = 64 * 1024;
 const EXEC_TIMEOUT: Duration = Duration::from_secs(15);
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
-const LAUNCHER: &str = "exec /usr/bin/env -i PATH=/usr/bin SOPHIA_SHELL_9P_SOCKET=\"$2\" \
+const LAUNCHER: &str = "exec /usr/bin/env -i PATH=/usr/bin \"$5=$2\" \
      /usr/bin/nice -n 19 \"$1\" --serve >\"$3\" 2>\"$4\"";
 
 pub struct Peer {
@@ -59,7 +60,13 @@ pub fn fonts(repo: &Path, directory: &Path) -> PathBuf {
     directory.to_path_buf()
 }
 
-pub fn launch(root: &Path, binary: &Path, socket: &Path, fonts: &Path) -> Peer {
+pub fn launch(
+    root: &Path,
+    binary: &Path,
+    socket: &Path,
+    fonts: &Path,
+    wire: crate::fixture::Wire,
+) -> Peer {
     let logs = root.join("logs");
     std::fs::create_dir(&logs).unwrap();
     let stdout = logs.join("stdout");
@@ -91,6 +98,7 @@ pub fn launch(root: &Path, binary: &Path, socket: &Path, fonts: &Path) -> Peer {
         .arg(socket)
         .arg(&stdout)
         .arg(&stderr)
+        .arg(wire.socket_env())
         .protection_domain(domain);
     let mut supervisor = ProcessSupervisor::new(SupervisedProcessKind::Shell, spec);
     supervisor
@@ -164,7 +172,13 @@ impl Peer {
     /// Prove what actually runs inside the domain, after every exec:
     /// the verified copy with exactly one endpoint at nice 19, as PID 1 of a
     /// private PID namespace, with one font visible and no host devices.
-    pub fn verify_domain(&mut self, binary: &Path, socket: &Path, fonts: &Path) {
+    pub fn verify_domain(
+        &mut self,
+        binary: &Path,
+        socket: &Path,
+        fonts: &Path,
+        wire: crate::fixture::Wire,
+    ) {
         let pid = self.pid();
         let expected = std::fs::metadata(binary).unwrap();
         let mut want = binary.as_os_str().as_encoded_bytes().to_vec();
@@ -206,7 +220,7 @@ impl Peer {
             environ,
             [
                 "PATH=/usr/bin".to_owned(),
-                format!("SOPHIA_SHELL_9P_SOCKET={}", socket.display())
+                format!("{}={}", wire.socket_env(), socket.display())
             ],
             "bemenu environment: exactly one endpoint"
         );

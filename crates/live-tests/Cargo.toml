@@ -11,6 +11,11 @@ publish.workspace = true
 rustix = { workspace = true, features = ["time"] }
 sophia-protocol.workspace = true
 sophia-runtime.workspace = true
+sophia-shell-client = { workspace = true, features = ["ipc-compat"] }
+sophia-backend-live.workspace = true
+sophia-config.workspace = true
+sophia-engine.workspace = true
+sophia-session = { workspace = true, features = ["native-session"] }
 xtask = { path = "../xtask" }
 
 [lints]
