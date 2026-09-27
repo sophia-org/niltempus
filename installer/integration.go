@@ -213,6 +213,11 @@ func packageDesktop(plan Plan, roots map[string]string, work string) (string, er
 	if err := logged(isolated(root, env, packageDesktopArgs(tool, plan, roots, pair, hashes, buildDir, stage)...), filepath.Join(work, "package-desktop.log")); err != nil {
 		return "", err
 	}
+	// Use the just-built, source-bound verifier before adding the personal
+	// desktop files. Never execute a verifier supplied by the candidate.
+	if err := logged(isolated(root, env, tool, "verify-release", stage, "--c-sdk-rev="+plan.Inputs.HagiaCSDKRevision), filepath.Join(work, "verify-package.log")); err != nil {
+		return "", err
+	}
 	return stage, nil
 }
 

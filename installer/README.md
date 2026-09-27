@@ -97,8 +97,11 @@ A schema-3 release must carry an external manifest of schema 7 that:
 
 Missing, repeated, malformed or mismatched values are refused. With
 `hagia_included=false`, the SDK fields and the sealed manifest must be
-absent. This installer applies these checks itself; it never relies only on
-a release's bundled verifier.
+absent. During a build, the source-bound Rust `verify-release` command checks
+the package before the Go assembler adds its desktop files and seals the final
+release. The Go verifier retains independent checks for that final shape and
+for installed legacy releases. Neither step executes a candidate's bundled
+verifier as its source of trust.
 
 Activation follows the integration activator's history in
 `/opt/sophia-niltempus-desktop/activated-releases`, whose lines are

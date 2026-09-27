@@ -1,12 +1,20 @@
-# Sophia desktop integration
+# niltempus
 
-Whole-stack tests that combine Sophia with named desktop clients, and the
-build recipes for the client artifacts they run. Sophia itself stays shell
-and WM agnostic (Sophia `AGENTS.md` rule 13, `docs/style-guide.md`); this
-repository owns what that rule moves out.
+My desktop assembled from Sophia, Hagia, Lom and Bemenu. This repository owns
+the Go installer, pinned build recipes and tests for that particular choice of
+components. It also provides an example for contributors assembling their own
+desktop. Sophia stays shell and WM agnostic; the C and Rust desktop SDKs remain
+separate repositories.
 
-The first slice is Bemenu: signed-revision artifact preparation and the live
-native launcher gate over Sophia's production 9P file export.
+The entrypoint is `niltempus install`. It verifies the explicitly prepared
+release, or builds from the configured inputs when none is selected. See the
+[installer guide](installer/README.md) for initial setup, reviewed dependencies,
+the Plan-3 migration and rollback. A changed or invalid selection is refused.
+
+The former `sophia-desktop-integration` work is consolidated here. Historical
+manifest fields and installed paths retain their names for compatibility.
+Conformance tests for Sophia's generic contracts stay in Sophia; tests of this
+desktop's components and combinations live here.
 
 ## Documentation
 
