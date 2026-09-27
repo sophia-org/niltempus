@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Provenance: moved from Sophia tools/run_current_lom_panel_gate_tty4.sh at 9fcaec782ce4fe9978568c0466ee17a78b3d4571 (Sophia rule 13).
-# Changes: every input is explicit. The Sophia checkout under test is
-# SOPHIA_SOURCE (clean, signed HEAD; its shared session runner and native
-# launcher catalog must match pins/sophia-shared.sha256). Lom, Hagia, Bemenu
-# and Provlita are prepared signed-revision artifacts (cargo xtask
-# prepare-product-artifact / prepare-bemenu-artifact) named by
-# SOPHIA_<PRODUCT>_ARTIFACT and SOPHIA_<PRODUCT>_COMMIT; no source checkout,
+# Changes: every input is explicit. SOPHIA_SOURCE is a clean checkout whose
+# HEAD is exactly the signed revision in pins/sophia.toml; the gate stages that
+# revision's exact tree (git archive, tree hash proven) into the private
+# SOPHIA_GATE_BUILD_DIR and reads or executes Sophia files only from there.
+# Lom, Hagia, Bemenu and Provlita are prepared artifacts (cargo xtask
+# prepare-product-artifact / prepare-bemenu-artifact) bound to the operator's
+# SOPHIA_<PRODUCT>_COMMIT and SOPHIA_<PRODUCT>_SHA256 (and _CONFIG_SHA256).
+# Every build writes only below SOPHIA_GATE_BUILD_DIR; no source checkout,
 # /home default or sibling path is built or read.
 set -euo pipefail
 
@@ -19,16 +21,12 @@ if [[ "${1:-}" == launcher || "${1:-}" == dock ]]; then GATE_MODE="$1"; shift; f
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=tools/lib/artifacts.sh
 . "$ROOT_DIR/tools/lib/artifacts.sh"
-required=(SOPHIA_SOURCE SOPHIA_LOM_ARTIFACT SOPHIA_LOM_COMMIT SOPHIA_HAGIA_ARTIFACT SOPHIA_HAGIA_COMMIT)
-[[ "$GATE_MODE" == panel ]] || required+=(SOPHIA_BEMENU_ARTIFACT SOPHIA_BEMENU_COMMIT)
-[[ "$GATE_MODE" != dock ]] || required+=(SOPHIA_PROVLITA_ARTIFACT SOPHIA_PROVLITA_COMMIT)
-if [[ "$GATE_MODE" == panel ]]; then
-    default_core="$ROOT_DIR/tools/fixtures/lom_panel_core.kdl"
-else
-    # Shared with Sophia; pinned by digest in pins/sophia-shared.sha256.
-    default_core="${SOPHIA_SOURCE:-}/tools/fixtures/native_launcher_core.kdl"
-fi
-LOM_CORE_CONFIG="${SOPHIA_LOM_CORE_CONFIG:-$default_core}"
+required=(SOPHIA_SOURCE SOPHIA_GATE_BUILD_DIR
+    SOPHIA_LOM_ARTIFACT SOPHIA_LOM_COMMIT SOPHIA_LOM_SHA256 SOPHIA_LOM_CONFIG_SHA256
+    SOPHIA_HAGIA_ARTIFACT SOPHIA_HAGIA_COMMIT SOPHIA_HAGIA_SHA256)
+[[ "$GATE_MODE" == panel ]] || required+=(SOPHIA_BEMENU_ARTIFACT SOPHIA_BEMENU_COMMIT SOPHIA_BEMENU_SHA256)
+[[ "$GATE_MODE" != dock ]] || required+=(SOPHIA_PROVLITA_ARTIFACT SOPHIA_PROVLITA_COMMIT
+    SOPHIA_PROVLITA_SHA256 SOPHIA_PROVLITA_CONFIG_SHA256)
 WORKLOAD_BUDGETS="$ROOT_DIR/tools/fixtures/lom_workload_budgets.json"
 EVIDENCE_DIR="${SOPHIA_LOM_NATIVE_EVIDENCE_DIR:-$ROOT_DIR/.artifacts/lom-panel-native/$(date -u +%Y%m%dT%H%M%SZ)}"
 
@@ -40,21 +38,37 @@ done
 [[ -z "$(git -C "$ROOT_DIR" status --short)" ]] || { echo "Integration source must be clean" >&2; exit 2; }
 git -C "$ROOT_DIR" verify-commit HEAD >/dev/null
 check_sophia_source "$SOPHIA_SOURCE"
+check_build_dir "$SOPHIA_GATE_BUILD_DIR"
 INTEGRATION_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD)"
-SOPHIA_COMMIT="$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)"
+SOPHIA_COMMIT="$(pinned_sophia_rev)"
 [[ ! -e "$EVIDENCE_DIR" ]] || { echo "Evidence directory already exists; refusing to overwrite it" >&2; exit 2; }
 mkdir -p "$(dirname "$EVIDENCE_DIR")"
 mkdir -m 700 "$EVIDENCE_DIR"
+# Every build output and every staged Sophia file lives below this directory.
+BUILD_DIR="$(realpath -- "$SOPHIA_GATE_BUILD_DIR")"
+SOPHIA_TREE="$BUILD_DIR/sophia-tree"
+SOPHIA_TARGET="$BUILD_DIR/sophia-target"
+INTEGRATION_TARGET="$BUILD_DIR/integration-target"
+stage_sophia_tree "$SOPHIA_SOURCE" "$SOPHIA_TREE"
+if [[ "$GATE_MODE" == panel ]]; then
+    default_core="$ROOT_DIR/tools/fixtures/lom_panel_core.kdl"
+else
+    default_core="$SOPHIA_TREE/tools/fixtures/native_launcher_core.kdl"
+fi
+LOM_CORE_CONFIG="${SOPHIA_LOM_CORE_CONFIG:-$default_core}"
 LOM_BIN="$EVIDENCE_DIR/lom"
 LOM_CONFIG="$EVIDENCE_DIR/lom-config.kdl"
 HAGIA_BIN="$EVIDENCE_DIR/hagia"
 BEMENU_BIN="$EVIDENCE_DIR/bemenu-sophia"
 PROVLITA_BIN="$EVIDENCE_DIR/provlita"
 PROVLITA_CONFIG="$EVIDENCE_DIR/provlita-config.kdl"
-load_artifact lom "$SOPHIA_LOM_ARTIFACT" "$SOPHIA_LOM_COMMIT" "$LOM_BIN" "$LOM_CONFIG"
-load_artifact hagia "$SOPHIA_HAGIA_ARTIFACT" "$SOPHIA_HAGIA_COMMIT" "$HAGIA_BIN"
-[[ "$GATE_MODE" == panel ]] || load_artifact bemenu "$SOPHIA_BEMENU_ARTIFACT" "$SOPHIA_BEMENU_COMMIT" "$BEMENU_BIN"
-[[ "$GATE_MODE" != dock ]] || load_artifact provlita "$SOPHIA_PROVLITA_ARTIFACT" "$SOPHIA_PROVLITA_COMMIT" "$PROVLITA_BIN" "$PROVLITA_CONFIG"
+load_artifact lom "$SOPHIA_LOM_ARTIFACT" "$SOPHIA_LOM_COMMIT" "$SOPHIA_LOM_SHA256" "$LOM_BIN" \
+    "$SOPHIA_LOM_CONFIG_SHA256" "$LOM_CONFIG"
+load_artifact hagia "$SOPHIA_HAGIA_ARTIFACT" "$SOPHIA_HAGIA_COMMIT" "$SOPHIA_HAGIA_SHA256" "$HAGIA_BIN"
+[[ "$GATE_MODE" == panel ]] || load_artifact bemenu "$SOPHIA_BEMENU_ARTIFACT" "$SOPHIA_BEMENU_COMMIT" \
+    "$SOPHIA_BEMENU_SHA256" "$BEMENU_BIN"
+[[ "$GATE_MODE" != dock ]] || load_artifact provlita "$SOPHIA_PROVLITA_ARTIFACT" "$SOPHIA_PROVLITA_COMMIT" \
+    "$SOPHIA_PROVLITA_SHA256" "$PROVLITA_BIN" "$SOPHIA_PROVLITA_CONFIG_SHA256" "$PROVLITA_CONFIG"
 cp "$WORKLOAD_BUDGETS" "$EVIDENCE_DIR/workload-budgets.json"
 cp "$LOM_CORE_CONFIG" "$EVIDENCE_DIR/core.kdl"
 cp "$ROOT_DIR/tools/fixtures/lom_panel_desktop.kdl" "$EVIDENCE_DIR/probe-overrides.kdl"
@@ -66,16 +80,17 @@ from verify import budgets, unique_json_object
 with open(sys.argv[2], encoding="utf-8") as source:
     budgets(json.load(source, object_pairs_hook=unique_json_object))
 PY
-CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR="$SOPHIA_SOURCE/target" nice -n 19 cargo build --locked --offline --release -p sophia-cli --features native-session --manifest-path "$SOPHIA_SOURCE/Cargo.toml"
-SOPHIA_BIN="$SOPHIA_SOURCE/target/release/sophia"
+CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR="$SOPHIA_TARGET" nice -n 19 cargo build --locked --offline --release \
+    -p sophia-cli --features native-session --manifest-path "$SOPHIA_TREE/Cargo.toml"
+SOPHIA_BIN="$SOPHIA_TARGET/release/sophia"
 if [[ "$GATE_MODE" == launcher ]]; then
     python3 "$ROOT_DIR/tools/probes/native_launcher/profile.py" \
         --lom "$LOM_BIN" --config "$LOM_CONFIG" --bemenu "$BEMENU_BIN" \
         > "$EVIDENCE_DIR/probe-overrides.kdl"
 fi
-XTASK_BIN="$ROOT_DIR/target/release/xtask"
+XTASK_BIN="$INTEGRATION_TARGET/release/xtask"
 if [[ "$GATE_MODE" == dock ]]; then
-    CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR="$ROOT_DIR/target" nice -n 19 cargo \
+    CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR="$INTEGRATION_TARGET" nice -n 19 cargo \
         --config "$ROOT_DIR/.provision/cargo-config.toml" build --locked --offline --release -p xtask \
         --manifest-path "$ROOT_DIR/Cargo.toml"
     "$XTASK_BIN" dock profile "$LOM_BIN" "$LOM_CONFIG" "$BEMENU_BIN" "$PROVLITA_BIN" "$PROVLITA_CONFIG" \
@@ -100,11 +115,11 @@ fi
 # and application declarations. Only the recorded probe overrides differ.
 "$SOPHIA_BIN" config print-effective --desktop-profile="$wm_profile" \
     > "$EVIDENCE_DIR/wm-profile.kdl"
-CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR="$SOPHIA_SOURCE/target" nice -n 19 cargo build --locked --offline --release \
-    -p sophia-config --example desktop_profile_probe --manifest-path "$SOPHIA_SOURCE/Cargo.toml"
+CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR="$SOPHIA_TARGET" nice -n 19 cargo build --locked --offline --release \
+    -p sophia-config --example desktop_profile_probe --manifest-path "$SOPHIA_TREE/Cargo.toml"
 probe_args=()
 [[ "$GATE_MODE" == panel ]] || probe_args+=(--require-launcher-binding)
-"$SOPHIA_SOURCE/target/release/examples/desktop_profile_probe" \
+"$SOPHIA_TARGET/release/examples/desktop_profile_probe" \
     "$EVIDENCE_DIR/wm-profile.kdl" "$EVIDENCE_DIR/probe-overrides.kdl" "${probe_args[@]}" \
     > "$EVIDENCE_DIR/desktop.kdl"
 "$SOPHIA_BIN" config check --desktop-profile="$EVIDENCE_DIR/desktop.kdl"
@@ -140,12 +155,11 @@ sha256sum "$SOPHIA_BIN" "$LOM_BIN" "$HAGIA_BIN" "$LOM_CONFIG" "$LOM_CORE_CONFIG"
     "$EVIDENCE_DIR/probe-overrides.kdl" "$EVIDENCE_DIR/workload-budgets.json" > "$EVIDENCE_DIR/inputs.sha256"
 if [[ "$GATE_MODE" != panel ]]; then sha256sum "$BEMENU_BIN" >> "$EVIDENCE_DIR/inputs.sha256"; fi
 if [[ "$GATE_MODE" == dock ]]; then sha256sum "$PROVLITA_BIN" "$PROVLITA_CONFIG" "$XTASK_BIN" >> "$EVIDENCE_DIR/inputs.sha256"; fi
-while read -r _ shared; do sha256sum "$SOPHIA_SOURCE/$shared"; done \
-    < "$ROOT_DIR/pins/sophia-shared.sha256" >> "$EVIDENCE_DIR/inputs.sha256"
 verify_candidate_inputs() {
     sha256sum --check --status "$EVIDENCE_DIR/inputs.sha256"
     [[ "integration_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)" == "$(sed -n '/^integration_commit=/p' "$EVIDENCE_DIR/identity.manifest")" ]]
     [[ "sophia_commit=$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)" == "$(sed -n '/^sophia_commit=/p' "$EVIDENCE_DIR/identity.manifest")" ]]
+    verify_staged_tree "$SOPHIA_SOURCE" "$SOPHIA_TREE"
     [[ -z "$(git -C "$ROOT_DIR" status --short)" && -z "$(git -C "$SOPHIA_SOURCE" status --short)" ]]
 }
 
@@ -155,8 +169,11 @@ echo "Checking Lom's protected GPU and content path before graphics takeover."
 SOPHIA_LOM_GPU_PROOF_ARM=1 \
 SOPHIA_LOM_GPU_EVIDENCE_DIR="$EVIDENCE_DIR/gpu-content" \
 SOPHIA_SOURCE="$SOPHIA_SOURCE" \
+SOPHIA_GATE_BUILD_DIR="$BUILD_DIR" \
 SOPHIA_LOM_ARTIFACT="$SOPHIA_LOM_ARTIFACT" \
 SOPHIA_LOM_COMMIT="$SOPHIA_LOM_COMMIT" \
+SOPHIA_LOM_SHA256="$SOPHIA_LOM_SHA256" \
+SOPHIA_LOM_CONFIG_SHA256="$SOPHIA_LOM_CONFIG_SHA256" \
 SOPHIA_LOM_GPU_RENDER_NODE="${SOPHIA_LOM_GPU_RENDER_NODE:-/dev/dri/renderD128}" \
     "$ROOT_DIR/tools/lom_gpu_content_hardware_proof.sh"
 
@@ -216,7 +233,7 @@ SOPHIA_SESSION_STARTUP=none \
 SOPHIA_SESSION_WATCHDOG_SECONDS=110 \
 SOPHIA_DIAGNOSTIC_DIR="$EVIDENCE_DIR/session" \
 SOPHIA_UNTRUSTED_SESSION_OUTPUT_LOG="$EVIDENCE_DIR/session/untrusted-session-output.log" \
-    "$SOPHIA_SOURCE/tools/run_sophia_session.sh" --max-runtime-ms=90000 "${shell_args[@]}" --wm-process="$HAGIA_BIN"
+    "$SOPHIA_TREE/tools/run_sophia_session.sh" --max-runtime-ms=90000 "${shell_args[@]}" --wm-process="$HAGIA_BIN"
 native_status=$?
 set -e
 printf 'native_exit_status=%s\n' "$native_status" > "$EVIDENCE_DIR/native-outcome.txt"

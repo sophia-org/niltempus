@@ -1,12 +1,14 @@
 //! Prepare an immutable product artifact (Lom, Provlita, Hagia) from one
 //! signed revision, for the attended tty4 gates.
 //!
-//! The same custody rules as `prepare-bemenu-artifact`: signer authorization
+//! The same custody rules as `prepare-bemenu-artifact`: SOURCE AUTHORIZATION
 //! (`git verify-commit`, status G) happens only here, the build input is
 //! `git archive` of the signed commit whose extracted tree must hash to
 //! exactly that commit's tree, the build runs low-priority with two jobs in a
 //! private process group with a deadline and a log cap, and the output
-//! directory is created last and made read-only. Nothing is read from the
+//! directory is created last and made read-only. ARTIFACT BINDING is the
+//! gates' separate job: the manifest is not signed, so they require the
+//! operator's expected commit and digests (printed here) for every file. Nothing is read from the
 //! source checkout's working tree and no sibling checkout is consulted: Rust
 //! products build `--offline --locked` from their own pinned lock file, so
 //! their dependencies must already be fetched (`cargo fetch --locked` in the
@@ -182,14 +184,20 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
         });
     match written {
         Ok(manifest) => {
-            let digest = manifest
-                .lines()
-                .find_map(|l| l.strip_prefix("binary_sha256="))
-                .unwrap_or_default()
-                .to_owned();
+            // The operator passes these digests back to the gates, which bind
+            // the files to them; the manifest itself is not signed.
+            let field = |key: &str| {
+                manifest
+                    .lines()
+                    .find_map(|l| l.strip_prefix(key))
+                    .unwrap_or_default()
+                    .to_owned()
+            };
             Ok(vec![format!(
-                "product_artifact status=prepared product={} commit={commit} binary_sha256={digest} signer={signer} dir={}",
+                "product_artifact status=prepared product={} commit={commit} binary_sha256={} config_sha256={} signer={signer} dir={}",
                 product.name,
+                field("binary_sha256="),
+                field("config_sha256="),
                 output.display()
             )])
         }

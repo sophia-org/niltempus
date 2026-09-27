@@ -39,8 +39,8 @@ def commit_object(label):
     return raw, commit
 
 
-def write_artifact(directory, kind, sdk_manifest=None, label=None):
-    """A prepared artifact directory for KIND; returns its commit."""
+def write_artifact(directory, kind, sdk_manifest=None, label=None, sdk_revision=None):
+    """A prepared artifact directory for KIND; returns commit and expected digests."""
     directory.mkdir(parents=True)
     raw, commit = commit_object(label or kind)
     binary = "bemenu-sophia" if kind == "bemenu" else kind
@@ -50,7 +50,8 @@ def write_artifact(directory, kind, sdk_manifest=None, label=None):
     values = {"schema": "1", "binary": binary, "binary_sha256": sha256(body), "source_commit": commit,
               "source_tree": "1" * 40, "signature_status": "G", "signer_fingerprint": "ABCDEF0123"}
     if kind == "bemenu":
-        values.update(sdk_revision="2" * 40, sdk_manifest_sha256=sha256(sdk_manifest.read_bytes()))
+        pinned = json.loads(sdk_manifest.read_text())["revision"]
+        values.update(sdk_revision=sdk_revision or pinned, sdk_manifest_sha256=sha256(sdk_manifest.read_bytes()))
         keys = ("schema", "binary", "binary_sha256", "source_commit", "source_tree", "signature_status",
                 "signer_fingerprint", "sdk_revision", "sdk_manifest_sha256")
         manifest = "bemenu-artifact.manifest"
@@ -65,7 +66,17 @@ def write_artifact(directory, kind, sdk_manifest=None, label=None):
         keys = PRODUCT_KEYS
         manifest = "product-artifact.manifest"
     (directory / manifest).write_text("".join(f"{k}={values[k]}\n" for k in keys))
-    return commit
+    return {"commit": commit, "sha256": values["binary_sha256"], "config_sha256": values.get("config_sha256")}
+
+
+def rewrite_manifest(directory, **changes):
+    """Replace manifest values in place (the manifest is unsigned)."""
+    manifest = next(directory.glob("*.manifest"))
+    lines = []
+    for line in manifest.read_text().splitlines():
+        key, value = line.split("=", 1)
+        lines.append(f"{key}={changes.get(key, value)}")
+    manifest.write_text("\n".join(lines) + "\n")
 
 
 class LauncherTests(unittest.TestCase):
@@ -90,51 +101,63 @@ class LauncherTests(unittest.TestCase):
         shutil.copyfile(repo / "pins/c-desktop-sdk/manifest.json", self.root / "pins/c-desktop-sdk/manifest.json")
         self.fakebin = self.base / "bin"
         self.fakebin.mkdir()
-        # The explicit Sophia checkout under test: fake executables and the two
-        # shared files whose digests the fixture pins (pin_shared).
+        # The explicit private build directory: fake build outputs live here.
+        self.build = self.base / "build"
+        release = self.build / "sophia-target/release"
+        (release / "examples").mkdir(parents=True)
+        # The explicit Sophia checkout: a real Git repository whose HEAD the
+        # fixture pins (commit_sophia). The gate stages its exact tree.
         self.sophia = self.base / "sophia"
         (self.sophia / "tools/fixtures").mkdir(parents=True)
         (self.sophia / "tools/fixtures/native_launcher_core.kdl").write_text("fixture shared core catalog\n")
-        for path in (self.sophia / "target/release/sophia",):
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("not an executable; fixture hash input only\n")
+        (self.sophia / ".gitignore").write_text("/tools/lib/untracked-*.sh\n")
         self.artifacts = self.base / "artifacts"
-        self.lom_commit = write_artifact(self.artifacts / "lom", "lom")
-        self.hagia_commit = write_artifact(self.artifacts / "hagia", "hagia")
+        self.lom = write_artifact(self.artifacts / "lom", "lom")
+        self.hagia = write_artifact(self.artifacts / "hagia", "hagia")
         self.script(self.fakebin / "tty", 'printf "%s\\n" "${TEST_TTY:-/dev/tty4}"')
+        # This repository is not a Git checkout in the fixture; the Sophia
+        # fixture is, and every other Git call reaches the real Git.
         self.script(self.fakebin / "git", f'''
+if [[ "${{1:-}}" == -C && "${{2:-}}" == "$TEST_INTEGRATION_ROOT" ]]; then
+    case "$*" in
+        *"status --short"*) printf "%s" "${{TEST_DIRTY:-}}" ;;
+        *"rev-parse HEAD"*) printf '%040d\\n' 1 ;;
+        *"verify-commit HEAD"*) exit 0 ;;
+        *) exit 99 ;;
+    esac
+    exit
+fi
 case "$*" in
-    *"status --short"*) printf "%s" "${{TEST_DIRTY:-}}" ;;
-    *"rev-parse HEAD"*) printf '%040d\\n' 1 ;;
-    *"verify-commit HEAD"*) exit 0 ;;
-    *"hash-object --stdin -t commit"*) exec {REAL_GIT} hash-object --stdin -t commit ;;
-    *) exit 99 ;;
-esac''')
+    *"verify-commit "*) exit "${{TEST_BADSIG:-0}}" ;;
+esac
+exec {REAL_GIT} "$@"''')
         self.script(self.fakebin / "cargo", 'echo build >> "$TEST_TRACE"')
         self.wm_profile = self.base / "wm.kdl"
         self.wm_profile.write_text('schema 1\nshortcut { profile "operator"; bind "Super+4" "policy:focus-workspace" "7"; }\n')
         # Configuration executables are supplied effects in this launcher test.
         # Rust desktop_probe controls cover the real parser/composition policy.
-        self.script(self.sophia / "target/release/sophia", '''
+        self.script(release / "sophia", '''
 [[ "$1" == config ]]
 case "$2" in
   print-effective) [[ "$3" == --desktop-profile="$SOPHIA_DESKTOP_PROFILE" ]]; cat "$SOPHIA_DESKTOP_PROFILE" ;;
   check) [[ -f "${3#--desktop-profile=}" ]] ;;
   *) exit 99 ;;
 esac''')
-        examples = self.sophia / "target/release/examples"
-        examples.mkdir()
-        self.script(examples / "desktop_profile_probe", '''
+        self.script(release / "examples/desktop_profile_probe", '''
 [[ "$#" == 2 ]]
 cat "$1"
 tail -n +2 "$2"''')
         self.script(self.tools / "lom_gpu_content_hardware_proof.sh", '''
 echo proof >> "$TEST_TRACE"
 [[ "$SOPHIA_LOM_GPU_PROOF_ARM" == 1 ]]
-[[ "$SOPHIA_SOURCE" == /* && "$SOPHIA_LOM_ARTIFACT" == /* && -n "$SOPHIA_LOM_COMMIT" ]]
+[[ "$SOPHIA_SOURCE" == /* && "$SOPHIA_GATE_BUILD_DIR" == /* && "$SOPHIA_LOM_ARTIFACT" == /* ]]
+[[ -n "$SOPHIA_LOM_COMMIT" && -n "$SOPHIA_LOM_SHA256" && -n "$SOPHIA_LOM_CONFIG_SHA256" ]]
 exit "${TEST_PROOF_STATUS:-0}"''')
         self.script(self.sophia / "tools/run_sophia_session.sh", '''
 echo session >> "$TEST_TRACE"
+# Staged, never the operator's checkout: an input missing from the pinned
+# tree (TEST_SOURCE_UNTRACKED) is unavailable here.
+[[ -z "${TEST_SOURCE_UNTRACKED:-}" ]] || source "$(dirname "$0")/lib/untracked-input.sh"
 [[ "$#" == 3 && "$1" == --max-runtime-ms=90000 ]]
 [[ "$2" == --shell-process="$SOPHIA_LOM_NATIVE_EVIDENCE_DIR/lom" ]]
 [[ "$3" == --wm-process="$SOPHIA_HAGIA_BIN" ]]
@@ -150,7 +173,8 @@ if [[ "${TEST_RECOVERY:-yes}" == yes ]]; then
 fi
 if [[ "${TEST_CHANGE_INPUT:-no}" == yes ]]; then echo changed >> "$SOPHIA_SHELL_CONFIG"; fi
 exit "${TEST_SESSION_STATUS:-0}"''')
-        self.pin_shared()
+        subprocess.run([REAL_GIT, "init", "-q", str(self.sophia)], check=True)
+        self.commit_sophia()
         host, client = transcript()
         native = "\n".join([
             "sophia_live_shell_gpu schema=1 status=granted device=fixture",
@@ -163,22 +187,37 @@ exit "${TEST_SESSION_STATUS:-0}"''')
         (self.base / "client.log").write_text(encode(client))
         self.evidence = self.base / "evidence"
         self.env = {**os.environ, "PATH": str(self.fakebin) + ":/usr/bin:/bin",
-                    "SOPHIA_SOURCE": str(self.sophia),
-                    "SOPHIA_LOM_ARTIFACT": str(self.artifacts / "lom"), "SOPHIA_LOM_COMMIT": self.lom_commit,
-                    "SOPHIA_HAGIA_ARTIFACT": str(self.artifacts / "hagia"), "SOPHIA_HAGIA_COMMIT": self.hagia_commit,
+                    "TEST_INTEGRATION_ROOT": str(self.root),
+                    "SOPHIA_SOURCE": str(self.sophia), "SOPHIA_GATE_BUILD_DIR": str(self.build),
                     "SOPHIA_LOM_NATIVE_GATE_ARM": "1",
                     "SOPHIA_DESKTOP_PROFILE": str(self.wm_profile),
                     "SOPHIA_LOM_NATIVE_EVIDENCE_DIR": str(self.evidence),
                     "TEST_TRACE": str(self.base / "trace"), "TEST_HOST": str(self.base / "host.log"),
                     "TEST_CLIENT": str(self.base / "client.log")}
+        self.use_artifact("lom", self.artifacts / "lom", self.lom)
+        self.use_artifact("hagia", self.artifacts / "hagia", self.hagia)
         for name in ("SOPHIA_LOM_CORE_CONFIG", "DISPLAY", "WAYLAND_DISPLAY"):
             self.env.pop(name, None)
 
-    def pin_shared(self):
-        """Pin the fixture Sophia checkout's shared files, as pins/ does for real."""
-        lines = [f"{sha256((self.sophia / path).read_bytes())} {path}\n"
-                 for path in ("tools/run_sophia_session.sh", "tools/fixtures/native_launcher_core.kdl")]
-        (self.root / "pins/sophia-shared.sha256").write_text("".join(lines))
+    def use_artifact(self, kind, directory, identity):
+        prefix = f"SOPHIA_{kind.upper()}_"
+        self.env[prefix + "ARTIFACT"] = str(directory)
+        self.env[prefix + "COMMIT"] = identity["commit"]
+        self.env[prefix + "SHA256"] = identity["sha256"]
+        if identity["config_sha256"] not in (None, "none"):
+            self.env[prefix + "CONFIG_SHA256"] = identity["config_sha256"]
+
+    def commit_sophia(self, pin=True):
+        """Commit the fixture Sophia checkout and pin its HEAD, as pins/ does for real."""
+        git = [REAL_GIT, "-C", str(self.sophia), "-c", "user.name=Fixture", "-c", "user.email=f@example.com",
+               "-c", "commit.gpgsign=false"]
+        subprocess.run(git + ["add", "-A"], check=True)
+        subprocess.run(git + ["commit", "-q", "--allow-empty", "-m", "fixture"], check=True)
+        if pin:
+            rev = subprocess.run([REAL_GIT, "-C", str(self.sophia), "rev-parse", "HEAD"],
+                                 capture_output=True, text=True, check=True).stdout.strip()
+            (self.root / "pins/sophia.toml").write_text(
+                f'url = "https://github.com/sophia-org/sophia.git"\nrev = "{rev}"\n')
 
     def script(self, path, body):
         path.write_text("#!/usr/bin/env bash\nset -euo pipefail\n" + body + "\n")
@@ -186,7 +225,15 @@ exit "${TEST_SESSION_STATUS:-0}"''')
 
     def run_launcher(self, **env):
         return subprocess.run(["bash", str(self.tools / "run.sh")], env={**self.env, **env},
-                              capture_output=True, text=True, timeout=10, umask=0o002)
+                              capture_output=True, text=True, timeout=20, umask=0o002)
+
+    def assert_refused_before_build(self, message, **env):
+        shutil.rmtree(self.evidence, ignore_errors=True)
+        (self.base / "trace").unlink(missing_ok=True)
+        result = self.run_launcher(**env)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(message, result.stderr)
+        self.assertFalse((self.base / "trace").exists())
 
     def test_generated_profiles_are_private_under_group_writable_umask(self):
         result = self.run_launcher()
@@ -204,12 +251,14 @@ exit "${TEST_SESSION_STATUS:-0}"''')
         self.assertEqual((self.base / "trace").read_text().splitlines(), ["build", "build", "proof", "session"])
         self.assertEqual((self.evidence / "wm-profile.kdl").read_bytes(), self.wm_profile.read_bytes())
         self.assertIn('bind "Super+4" "policy:focus-workspace" "7"', (self.evidence / "desktop.kdl").read_text())
-        self.assertIn("wm_profile_sha256=", (self.evidence / "identity.manifest").read_text())
-        self.assertIn("probe_overrides_sha256=", (self.evidence / "identity.manifest").read_text())
-        self.assertIn(f"lom_commit={self.lom_commit}", (self.evidence / "identity.manifest").read_text())
-        self.assertIn(f"hagia_commit={self.hagia_commit}", (self.evidence / "identity.manifest").read_text())
-        self.assertIn("integration_commit=", (self.evidence / "identity.manifest").read_text())
-        self.assertIn(str(self.sophia / "tools/run_sophia_session.sh"), (self.evidence / "inputs.sha256").read_text())
+        manifest = (self.evidence / "identity.manifest").read_text()
+        for field in ("wm_profile_sha256=", "probe_overrides_sha256=", "integration_commit=",
+                      f"lom_commit={self.lom['commit']}", f"hagia_commit={self.hagia['commit']}"):
+            self.assertIn(field, manifest)
+        # Builds and staged Sophia files live only in the private build directory.
+        self.assertTrue((self.build / "sophia-tree/tools/run_sophia_session.sh").is_file())
+        self.assertFalse((self.sophia / "target").exists())
+        self.assertFalse((self.root / "target").exists())
 
     def test_missing_selected_wm_profile_never_launches_proof_or_session(self):
         result = self.run_launcher(SOPHIA_DESKTOP_PROFILE=str(self.base / "missing.kdl"))
@@ -225,45 +274,80 @@ exit "${TEST_SESSION_STATUS:-0}"''')
                 self.assertFalse((self.base / "trace").exists())
 
     def test_missing_explicit_inputs_stop_before_build(self):
-        for name in ("SOPHIA_SOURCE", "SOPHIA_LOM_ARTIFACT", "SOPHIA_LOM_COMMIT",
-                     "SOPHIA_HAGIA_ARTIFACT", "SOPHIA_HAGIA_COMMIT"):
+        for name in ("SOPHIA_SOURCE", "SOPHIA_GATE_BUILD_DIR", "SOPHIA_LOM_ARTIFACT", "SOPHIA_LOM_COMMIT",
+                     "SOPHIA_LOM_SHA256", "SOPHIA_LOM_CONFIG_SHA256",
+                     "SOPHIA_HAGIA_ARTIFACT", "SOPHIA_HAGIA_COMMIT", "SOPHIA_HAGIA_SHA256"):
             with self.subTest(name=name):
                 env = {k: v for k, v in self.env.items() if k != name}
                 result = subprocess.run(["bash", str(self.tools / "run.sh")], env=env,
-                                        capture_output=True, text=True, timeout=10)
+                                        capture_output=True, text=True, timeout=20)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(f"{name} is required", result.stderr)
                 self.assertFalse((self.base / "trace").exists())
                 self.assertFalse(self.evidence.exists())
 
-    def test_unpinned_shared_sophia_file_stops_before_build(self):
-        with (self.sophia / "tools/run_sophia_session.sh").open("a") as script:
-            script.write("# drift\n")
-        result = self.run_launcher()
+    def test_build_directory_must_be_explicit_private_and_outside_sources(self):
+        for message, value in {"must be absolute": "build",
+                               "outside every source tree": str(self.sophia / "build"),
+                               "outside every source tree ": str(self.root / "target")}.items():
+            with self.subTest(value=value):
+                self.assert_refused_before_build(message.strip(), SOPHIA_GATE_BUILD_DIR=value)
+
+    def test_sophia_source_must_be_the_pinned_signed_clean_revision(self):
+        with self.subTest("unsigned"):
+            self.assert_refused_before_build("is not a good signed commit", TEST_BADSIG="1")
+        with self.subTest("dirty"):
+            (self.sophia / "tools/fixtures/native_launcher_core.kdl").write_text("drift\n")
+            self.assert_refused_before_build("Sophia checkout must be clean")
+            subprocess.run([REAL_GIT, "-C", str(self.sophia), "checkout", "-q", "--", "."], check=True)
+        with self.subTest("another revision"):
+            (self.sophia / "tools/fixtures/native_launcher_core.kdl").write_text("next revision\n")
+            self.commit_sophia(pin=False)
+            self.assert_refused_before_build("is not the pinned revision")
+
+    def test_staged_tree_must_hash_to_the_pinned_tree(self):
+        # An export-ignore attribute makes the archive differ from the tree.
+        (self.sophia / ".gitattributes").write_text("tools/fixtures/* export-ignore\n")
+        self.commit_sophia()
+        self.assert_refused_before_build("staged Sophia tree")
+
+    def test_an_input_outside_the_pinned_tree_is_unavailable(self):
+        # Ignored and untracked: the checkout stays clean, but the pinned tree
+        # lacks it, so the staged session runner cannot read it.
+        (self.sophia / "tools/lib").mkdir(parents=True)
+        (self.sophia / "tools/lib/untracked-input.sh").write_text("true\n")
+        result = self.run_launcher(TEST_SOURCE_UNTRACKED="1")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("differs from pins/sophia-shared.sha256", result.stderr)
-        self.assertFalse((self.base / "trace").exists())
+        self.assertEqual((self.evidence / "native-outcome.txt").read_text(), "native_exit_status=1\n")
 
     def test_artifact_binding_failures_stop_before_build(self):
         other = write_artifact(self.base / "other", "lom", label="another signed revision")
         tamper = self.base / "tampered"
         shutil.copytree(self.artifacts / "lom", tamper)
         (tamper / "lom").write_text("substituted binary\n")
+        # Binary and unsigned manifest replaced together: self-consistent, but
+        # not the operator's expected digest.
+        swapped = self.base / "swapped"
+        shutil.copytree(self.artifacts / "lom", swapped)
+        (swapped / "lom").write_text("substituted binary\n")
+        rewrite_manifest(swapped, binary_sha256=sha256(b"substituted binary\n"))
+        config = self.base / "config-swapped"
+        shutil.copytree(self.artifacts / "lom", config)
+        (config / "config.kdl").write_text("substituted configuration\n")
+        rewrite_manifest(config, config_sha256=sha256(b"substituted configuration\n"))
         cases = {
-            "commit mismatch": {"SOPHIA_LOM_COMMIT": other},
-            "SHA-256 mismatch": {"SOPHIA_LOM_ARTIFACT": str(tamper)},
+            "commit mismatch": {"SOPHIA_LOM_COMMIT": other["commit"]},
+            "lom binary SHA-256 is not the expected one": {"SOPHIA_LOM_ARTIFACT": str(tamper)},
+            "lom manifest binary SHA-256 is not the expected one": {"SOPHIA_LOM_ARTIFACT": str(swapped)},
+            "lom manifest configuration is not the expected one": {"SOPHIA_LOM_ARTIFACT": str(config)},
             "product": {"SOPHIA_HAGIA_ARTIFACT": str(self.artifacts / "lom"),
-                        "SOPHIA_HAGIA_COMMIT": self.lom_commit},
+                        "SOPHIA_HAGIA_COMMIT": self.lom["commit"]},
             "absolute directory": {"SOPHIA_LOM_ARTIFACT": "artifacts/lom"},
+            "64 lowercase hex": {"SOPHIA_LOM_SHA256": "LOM"},
         }
         for message, env in cases.items():
             with self.subTest(message=message):
-                shutil.rmtree(self.evidence, ignore_errors=True)
-                (self.base / "trace").unlink(missing_ok=True)
-                result = self.run_launcher(**env)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn(message, result.stderr)
-                self.assertFalse((self.base / "trace").exists())
+                self.assert_refused_before_build(message, **env)
 
     def test_failed_proof_never_launches_session(self):
         self.assertNotEqual(self.run_launcher(TEST_PROOF_STATUS="1").returncode, 0)

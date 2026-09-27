@@ -6,9 +6,11 @@ Bemenu (application launcher, GPU denied) in the same bounded tty4 session.
 Plain `lom-test` retains the previous single-shell 40-action panel workload.
 This is a separately attended hardware run, never part of the offline gate.
 
-The command requires an explicit clean, signed Sophia checkout (`SOPHIA_SOURCE`)
+The command requires a clean Sophia checkout at the pinned signed revision
+(`SOPHIA_SOURCE`), a private `SOPHIA_GATE_BUILD_DIR`
 and prepared signed-revision Lom, Hagia and Bemenu artifacts
-(`SOPHIA_<PRODUCT>_ARTIFACT` and `SOPHIA_<PRODUCT>_COMMIT`); Bemenu comes from
+(`SOPHIA_<PRODUCT>_ARTIFACT`, bound to the operator's `_COMMIT` and `_SHA256`);
+Bemenu comes from
 `cargo xtask prepare-bemenu-artifact`, built from an exact signed commit archive,
 not a possibly stale in-tree executable. It records all source/binary/config
 hashes and checks them again before and after the session. Nothing is installed

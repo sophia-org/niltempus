@@ -17,8 +17,9 @@ DRM master.
 
 ```sh
 cargo xtask prepare-product-artifact lom LOM-REPO SIGNED-COMMIT LOM-ARTIFACT-DIR
-SOPHIA_LOM_GPU_PROOF_ARM=1 SOPHIA_SOURCE=/abs/sophia \
+SOPHIA_LOM_GPU_PROOF_ARM=1 SOPHIA_SOURCE=/abs/sophia SOPHIA_GATE_BUILD_DIR=/abs/private-build \
 SOPHIA_LOM_ARTIFACT=LOM-ARTIFACT-DIR SOPHIA_LOM_COMMIT=SIGNED-COMMIT \
+SOPHIA_LOM_SHA256=BINARY-SHA256 SOPHIA_LOM_CONFIG_SHA256=CONFIG-SHA256 \
     tools/lom_gpu_content_hardware_proof.sh
 ```
 
@@ -28,10 +29,15 @@ the script refuses (exit 3) before building anything.
 
 The separate `tools/run_current_lom_panel_gate_tty4.sh` is the native acceptance
 candidate. Run it only from tty4 after ending the graphical session, with
-`SOPHIA_LOM_NATIVE_GATE_ARM=1`. It builds Sophia from the explicit clean, signed
-`SOPHIA_SOURCE` checkout (whose shared session runner and native launcher catalog
-must match `pins/sophia-shared.sha256`), runs only prepared signed-revision
-artifacts (`SOPHIA_{LOM,HAGIA,BEMENU,PROVLITA}_ARTIFACT` and `_COMMIT`),
+`SOPHIA_LOM_NATIVE_GATE_ARM=1`. Source authorization: `SOPHIA_SOURCE` must be a
+clean checkout whose HEAD is exactly the signed revision in `pins/sophia.toml`;
+the gate stages that revision's exact tree into the private
+`SOPHIA_GATE_BUILD_DIR` (tree hash proven) and reads, builds and executes
+Sophia only from there. Artifact binding: it runs only prepared artifacts
+(`SOPHIA_{LOM,HAGIA,BEMENU,PROVLITA}_ARTIFACT`) whose commit object and
+binary (and configuration) match the operator's `_COMMIT`, `_SHA256` (and
+`_CONFIG_SHA256`); the artifact manifest is unsigned and binds nothing alone.
+It
 first runs the protected GPU/content proof while Sophia does not own the display,
 then runs the 90-second normal-exit workload (110-second failure watchdog). A failed prerequisite therefore
 stops before graphics takeover and retains the client's boundary error. The native

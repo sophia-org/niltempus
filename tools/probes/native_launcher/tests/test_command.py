@@ -17,15 +17,14 @@ class ComponentCommandTests(panel_tests.LauncherTests):
         super().setUp()
         shutil.copytree(ROOT / 'tools/probes/native_launcher', self.tools / 'probes/native_launcher',
                         ignore=shutil.ignore_patterns('__pycache__'))
-        self.script(self.sophia / 'target/release/examples/desktop_profile_probe', """
+        self.script(self.build / 'sophia-target/release/examples/desktop_profile_probe', """
 [[ "$#" == 2 || ( "$#" == 3 && "$3" == --require-launcher-binding ) ]]
 cat "$1"
 tail -n +2 "$2"
 """)
-        self.bemenu_commit = panel_tests.write_artifact(
-            self.artifacts / 'bemenu', 'bemenu', self.root / 'pins/c-desktop-sdk/manifest.json')
-        self.env['SOPHIA_BEMENU_ARTIFACT'] = str(self.artifacts / 'bemenu')
-        self.env['SOPHIA_BEMENU_COMMIT'] = self.bemenu_commit
+        self.sdk = self.root / 'pins/c-desktop-sdk/manifest.json'
+        self.bemenu = panel_tests.write_artifact(self.artifacts / 'bemenu', 'bemenu', self.sdk)
+        self.use_artifact('bemenu', self.artifacts / 'bemenu', self.bemenu)
         # Keep the panel path exactly as the inherited controls require.
         prior = (self.sophia / 'tools/run_sophia_session.sh').read_text().splitlines()[2:]
         self.script(self.sophia / 'tools/run_sophia_session.sh', '''
@@ -44,14 +43,14 @@ if [[ "$#" == 2 ]]; then
     exit "${TEST_SESSION_STATUS:-0}"
 fi
 ''' + '\n'.join(prior))
-        self.pin_shared()
+        self.commit_sophia()
         self.component_host = self.base / 'component-host.log'
         self.component_host.write_text('\n'.join(transcript()) + '\n')
         self.env['TEST_COMPONENT_HOST'] = str(self.component_host)
 
     def run_components(self, **env):
         return subprocess.run(['bash', str(self.tools / 'run.sh'), 'launcher'],
-                              env={**self.env, **env}, capture_output=True, text=True, timeout=10)
+                              env={**self.env, **env}, capture_output=True, text=True, timeout=20)
 
     def test_component_mode_uses_roles_and_real_transcript_verifier(self):
         result = self.run_components()
@@ -63,18 +62,44 @@ fi
         self.assertIn('shell-component "panel" "bar"', profile)
         self.assertIn('shell-component "menu" "application-launcher"', profile)
         self.assertIn('bind "Super+4"', profile)
-        self.assertIn(f'bemenu_commit={self.bemenu_commit}', (self.evidence / 'identity.manifest').read_text())
+        self.assertIn(f"bemenu_commit={self.bemenu['commit']}", (self.evidence / 'identity.manifest').read_text())
         self.assertIn(str(self.evidence / 'bemenu-sophia'), (self.evidence / 'inputs.sha256').read_text())
         self.assertFalse((self.evidence / 'workload-verification.json').exists())
         self.assertIn('"status": "pass"', (self.evidence / 'launcher-verification.json').read_text())
 
-    def test_component_sdk_pin_mismatch_refuses_before_build(self):
-        with (self.root / 'pins/c-desktop-sdk/manifest.json').open('a') as manifest:
-            manifest.write(' ')
-        result = self.run_components()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn('SDK manifest differs', result.stderr)
+    def assert_components_refused_before_build(self, message, **env):
+        (self.base / 'trace').unlink(missing_ok=True)
+        result = self.run_components(**env)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(message, result.stderr)
         self.assertFalse((self.base / 'trace').exists())
+
+    def test_component_sdk_pin_mismatch_refuses_before_build(self):
+        with self.sdk.open('a') as manifest:
+            manifest.write(' ')
+        self.assert_components_refused_before_build('SDK manifest differs')
+
+    def test_component_sdk_revision_must_equal_the_pin_even_with_matching_manifest_digest(self):
+        other = panel_tests.write_artifact(self.base / 'other-sdk', 'bemenu', self.sdk,
+                                           label='other sdk', sdk_revision='3' * 40)
+        env = {'SOPHIA_BEMENU_ARTIFACT': str(self.base / 'other-sdk'),
+               'SOPHIA_BEMENU_COMMIT': other['commit'], 'SOPHIA_BEMENU_SHA256': other['sha256']}
+        self.assert_components_refused_before_build('SDK revision', **env)
+
+    def test_component_bemenu_binary_and_manifest_swapped_together_refuse(self):
+        swapped = self.base / 'swapped-bemenu'
+        shutil.copytree(self.artifacts / 'bemenu', swapped)
+        (swapped / 'bemenu-sophia').write_text('substituted launcher\n')
+        panel_tests.rewrite_manifest(swapped, binary_sha256=panel_tests.sha256(b'substituted launcher\n'))
+        self.assert_components_refused_before_build(
+            'bemenu manifest binary SHA-256 is not the expected one', SOPHIA_BEMENU_ARTIFACT=str(swapped))
+
+    def test_component_missing_bemenu_expected_digest_refuses(self):
+        env = {k: v for k, v in self.env.items() if k != 'SOPHIA_BEMENU_SHA256'}
+        result = subprocess.run(['bash', str(self.tools / 'run.sh'), 'launcher'], env=env,
+                                capture_output=True, text=True, timeout=20)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('SOPHIA_BEMENU_SHA256 is required', result.stderr)
 
     def test_component_binary_change_refuses(self):
         self.assertNotEqual(self.run_components(TEST_CHANGE_BEMENU='yes').returncode, 0)

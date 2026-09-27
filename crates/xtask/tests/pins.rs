@@ -170,16 +170,3 @@ fn contract_bindings_cannot_be_dropped_or_rebound() {
         assert!(parse_contracts(&bad).is_err(), "{bad}");
     }
 }
-
-#[test]
-fn shared_sophia_files_cannot_be_dropped_or_redirected() {
-    let good = text("pins/sophia-shared.sha256");
-    assert_eq!(xtask::pins::parse_shared(&good).unwrap().len(), 2);
-    let dropped = good.lines().skip(1).collect::<Vec<_>>().join("\n");
-    let redirected = good.replacen("tools/run_sophia_session.sh", "/tmp/run_sophia_session.sh", 1);
-    let malformed = good.replacen(' ', "\t", 1);
-    let short = good.replacen(&good[..64], "abc", 1);
-    for bad in [dropped, redirected, malformed, short] {
-        assert!(xtask::pins::parse_shared(&bad).is_err(), "{bad}");
-    }
-}

@@ -158,6 +158,21 @@ for script in "$runner" "$ROOT_DIR/tools/lom_gpu_content_hardware_proof.sh"; do
         exit 1
     fi
 done
+# Sophia is read only from the staged pinned tree: no path below the
+# operator's checkout, and every build writes only to the private build dir
+# at low priority with two jobs.
+for script in "$runner" "$ROOT_DIR/tools/lom_gpu_content_hardware_proof.sh" "$ROOT_DIR/tools/lib/artifacts.sh"; do
+    if grep -nE '\$\{?SOPHIA_SOURCE\}?/' "$script"; then
+        echo "$script reads Sophia outside the staged pinned tree" >&2
+        exit 1
+    fi
+    while IFS= read -r line; do
+        [[ "$line" =~ CARGO_BUILD_JOBS=2\ CARGO_TARGET_DIR=\"\$(SOPHIA_TARGET|INTEGRATION_TARGET)\"\ nice\ -n\ 19\ cargo ]] || {
+            echo "$script has a cargo build outside the private low-priority build dirs: $line" >&2
+            exit 1
+        }
+    done < <(grep -E '(^|[[:space:]])cargo([[:space:]]|$)' "$script" | grep -vE '^[[:space:]]*#')
+done
 grep -q 'SOPHIA_CORE_CONFIG="$LOM_CORE_CONFIG"' "$runner" || {
     echo "native runner does not pass its bounded application catalog to Sophia" >&2
     exit 1

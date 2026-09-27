@@ -35,17 +35,25 @@ and fixtures, and the `xtask dock` profile generator and verifier. See
 
     cargo xtask prepare-product-artifact lom|provlita|hagia REPO SIGNED-COMMIT NEW-DIR
     cargo xtask prepare-bemenu-artifact BEMENU-REPO SIGNED-COMMIT NEW-DIR
-    SOPHIA_LOM_NATIVE_GATE_ARM=1 SOPHIA_SOURCE=/abs/sophia \
-    SOPHIA_LOM_ARTIFACT=DIR SOPHIA_LOM_COMMIT=REV \
-    SOPHIA_HAGIA_ARTIFACT=DIR SOPHIA_HAGIA_COMMIT=REV \
-    [SOPHIA_BEMENU_ARTIFACT=DIR SOPHIA_BEMENU_COMMIT=REV] \
-    [SOPHIA_PROVLITA_ARTIFACT=DIR SOPHIA_PROVLITA_COMMIT=REV] \
+    SOPHIA_LOM_NATIVE_GATE_ARM=1 SOPHIA_SOURCE=/abs/sophia SOPHIA_GATE_BUILD_DIR=/abs/build \
+    SOPHIA_LOM_ARTIFACT=DIR SOPHIA_LOM_COMMIT=REV SOPHIA_LOM_SHA256=SHA SOPHIA_LOM_CONFIG_SHA256=SHA \
+    SOPHIA_HAGIA_ARTIFACT=DIR SOPHIA_HAGIA_COMMIT=REV SOPHIA_HAGIA_SHA256=SHA \
+    [SOPHIA_BEMENU_ARTIFACT=DIR SOPHIA_BEMENU_COMMIT=REV SOPHIA_BEMENU_SHA256=SHA] \
+    [SOPHIA_PROVLITA_ARTIFACT=DIR SOPHIA_PROVLITA_COMMIT=REV SOPHIA_PROVLITA_SHA256=SHA \
+     SOPHIA_PROVLITA_CONFIG_SHA256=SHA] \
         tools/run_current_lom_panel_gate_tty4.sh [launcher|dock]
 
-These runs are manual (tty4, real hardware). The Sophia checkout's shared
-session runner and native launcher catalog must match
-`pins/sophia-shared.sha256`. Rust products build `--offline --locked`, so run
-`cargo fetch --locked` in the product repository first. Their verifier
+These runs are manual (tty4, real hardware). They also require
+`SOPHIA_GATE_BUILD_DIR` (an absolute private directory outside every source
+tree; every build and the staged Sophia tree live there) and, per product,
+`SOPHIA_<PRODUCT>_SHA256` (and `_CONFIG_SHA256` for Lom and Provlita), the
+digests printed by the prepare command. `SOPHIA_SOURCE` must be a clean
+checkout whose HEAD is exactly the signed revision in `pins/sophia.toml`; the
+gate stages that revision's exact tree (`git archive`, tree hash proven) and
+reads Sophia only from there. Source authorization (the signed revision) and
+artifact binding (the expected digests) are separate checks. Rust products
+build `--offline --locked`, so run `cargo fetch --locked` in the product
+repository first. Their verifier
 self-tests are part of the offline gate (`crates/xtask/tests/verifier_self_tests.rs`).
 
 ## Provisioning

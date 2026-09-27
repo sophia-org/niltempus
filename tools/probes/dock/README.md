@@ -8,9 +8,11 @@ lom-test dock
 ```
 
 This is a bounded attended smoke, not a normal-session installer. It builds
-Sophia from the explicit clean, signed `SOPHIA_SOURCE` checkout and runs prepared
+the exact pinned Sophia tree (from a clean `SOPHIA_SOURCE` checkout at the signed
+revision in `pins/sophia.toml`) into `SOPHIA_GATE_BUILD_DIR` and runs prepared
 signed-revision Lom, Provlita, Bemenu and Hagia artifacts
-(`SOPHIA_<PRODUCT>_ARTIFACT` and `SOPHIA_<PRODUCT>_COMMIT`, see
+(`SOPHIA_<PRODUCT>_ARTIFACT`, bound to the operator's `_COMMIT`, `_SHA256` and
+`_CONFIG_SHA256`; see
 `cargo xtask prepare-product-artifact` and `prepare-bemenu-artifact`). It records
 revisions and binary/config hashes, and runs the existing protected Lom GPU proof
 before graphics takeover. Provlita shares Lom's GPU adapter; that proof does not

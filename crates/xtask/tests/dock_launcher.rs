@@ -1,7 +1,8 @@
 // Provenance: moved from Sophia crates/xtask/tests/dock_launcher.rs at
 // 9fcaec782ce4fe9978568c0466ee17a78b3d4571 (Sophia rule 13). Adapted to the
-// explicit inputs: a fixture Sophia checkout (SOPHIA_SOURCE, shared files
-// pinned by digest) and prepared product artifacts bound to fixture commits.
+// explicit inputs: a fixture Sophia Git checkout pinned by revision and staged
+// by the gate, a private build directory, and prepared product artifacts bound
+// to fixture commits and expected digests.
 //! Execute the actual shell launcher with supplied build/VT/session effects.
 //! The real xtask profile/verifier binary and the real artifact intake run.
 //! No device or live endpoint exists.
@@ -29,8 +30,28 @@ fn real_git() -> PathBuf {
         .expect("git on PATH")
 }
 
-/// A prepared artifact directory; returns its commit.
-fn artifact(directory: &Path, kind: &str, sdk_manifest: &Path) -> String {
+fn git(directory: &Path, args: &[&str]) -> String {
+    let out = Command::new(real_git())
+        .arg("-C")
+        .arg(directory)
+        .args(["-c", "user.name=Fixture", "-c", "user.email=f@example.com"])
+        .args(["-c", "commit.gpgsign=false"])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// Expected identity of a prepared artifact: commit, binary and config digests.
+struct Identity {
+    commit: String,
+    sha256: String,
+    config_sha256: Option<String>,
+}
+
+/// A prepared artifact directory and its expected identity.
+fn artifact(directory: &Path, kind: &str, sdk_manifest: &Path) -> Identity {
     fs::create_dir_all(directory).unwrap();
     let raw = format!(
         "tree {}\nauthor A U Thor <a@example.com> 0 +0000\ncommitter A U Thor <a@example.com> 0 +0000\n\
@@ -57,13 +78,19 @@ fn artifact(directory: &Path, kind: &str, sdk_manifest: &Path) -> String {
         sha256(body.as_bytes()),
         "1".repeat(40)
     );
+    let mut config_sha256 = None;
     let (name, manifest) = if kind == "bemenu" {
+        let sdk = fs::read_to_string(sdk_manifest).unwrap();
+        let revision = sdk
+            .split_once("\"revision\": \"")
+            .and_then(|(_, rest)| rest.get(..40))
+            .unwrap()
+            .to_owned();
         (
             "bemenu-artifact.manifest",
             format!(
-                "schema=1\n{common}sdk_revision={}\nsdk_manifest_sha256={}\n",
-                "2".repeat(40),
-                sha256(&fs::read(sdk_manifest).unwrap())
+                "schema=1\n{common}sdk_revision={revision}\nsdk_manifest_sha256={}\n",
+                sha256(sdk.as_bytes())
             ),
         )
     } else {
@@ -72,7 +99,9 @@ fn artifact(directory: &Path, kind: &str, sdk_manifest: &Path) -> String {
         } else {
             let text = format!("fixture {kind} configuration\n");
             fs::write(directory.join("config.kdl"), &text).unwrap();
-            format!("config=config.kdl\nconfig_sha256={}\n", sha256(text.as_bytes()))
+            let digest = sha256(text.as_bytes());
+            config_sha256 = Some(digest.clone());
+            format!("config=config.kdl\nconfig_sha256={digest}\n")
         };
         (
             "product-artifact.manifest",
@@ -80,14 +109,19 @@ fn artifact(directory: &Path, kind: &str, sdk_manifest: &Path) -> String {
         )
     };
     fs::write(directory.join(name), manifest).unwrap();
-    commit
+    Identity {
+        commit,
+        sha256: sha256(body.as_bytes()),
+        config_sha256,
+    }
 }
 
 struct Fixture {
     directory: PathBuf,
     root: PathBuf,
     sophia: PathBuf,
-    commits: Vec<(&'static str, String)>,
+    build: PathBuf,
+    identities: Vec<(&'static str, Identity)>,
 }
 impl Fixture {
     fn new() -> Self {
@@ -95,12 +129,12 @@ impl Fixture {
         fs::create_dir(&directory).unwrap();
         let root = directory.join("integration");
         let sophia = directory.join("sophia");
+        let build = directory.join("build");
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         for name in [
             "tools/fixtures",
             "tools/lib",
             "tools/probes/lom_workload",
-            "target/release",
             "pins/c-desktop-sdk",
         ] {
             fs::create_dir_all(root.join(name)).unwrap();
@@ -117,13 +151,14 @@ impl Fixture {
         ] {
             fs::copy(repo.join(name), root.join(name)).unwrap();
         }
+        fs::create_dir_all(build.join("integration-target/release")).unwrap();
         fs::copy(
             env!("CARGO_BIN_EXE_xtask"),
-            root.join("target/release/xtask"),
+            build.join("integration-target/release/xtask"),
         )
         .unwrap();
         let sdk = root.join("pins/c-desktop-sdk/manifest.json");
-        let commits = ["lom", "hagia", "bemenu", "provlita"]
+        let identities = ["lom", "hagia", "bemenu", "provlita"]
             .into_iter()
             .map(|kind| {
                 (
@@ -143,23 +178,28 @@ impl Fixture {
             &directory.join("bin/git"),
             &format!(
                 r#"
-case "$*" in
-    *'status --short'*) ;;
-    *'rev-parse HEAD'*) printf '%040d\n' 1 ;;
-    *'verify-commit '*) ;;
-    *'hash-object --stdin -t commit'*) exec {} hash-object --stdin -t commit ;;
-    *) exit 99 ;;
-esac"#,
-                real_git().display()
+if [[ "${{1:-}}" == -C && "${{2:-}}" == "{root}" ]]; then
+    case "$*" in
+        *'status --short'*) ;;
+        *'rev-parse HEAD'*) printf '%040d\n' 1 ;;
+        *'verify-commit '*) ;;
+        *) exit 99 ;;
+    esac
+    exit
+fi
+case "$*" in *'verify-commit '*) exit 0 ;; esac
+exec {git} "$@""#,
+                root = root.display(),
+                git = real_git().display()
             ),
         );
         script(&directory.join("bin/cargo"), "echo build >> \"$TRACE\"");
         script(
-            &sophia.join("target/release/sophia"),
+            &build.join("sophia-target/release/sophia"),
             r#"case "$2" in print-effective) cat "$SOPHIA_DESKTOP_PROFILE" ;; check) test -f "${3#--desktop-profile=}" ;; *) exit 99 ;; esac"#,
         );
         script(
-            &sophia.join("target/release/examples/desktop_profile_probe"),
+            &build.join("sophia-target/release/examples/desktop_profile_probe"),
             r#"
 [[ "$#" == 3 && "$3" == --require-launcher-binding ]]
 cat "$1"
@@ -188,18 +228,24 @@ exit "${SESSION_STATUS:-0}""#,
             "fixture shared catalog\n",
         )
         .unwrap();
-        let pins = [
-            "tools/run_sophia_session.sh",
-            "tools/fixtures/native_launcher_core.kdl",
-        ]
-        .map(|path| format!("{} {path}\n", sha256(&fs::read(sophia.join(path)).unwrap())))
-        .concat();
-        fs::write(root.join("pins/sophia-shared.sha256"), pins).unwrap();
+        git(&directory, &["init", "-q", "sophia"]);
+        git(&sophia, &["add", "-A"]);
+        git(&sophia, &["commit", "-q", "-m", "fixture"]);
+        let rev = git(&sophia, &["rev-parse", "HEAD"]);
+        fs::write(
+            root.join("pins/sophia.toml"),
+            format!(
+                "url = \"https://github.com/sophia-org/sophia.git\"\nrev = \"{}\"\n",
+                rev.trim()
+            ),
+        )
+        .unwrap();
         Self {
             directory,
             root,
             sophia,
-            commits,
+            build,
+            identities,
         }
     }
     fn run(&self, evidence: &str, proof: &str, session: &str) -> std::process::Output {
@@ -216,6 +262,7 @@ exit "${SESSION_STATUS:-0}""#,
             .env("HOME", &self.directory)
             .env("SOPHIA_LOM_NATIVE_GATE_ARM", "1")
             .env("SOPHIA_SOURCE", &self.sophia)
+            .env("SOPHIA_GATE_BUILD_DIR", &self.build)
             .env("SOPHIA_DESKTOP_PROFILE", self.directory.join("wm.kdl"))
             .env(
                 "SOPHIA_LOM_NATIVE_EVIDENCE_DIR",
@@ -224,20 +271,29 @@ exit "${SESSION_STATUS:-0}""#,
             .env("TRACE", self.directory.join("trace"))
             .env("PROOF_STATUS", proof)
             .env("SESSION_STATUS", session);
-        for (kind, commit) in &self.commits {
+        for (kind, identity) in &self.identities {
             let upper = kind.to_ascii_uppercase();
             command
                 .env(
                     format!("SOPHIA_{upper}_ARTIFACT"),
                     self.directory.join("artifacts").join(kind),
                 )
-                .env(format!("SOPHIA_{upper}_COMMIT"), commit);
+                .env(format!("SOPHIA_{upper}_COMMIT"), &identity.commit)
+                .env(format!("SOPHIA_{upper}_SHA256"), &identity.sha256);
+            if let Some(config) = &identity.config_sha256 {
+                command.env(format!("SOPHIA_{upper}_CONFIG_SHA256"), config);
+            }
         }
         command.output().unwrap()
     }
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
+        // The staged Sophia tree is read-only by design.
+        let _ = Command::new("chmod")
+            .args(["-R", "u+w"])
+            .arg(&self.directory)
+            .status();
         let _ = fs::remove_dir_all(&self.directory);
     }
 }
@@ -275,8 +331,11 @@ fn dock_launcher_uses_three_component_profile_and_refuses_failed_or_missing_evid
     let manifest = fs::read_to_string(f.directory.join("empty/identity.manifest")).unwrap();
     assert!(manifest.contains("provlita_binary_sha256="));
     assert!(manifest.contains("latency_acceptance=NOT_RUN"));
-    let provlita = &f.commits.iter().find(|(k, _)| *k == "provlita").unwrap().1;
-    assert!(manifest.contains(&format!("provlita_commit={provlita}")));
+    let provlita = &f.identities.iter().find(|(k, _)| *k == "provlita").unwrap().1;
+    assert!(manifest.contains(&format!("provlita_commit={}", provlita.commit)));
+    // Builds and staged Sophia files stay in the private build directory.
+    assert!(f.build.join("sophia-tree/tools/run_sophia_session.sh").is_file());
+    assert!(!f.sophia.join("target").exists() && !f.root.join("target").exists());
     assert!(
         !f.run("empty", "0", "0").status.success(),
         "must not overwrite evidence"
