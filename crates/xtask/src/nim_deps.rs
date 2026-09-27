@@ -291,8 +291,8 @@ impl FileEntry {
         Record::of("file")
             .with("package", &self.package)
             .with("path", &self.path)
-            .with("mode", &format!("{:04o}", self.mode))
-            .with("size", &self.size.to_string())
+            .with("mode", format!("{:04o}", self.mode))
+            .with("size", self.size.to_string())
             .with("sha256", &self.sha256)
     }
 }
@@ -509,10 +509,10 @@ pub fn probe_toolchain(
         records.push(
             Record::of("tool")
                 .with("role", role)
-                .with("path", &path.to_string_lossy())
-                .with("resolved", &resolved.to_string_lossy())
+                .with("path", path.to_string_lossy())
+                .with("resolved", resolved.to_string_lossy())
                 .with("version", line)
-                .with("sha256", &sha256(&read(resolved)?)),
+                .with("sha256", sha256(&read(resolved)?)),
         );
         if *role != "bwrap" {
             owned.insert(resolved.to_string_lossy().into_owned());
@@ -531,8 +531,8 @@ pub fn probe_toolchain(
         records.push(
             Record::of("tree")
                 .with("role", role)
-                .with("path", &dir.to_string_lossy())
-                .with("files", &files.len().to_string())
+                .with("path", dir.to_string_lossy())
+                .with("files", files.len().to_string())
                 .with("inventory_sha256", &inventory_sha256(&files)?),
         );
     }
@@ -613,7 +613,7 @@ impl Manifest {
                 .with("product", &self.product)
                 .with("source_commit", &self.source_commit)
                 .with("source_tree", &self.source_tree)
-                .with("store", &self.store.to_string_lossy()),
+                .with("store", self.store.to_string_lossy()),
         ];
         records.extend(self.toolchain.iter().cloned());
         records.push(Record::of("note").with("text", NOTE));
@@ -627,7 +627,7 @@ impl Manifest {
                     .with("origin_url", &p.origin_url)
                     .with("origin_vcs_revision", &p.origin_vcs_revision)
                     .with("requires", &p.requires)
-                    .with("files", &p.files.len().to_string())
+                    .with("files", p.files.len().to_string())
                     .with("inventory_sha256", &inventory_sha256(&p.files)?),
             );
         }

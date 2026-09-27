@@ -626,8 +626,8 @@ pub fn seal(out: &Path, header: Vec<Record>) -> Result<String, String> {
         records.push(
             Record::of("file")
                 .with("path", &file.path)
-                .with("mode", &format!("{:04o}", file.mode))
-                .with("size", &file.size.to_string())
+                .with("mode", format!("{:04o}", file.mode))
+                .with("size", file.size.to_string())
                 .with("sha256", &file.sha256),
         );
     }
@@ -820,7 +820,7 @@ pub fn header_for_tests(
             Record::of("product")
                 .with("name", name)
                 .with("commit", commit)
-                .with("tree", &"1".repeat(40))
+                .with("tree", "1".repeat(40))
                 .with("signer", "ABCDEF")
                 .with("nim_deps_sha256", deps),
         );
