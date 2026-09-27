@@ -47,6 +47,8 @@ make_artifact() {
     printf 'fixture operator guide\n' >"$artifact/share/doc/sophia/operations.md"
     install -m 644 "$ROOT_DIR/tools/lib/live_session_surface.sh" \
         "$artifact/tools/lib/live_session_surface.sh"
+    install -m 644 "$ROOT_DIR/tools/lib/activation_ledger.sh" \
+        "$artifact/tools/lib/activation_ledger.sh"
     install -m 755 "$ROOT_DIR/tools/verify_packaged_policy.sh" \
         "$artifact/tools/verify_packaged_policy.sh"
 
@@ -311,6 +313,40 @@ if env "${proof_env[@]}" "$ROOT_DIR/tools/install_live_session.sh" \
 fi
 [[ ! -e "$proof_prefix/releases/0006" ]]
 
+# Activation history: $PREFIX/activated-releases binds each activated
+# release_id to the digests of its manifest and SHA256SUMS.
+ledger_digests() {
+    awk -v id="$2" '$1 == id { print $2 " " $3 }' "$1/activated-releases"
+}
+release_digests() {
+    printf '%s %s\n' "$(sha256sum <"$1/manifest" | awk '{print $1}')" \
+        "$(sha256sum <"$1/SHA256SUMS" | awk '{print $1}')"
+}
+reseal() {
+    (
+        cd "$1"
+        find bin share target tools -type f -print0 | sort -z | \
+            xargs -0 sha256sum >SHA256SUMS
+    )
+}
+refuse_activation() {
+    local prefix_env_name="$1" release="$2" label="$3"
+    local -n prefix_env="$prefix_env_name"
+    if env "${prefix_env[@]}" "$ROOT_DIR/tools/activate_live_session_release.sh" \
+        "$release" >/dev/null 2>&1; then
+        echo "activation accepted $label" >&2
+        exit 1
+    fi
+}
+refuse_rollback() {
+    local prefix_env_name="$1" commands="$2" label="$3"
+    local -n prefix_env="$prefix_env_name"
+    if env "${prefix_env[@]}" "$commands/sophia-rollback" >/dev/null 2>&1; then
+        echo "rollback accepted $label" >&2
+        exit 1
+    fi
+}
+
 # Installed but never activated: a schema-6 release placed in the immutable
 # release directory (as a staged or interrupted install would leave it) cannot
 # be activated, even though its own bundled verifier accepts it.
@@ -321,26 +357,67 @@ legacy_env=(
     SOPHIA_COMMAND_DIR="$TEMP_DIR/legacy/commands"
 )
 env "${legacy_env[@]}" "$ROOT_DIR/tools/install_live_session.sh" "$hagia_artifact"
-grep -Fqx 0003 "$legacy_prefix/activated-releases"
+[[ "$(ledger_digests "$legacy_prefix" 0003)" == \
+    "$(release_digests "$legacy_prefix/releases/0003")" ]]
 cp -a "$old_candidate" "$legacy_prefix/releases/0006"
-if env "${legacy_env[@]}" "$ROOT_DIR/tools/activate_live_session_release.sh" \
-    "$legacy_prefix/releases/0006" >/dev/null 2>&1; then
-    echo "activation accepted a never-activated schema-6 release" >&2
-    exit 1
-fi
+refuse_activation legacy_env "$legacy_prefix/releases/0006" \
+    "a never-activated schema-6 release"
 [[ "$(readlink "$legacy_prefix/current")" == releases/0003 ]]
-if grep -Fqx 0006 "$legacy_prefix/activated-releases"; then
-    echo "a refused activation was recorded in the ledger" >&2
-    exit 1
-fi
-# An installed schema-6 release that WAS active before (here the previous
-# link of an installation predating the ledger) stays a valid rollback target
-# under its own verifier, and re-activating it is not a new candidate.
-ln -sfn releases/0006 "$legacy_prefix/previous"
-env "${legacy_env[@]}" "$TEMP_DIR/legacy/commands/sophia-rollback" >/dev/null
-[[ "$(readlink "$legacy_prefix/current")" == releases/0006 ]]
-env "${legacy_env[@]}" "$ROOT_DIR/tools/activate_live_session_release.sh" \
-    "$legacy_prefix/releases/0006" >/dev/null
+[[ -z "$(ledger_digests "$legacy_prefix" 0006)" ]]
+
+# (a) A genuine pre-ledger installation: current and previous exist and there
+# is no ledger. The first rollback records both once (with their digests),
+# and the pre-ledger previous, a schema-6 release, rolls back under its own
+# verifier.
+pre_prefix="$TEMP_DIR/pre/prefix"
+pre_commands="$TEMP_DIR/pre/commands"
+pre_env=(
+    SOPHIA_INSTALL_PREFIX="$pre_prefix"
+    SOPHIA_SESSION_DIR="$TEMP_DIR/pre/sessions"
+    SOPHIA_COMMAND_DIR="$pre_commands"
+)
+env "${pre_env[@]}" "$ROOT_DIR/tools/install_live_session.sh" "$hagia_artifact"
+rm "$pre_prefix/activated-releases"
+cp -a "$old_candidate" "$pre_prefix/releases/0006"
+ln -sfn releases/0006 "$pre_prefix/previous"
+env "${pre_env[@]}" "$pre_commands/sophia-rollback" >/dev/null
+[[ "$(readlink "$pre_prefix/current")" == releases/0006 ]]
+[[ "$(readlink "$pre_prefix/previous")" == releases/0003 ]]
+for id in 0003 0006; do
+    [[ "$(ledger_digests "$pre_prefix" "$id")" == \
+        "$(release_digests "$pre_prefix/releases/$id")" ]]
+done
+[[ "$(wc -l <"$pre_prefix/activated-releases")" == 2 ]]
+
+# (b) The same ID with changed contents (a bundled verifier that accepts
+# anything, resealed) is refused by activation and by rollback, before its
+# bundled verifier runs.
+printf '#!/usr/bin/env bash\nexit 0\n' >"$pre_prefix/releases/0003/tools/verify_packaged_policy.sh"
+reseal "$pre_prefix/releases/0003"
+refuse_activation pre_env "$pre_prefix/releases/0003" "a recorded ID with changed contents"
+refuse_rollback pre_env "$pre_commands" "a recorded ID with changed contents"
+[[ "$(readlink "$pre_prefix/current")" == releases/0006 ]]
+
+# (c) After the migration, links grant nothing. An unrecorded link target
+# is a new candidate: a schema-6 one is refused by rollback and by
+# activation...
+cp -a "$old_candidate" "$pre_prefix/releases/0007"
+sed -i 's/^release_id=.*/release_id=0007/' "$pre_prefix/releases/0007/manifest"
+ln -sfn releases/0007 "$pre_prefix/previous"
+refuse_rollback pre_env "$pre_commands" "an unrecorded previous link"
+refuse_activation pre_env "$pre_prefix/releases/0007" \
+    "an unrecorded schema-6 link target"
+[[ "$(readlink "$pre_prefix/current")" == releases/0006 ]]
+[[ -z "$(ledger_digests "$pre_prefix" 0007)" ]]
+# ...and one that passes the current verifier is activated and recorded.
+cp -a "$hagia_artifact" "$pre_prefix/releases/0008"
+sed -i 's/^release_id=.*/release_id=0008/' "$pre_prefix/releases/0008/manifest"
+ln -sfn releases/0008 "$pre_prefix/previous"
+env "${pre_env[@]}" "$ROOT_DIR/tools/activate_live_session_release.sh" \
+    "$pre_prefix/releases/0008" >/dev/null
+[[ "$(readlink "$pre_prefix/current")" == releases/0008 ]]
+[[ "$(ledger_digests "$pre_prefix" 0008)" == \
+    "$(release_digests "$pre_prefix/releases/0008")" ]]
 
 if env "${hagia_env[@]}" "$ROOT_DIR/tools/activate_live_session_release.sh" \
     "$hagia_artifact" >/dev/null 2>&1; then

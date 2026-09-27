@@ -51,16 +51,33 @@ or sealed file. With `hagia_included=false` the SDK fields and the sealed
 manifest must be absent. A schema-6 release is refused as a candidate:
 - Installation runs this repository's current verifier on the staged copy,
   as well as the candidate's bundled one.
-- Activating a release that was never activated before also runs the
-  current verifier. "Activated before" means recorded in
-  `$PREFIX/activated-releases`, which activation appends to after a
-  successful switch, or linked as `current` or `previous` by an
-  installation that predates that ledger.
+- Activating a release that is not recorded as activated also runs the
+  current verifier, before any link changes.
 
-A release that was activated before keeps its own packaged verifier, so an
-installed schema-6 release remains a valid rollback target. Historical
-schema-6 releases are otherwise read only through the legacy path of
-Sophia's Go verifier (root). Installation verifies the artifact
+Activation history lives in `$PREFIX/activated-releases`. Each line binds a
+release_id to the sha256 of its `manifest` and of its `SHA256SUMS`:
+- Activation appends the line only after a successful switch.
+- A recorded release keeps its own packaged verifier, so an installed
+  schema-6 release stays a valid rollback target.
+- A recorded ID whose manifest or `SHA256SUMS` no longer matches its entry
+  is refused, by activation and by rollback, before its bundled verifier
+  runs.
+- Links grant nothing, with one exception. An installation that has no
+  ledger yet, because it predates this change, records its existing
+  `current` and `previous` targets exactly once, on its first activation or
+  rollback. After that, only ledger entries count.
+- Rollback accepts only a recorded, unchanged previous release. An
+  unrecorded one is a new candidate and must be activated.
+
+Historical schema-6 releases are otherwise read only through the legacy path
+of Sophia's Go verifier (root).
+
+**Limitation.** These rules are enforced only by this repository's scripts
+and by releases built from them. Activation always runs from this
+repository's `tools/activate_live_session_release.sh`, but `sophia-rollback`
+is the current release's own copy. If the current release is a schema-6-era
+release, its rollback script predates the ledger, and it also predates the
+schema-7 verifier. It keeps its old behaviour. Installation verifies the artifact
 before an atomic `/opt/sophia/current` switch and keeps the former release as
 `previous`. No package contains an X11 WM bridge, an embedded legacy WM or
 bridge-specific configuration. Local installation does not require pushing or

@@ -254,7 +254,7 @@ pub const COMMANDS: [(&str, &str); 45] = [
 ];
 
 /// This repository's files shipped under tools/ at the same relative path.
-pub const TOOLS: [(&str, u32); 17] = [
+pub const TOOLS: [(&str, u32); 18] = [
     ("tools/session/run_desktop_session.sh", 0o755),
     ("tools/start_sophia_native_hot_reload_tty3.sh", 0o755),
     ("tools/verify_packaged_policy.sh", 0o755),
@@ -263,6 +263,7 @@ pub const TOOLS: [(&str, u32); 17] = [
     ("tools/config/proof_helpers.sh", 0o644),
     ("tools/config/99-sophia-uinput.rules", 0o644),
     ("tools/config/sophia-uinput.conf", 0o644),
+    ("tools/lib/activation_ledger.sh", 0o644),
     ("tools/lib/installed_attempt_ledger.sh", 0o644),
     ("tools/lib/installed_hagia_evidence.sh", 0o644),
     ("tools/lib/live_session_surface.sh", 0o644),

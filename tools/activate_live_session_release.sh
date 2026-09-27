@@ -5,6 +5,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=tools/lib/live_session_surface.sh
 source "$ROOT_DIR/tools/lib/live_session_surface.sh"
+# shellcheck source=tools/lib/activation_ledger.sh
+source "$ROOT_DIR/tools/lib/activation_ledger.sh"
 
 (( $# == 1 )) || {
     echo "usage: tools/activate_live_session_release.sh INSTALLED_RELEASE_DIR" >&2
@@ -59,6 +61,14 @@ release_id="$(awk -F= '$1 == "release_id" { print $2; exit }' "$release/manifest
     exit 1
 }
 
+# Activation history, before any verification or link change. A prefix
+# without a ledger records its existing current and previous targets once.
+# A recorded ID must still have exactly its recorded contents, or it is
+# refused here, before its bundled verifier could vouch for it.
+activation_ledger_bootstrap
+release_digests="$(activation_release_digests "$release")" || exit 1
+activation_history="$(activation_ledger_status "$release_id" "$release")" || exit 1
+
 hagia_included="$(awk -F= '$1 == "hagia_included" { print $2; exit }' "$release/manifest")"
 if [[ "$hagia_included" == true ]]; then
     [[ -x /usr/bin/bwrap ]] || {
@@ -85,24 +95,11 @@ fi
 )
 "$release/tools/verify_packaged_policy.sh" "$release"
 
-# A release activated before (recorded in the ledger, or the current or
-# previous link of an installation that predates the ledger) keeps its own
-# packaged verifier, so installed schema-6 releases stay valid targets. Every
-# other release is a NEW candidate: it must also pass this repository's
-# current verifier (schema 7), whatever its bundled verifier accepts.
-ACTIVATED_LEDGER="$PREFIX/activated-releases"
-previously_activated() {
-    local link target
-    if [[ -f "$ACTIVATED_LEDGER" ]] && grep -Fqx -- "$release_id" "$ACTIVATED_LEDGER"; then
-        return 0
-    fi
-    for link in current previous; do
-        target="$(readlink -f "$PREFIX/$link" 2>/dev/null || true)"
-        [[ -n "$target" && "$target" == "$release" ]] && return 0
-    done
-    return 1
-}
-if ! previously_activated; then
+# A recorded release keeps its own packaged verifier, so installed schema-6
+# releases stay valid rollback targets. Every other release is a NEW
+# candidate: it must also pass this repository's current verifier
+# (schema 7), whatever its bundled verifier accepts.
+if [[ "$activation_history" != recorded ]]; then
     "$ROOT_DIR/tools/verify_packaged_policy.sh" "$release" || {
         echo "Refusing to activate a new release that fails the current packaged-policy verifier: $release_id" >&2
         exit 1
@@ -135,14 +132,8 @@ if [[ "$old_current_path" != "$release" ]]; then
     ln -s "releases/$release_id" "$current_temp"
     mv -Tf "$current_temp" "$PREFIX/current"
 fi
-# Record the activation. Written only after verification and the switch.
-if ! { [[ -f "$ACTIVATED_LEDGER" ]] && grep -Fqx -- "$release_id" "$ACTIVATED_LEDGER"; }; then
-    ledger_temp="$PREFIX/.activated-releases.$$"
-    { [[ ! -f "$ACTIVATED_LEDGER" ]] || cat -- "$ACTIVATED_LEDGER"; printf '%s\n' "$release_id"; } \
-        >"$ledger_temp"
-    chmod 644 "$ledger_temp"
-    mv -Tf "$ledger_temp" "$ACTIVATED_LEDGER"
-fi
+# Record the activation, only after verification and the switch.
+[[ "$activation_history" == recorded ]] || activation_ledger_record "$release_id" "$release_digests"
 trap - EXIT
 
 echo "Activated Sophia release: $release_id"

@@ -9,6 +9,8 @@ self="$(readlink -f "$0")"
 source_release="$(cd "$(dirname "$self")/.." && pwd -P)"
 # shellcheck source=tools/lib/live_session_surface.sh
 source "$source_release/tools/lib/live_session_surface.sh"
+# shellcheck source=tools/lib/activation_ledger.sh
+source "$source_release/tools/lib/activation_ledger.sh"
 current="$(readlink "$PREFIX/current" 2>/dev/null || true)"
 previous="$(readlink "$PREFIX/previous" 2>/dev/null || true)"
 [[ -n "$current" && -n "$previous" ]] || {
@@ -23,6 +25,22 @@ target="$(readlink -f "$PREFIX/$previous")"
 releases="$(readlink -f "$PREFIX/releases")"
 [[ -n "$target" && "$target" == "$releases/"* && ! -L "$target" ]] || {
     echo "Previous release is outside the immutable release directory." >&2
+    exit 1
+}
+# Only a recorded release with exactly its recorded contents is a rollback
+# target (a prefix without a ledger records its current and previous once).
+# It keeps its own packaged verifier. An unrecorded one is a new candidate:
+# activate it with tools/activate_live_session_release.sh, which applies the
+# current verifier.
+activation_ledger_bootstrap
+target_id="$(activation_release_id "$target")"
+[[ "$target_id" =~ ^[0-9A-Za-z._-]+$ && "$target" == "$releases/$target_id" ]] || {
+    echo "Previous release has an invalid release_id or path." >&2
+    exit 1
+}
+activation_history="$(activation_ledger_status "$target_id" "$target")" || exit 1
+[[ "$activation_history" == recorded ]] || {
+    echo "Previous release $target_id was never activated here; activate it as a new candidate instead." >&2
     exit 1
 }
 (
