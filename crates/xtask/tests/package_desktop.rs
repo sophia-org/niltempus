@@ -299,7 +299,7 @@ fn the_release_layout_manifest_and_sums_are_exact() {
         assert_eq!(mode(&format!("bin/{name}")), 0o755, "{name}");
     }
     for (path, want) in TOOLS.iter().chain(SOPHIA_RETAINED.iter()) {
-        assert_eq!(mode(*path), *want, "{path}");
+        assert_eq!(mode(path), *want, "{path}");
     }
     assert_eq!(mode("manifest"), 0o644);
     assert_eq!(mode("share/sophia-policy/hagia/default.kdl"), 0o644);
