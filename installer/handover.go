@@ -50,7 +50,7 @@ func readHagiaProcess(pid int) (HagiaProcess, error) {
 	}
 	checkpoint := ""
 	for _, item := range strings.Split(string(env), "\x00") {
-		if value, ok := strings.CutPrefix(item, "HAGIA_POLICY_CHECKPOINT="); ok {
+		if value, ok := strings.CutPrefix(item, "SOPHIA_WM_POLICY_CHECKPOINT="); ok {
 			checkpoint = value
 		}
 	}

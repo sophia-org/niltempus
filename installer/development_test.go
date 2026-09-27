@@ -115,7 +115,7 @@ int main(void) { signal(SIGTERM,restart); puts(VERSION); fflush(stdout); while(!
 	defer cancel()
 	start := func() (*exec.Cmd, error) {
 		cmd := exec.CommandContext(ctx, binary)
-		cmd.Env = []string{"HAGIA_POLICY_CHECKPOINT=" + checkpoint}
+		cmd.Env = []string{"SOPHIA_WM_POLICY_CHECKPOINT=" + checkpoint}
 		out, err := cmd.StdoutPipe()
 		if err != nil {
 			return nil, err

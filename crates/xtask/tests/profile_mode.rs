@@ -225,8 +225,21 @@ fn retired() -> Vec<String> {
     ]
 }
 
-/// A frozen, byte-for-byte oracle may quote history; nothing else may.
+/// A frozen, byte-for-byte oracle may quote history.
 const FROZEN: [&str; 1] = ["crates/xtask/tests/fixtures/session_arguments_before_t027.sh"];
+
+// These exact lines attest compatibility or remove inherited legacy values.
+// None may select a legacy value for a newly launched process. Go's probe,
+// launcher and environment tests exercise their behavior.
+fn compatibility_lines() -> Vec<(&'static str, String)> {
+    vec![
+        ("installer/preflight.go", ["const policyEnvironmentContract = \"hagia_environment_contract schema=1 wm_policy=sophia-wm-policy-v1 names=SOPHIA_WM_POLICY_CHECKPOINT,SOPHIA_WM_POLICY_CANDIDATE,SOPHIA_WM_POLICY_PROFILE_ACTIVATION legacy=", "HAGIA_POLICY", "_CHECKPOINT,", "HAGIA_POLICY", "_CANDIDATE,", "HAGIA_POLICY", "_PROFILE_ACTIVATION precedence=presence\""].concat()),
+        ("installer/release.go", ["unset SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE ", "SOPHIA_HAGIA", "_PROFILE_MODE SOPHIA_DESKTOP_PROFILE_MODE"].concat()),
+        ("installer/launcher_test.go", ["printf '%s\\n' \"$", "SOPHIA_HAGIA", "_BIN\" \"$SOPHIA_DESKTOP_PROFILE\" \"${", "SOPHIA_HAGIA", "_PROFILE_MODE-unset}\" \"${SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE-unset}\" \"$SOPHIA_INSTALL_PREFIX\" \"$@\""].concat()),
+        ("installer/launcher_test.go", ["\tcmd.Env = append(os.Environ(), \"XDG_STATE_HOME=\"+state, \"", "SOPHIA_HAGIA", "_BIN=/stale/hagia\", \"SOPHIA_DESKTOP_PROFILE=/stale/profile\", \"", "SOPHIA_HAGIA", "_PROFILE_MODE=packaged-promotion\", \"SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1\")"].concat()),
+        ("installer/development_test.go", ["\tenv := strings.Join(buildEnvironment([]string{\"", "HAGIA_POLICY", "_CHECKPOINT=/live\", \"", "HAGIA_POLICY", "_SOCKET=/live/socket\", \"DBUS_SESSION_BUS_ADDRESS=live\", \"PATH=/usr/bin\"}), \"\\n\")"].concat()),
+    ]
+}
 
 fn walk(root: &Path, dir: &Path, hits: &mut Vec<String>, names: &[String], scanned: &mut usize) {
     for entry in fs::read_dir(dir).unwrap() {
@@ -241,7 +254,23 @@ fn walk(root: &Path, dir: &Path, hits: &mut Vec<String>, names: &[String], scann
             walk(root, &path, hits, names, scanned);
         } else if meta.is_file() && !FROZEN.contains(&relative.as_str()) {
             *scanned += 1;
-            let bytes = fs::read(path).unwrap();
+            let mut bytes = fs::read(path).unwrap();
+            for (file, line) in compatibility_lines() {
+                if file == relative {
+                    let text = String::from_utf8(bytes).unwrap();
+                    assert_eq!(
+                        text.lines().filter(|candidate| *candidate == line).count(),
+                        1,
+                        "compatibility exception changed: {file}"
+                    );
+                    bytes = text
+                        .lines()
+                        .filter(|candidate| *candidate != line)
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                        .into_bytes();
+                }
+            }
             for retired in names {
                 if bytes
                     .windows(retired.len())
@@ -263,7 +292,7 @@ fn no_retired_profile_name_remains_in_the_repository() {
     walk(&root, &root, &mut hits, &names, &mut scanned);
     assert!(scanned > 100, "scanned only {scanned} files");
     assert!(hits.is_empty(), "{hits:#?}");
-    // The frozen oracle is the only exemption and still exists.
+    // Frozen oracles must still exist.
     for path in FROZEN {
         assert!(root.join(path).is_file(), "{path}");
     }
