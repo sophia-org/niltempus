@@ -30,5 +30,8 @@ sha2 = "0.10.9"
 # builds this package (its conformance-host bins use ../ paths), so
 # provisioning fetches into a private CARGO_HOME rather than `cargo vendor`.
 sophia-conformance = { git = "https://github.com/sophia-org/sophia.git", rev = "d20faf3709ae21d94491f7a628ac9a4a86619cdf" }
+# The public desktop-profile loader, for the moved dock profile test (it was a
+# dev-dependency of Sophia's sophia-conformance).
+sophia-config = { git = "https://github.com/sophia-org/sophia.git", rev = "d20faf3709ae21d94491f7a628ac9a4a86619cdf" }
 sophia-protocol = { git = "https://github.com/sophia-org/sophia.git", rev = "d20faf3709ae21d94491f7a628ac9a4a86619cdf" }
 sophia-runtime = { git = "https://github.com/sophia-org/sophia.git", rev = "d20faf3709ae21d94491f7a628ac9a4a86619cdf" }

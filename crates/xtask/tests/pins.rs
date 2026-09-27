@@ -20,7 +20,8 @@ fn lock(runtime: &str, protocol: &str, extra: &str) -> String {
         "version = 4\n\n[[package]]\nname = \"live-tests\"\nversion = \"0.1.0\"\n\n\
          [[package]]\nname = \"sophia-protocol\"\nversion = \"0.1.0\"\nsource = \"{protocol}\"\n\n\
          [[package]]\nname = \"sophia-runtime\"\nversion = \"0.1.0\"\nsource = \"{runtime}\"\n\n\
-         [[package]]\nname = \"sophia-conformance\"\nversion = \"0.1.0\"\nsource = \"{conformance}\"\n{extra}"
+         [[package]]\nname = \"sophia-conformance\"\nversion = \"0.1.0\"\nsource = \"{conformance}\"\n\n\
+         [[package]]\nname = \"sophia-config\"\nversion = \"0.1.0\"\nsource = \"{conformance}\"\n{extra}"
     )
 }
 
