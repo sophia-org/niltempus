@@ -213,7 +213,12 @@ fn only_auto_or_packaged_promotion_can_be_requested() {
 fn retired() -> Vec<String> {
     vec![
         ["SOPHIA_HAGIA", "_PROFILE_MODE"].concat(),
-        ["HAGIA", "_POLICY_"].concat(),
+        // The retired Sophia-exported policy names (now SOPHIA_WM_POLICY_*).
+        // Hagia's own HAGIA_POLICY_FAULT_* test hooks and this repository's
+        // SOPHIA_HAGIA_POLICY_* gate settings are not among them.
+        ["HAGIA_POLICY", "_CHECKPOINT"].concat(),
+        ["HAGIA_POLICY", "_CANDIDATE"].concat(),
+        ["HAGIA_POLICY", "_PROFILE_ACTIVATION"].concat(),
         ["hagia-policy", ".checkpoint"].concat(),
         ["sophia_check", "_hagia_profile"].concat(),
         ["hagia/", "config.kdl"].concat(),
