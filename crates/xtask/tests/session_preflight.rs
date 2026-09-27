@@ -25,6 +25,13 @@ impl Table {
         )
         .unwrap();
     }
+    /// A process whose stat record is exactly `record` (possibly malformed).
+    fn raw(&self, pid: u32, record: &str) {
+        let dir = self.0.join(pid.to_string());
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("stat"), record).unwrap();
+        assert_eq!(fs::read_to_string(dir.join("stat")).unwrap(), record);
+    }
 }
 impl Drop for Table {
     fn drop(&mut self) {
