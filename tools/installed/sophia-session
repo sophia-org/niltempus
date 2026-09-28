@@ -40,7 +40,6 @@ export SOPHIA_BIN="$RELEASE_DIR/target/release/sophia"
 export SOPHIA_SESSION_PREFLIGHT="$RELEASE_DIR/target/release/active-session-preflight"
 export SOPHIA_INTEGRATION_XTASK="$RELEASE_DIR/target/release/sophia-integration-xtask"
 adapter="$RELEASE_DIR/tools/session/run_desktop_session.sh"
-export SOPHIA_NATIVE_WM_BIN="$RELEASE_DIR/target/release/sophia-wm-demo"
 # The policy client is a blind client: it sees no pixels, holds no
 # privileges, and every proposal it makes is validated by the Engine before
 # anything is drawn. It does not need to be immutable the way the Engine does,

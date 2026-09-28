@@ -20,6 +20,13 @@ Session recipes select shell components from the desktop profile. They no
 longer pass the legacy `--shell-process-default` fallback; setting
 `SOPHIA_HAGIA_SHELL_BIN` does not add a shell to the session.
 
+New packages do not build or seal the retired `sophia-wm-demo` IPC client.
+Historical runtime-identity records may still name it as `unavailable`, and
+archive verifiers continue to accept their bound older binaries. The old
+mixed-output physical recipe requires a Sophia pin that still contains that
+demo; it is not a 9P WM/output proof. Replacing that recipe belongs to the
+separate output-role migration, before moving its pin to a demo-free Sophia.
+
 ## Documentation
 
 - [Qualified 9P candidate](docs/final-9p-candidate.md): exact binaries, gates

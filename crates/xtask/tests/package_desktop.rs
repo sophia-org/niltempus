@@ -409,7 +409,6 @@ fn the_release_layout_manifest_and_sums_are_exact() {
     let mut expected = BTreeSet::new();
     for name in [
         "sophia",
-        "sophia-wm-demo",
         "sophia-integration-xtask",
         "active-session-preflight",
         "hagia",

@@ -327,7 +327,6 @@ pub const OPERATIONS_DOC: &str = "docs/operations.md";
 #[derive(Debug, Clone)]
 pub struct Binaries {
     pub sophia: PathBuf,
-    pub sophia_wm_demo: PathBuf,
     pub xtask: PathBuf,
     pub preflight: PathBuf,
 }
@@ -451,8 +450,6 @@ pub fn run_with(
         &[
             "-p",
             "sophia-cli",
-            "-p",
-            "sophia-wm-demo",
             "--features",
             "sophia-cli/native-session",
         ],
@@ -479,7 +476,6 @@ pub fn run_with(
         integration_commit,
         binaries: Binaries {
             sophia: sophia_target.join("release/sophia"),
-            sophia_wm_demo: sophia_target.join("release/sophia-wm-demo"),
             xtask: integration_target.join("release/xtask"),
             preflight: integration_target.join("release/active-session-preflight"),
         },
@@ -783,7 +779,6 @@ fn lay_out(a: &Assembly) -> Result<(), String> {
     let release = out.join("target/release");
     for (source, name) in [
         (&a.binaries.sophia, "sophia"),
-        (&a.binaries.sophia_wm_demo, "sophia-wm-demo"),
         (&a.binaries.xtask, "sophia-integration-xtask"),
         (&a.binaries.preflight, "active-session-preflight"),
         (&a.pair.hagia, "hagia"),

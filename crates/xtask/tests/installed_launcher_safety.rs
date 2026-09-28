@@ -23,6 +23,8 @@ fn installed_session_uses_only_versioned_release_artifacts() {
     assert!(INSTALLED_SESSION.contains("$RELEASE_DIR/target/release/sophia"));
     assert!(!INSTALLED_SESSION.contains("cargo "));
     assert!(!INSTALLED_SESSION.contains("sudo "));
+    assert!(!INSTALLED_SESSION.contains("SOPHIA_NATIVE_WM_BIN"));
+    assert!(!INSTALLED_SESSION.contains("sophia-wm-demo"));
     // Every path Sophia's launcher contract requires is absolute and sealed
     // in the release.
     for line in [
