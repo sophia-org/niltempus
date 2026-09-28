@@ -14,24 +14,10 @@ fn repo() -> PathBuf {
 /// Scripts that may still build until their own change lands, each for a
 /// stated reason; the list may only shrink. None of them is a converted
 /// physical runner.
-const PENDING: [(&str, &str); 4] = [
-    (
-        "tools/run_current_lom_panel_gate_tty4.sh",
-        "Lom lockstep (SDK + 9P): frozen until root's Lom change is gated",
-    ),
-    (
-        "tools/lom_gpu_content_hardware_proof.sh",
-        "Lom lockstep (SDK + 9P): frozen until root's Lom change is gated",
-    ),
-    (
-        "tools/check_lom_gpu_content_proof_verifiers.sh",
-        "the Lom self-test that scans those two scripts for builds",
-    ),
-    (
-        "tools/provision.sh",
-        "provisioning's offline --locked self-check of this repository's own xtask",
-    ),
-];
+const PENDING: [(&str, &str); 1] = [(
+    "tools/provision.sh",
+    "provisioning's offline --locked self-check of this repository's own xtask",
+)];
 
 /// Scripts explicitly exempt by ruling (fixed; not a waiting list).
 const EXEMPT: [(&str, &str); 1] = [(

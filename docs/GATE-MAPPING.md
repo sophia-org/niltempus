@@ -33,7 +33,7 @@ and Hagia; it is retired together with that IPC, not moved.
 | `check_keyboard_independence_verifier.sh`, `..._session_verifier.sh` (:133-134) | E `physical_selftests` |
 | `check_sophia_terminal_performance_reporter.sh` (:135) | E `physical_selftests` |
 | `check_installed_native_verifiers.sh` and its sub-checks (:136) | E `physical_selftests` (each sub-check its own test) |
-| `check_lom_gpu_content_proof_verifiers.sh` (moved at 9fcaec782) | E `verifier_self_tests`; the Lom gate itself is pending the Lom 9P seams |
+| `check_lom_gpu_content_proof_verifiers.sh` (moved at 9fcaec782) | E `verifier_self_tests`; Lom runners select 9P and consume verified prepared inputs |
 
 Newly automated here (manual only in Sophia): `check_hagia_profile_selection.sh`,
 `check_live_session_install.sh`, `check_rehearse_wm_9p.sh`
@@ -53,7 +53,7 @@ and `check_live_session_milestone5_verifier.sh` (`physical_selftests`).
 | `sophia-cli/tests/session_prepare_inputs.rs` (recipe part) | E `session_recipe_inputs.rs`; S keeps the controls and `check-launch` parts |
 | `sophia-cli/tests/session_application_arguments.rs` | E `session_recipe_application.rs` |
 | `sophia-cli/tests/launcher_safety.rs` installed sections (271-377) | E `installed_launcher_safety.rs` |
-| `sophia-cli/tests/launcher_safety.rs` Lom sections (44-53) | E `check_lom_gpu_content_proof_verifiers.sh` (pending Lom) |
+| `sophia-cli/tests/launcher_safety.rs` Lom sections (44-53) | E `check_lom_gpu_content_proof_verifiers.sh` and Lom workload launcher controls |
 | `sophia-cli/tests/launcher_safety.rs` remaining sections | S (on the reduced `run_sophia_session.sh`) |
 | `session_launcher_recovery.rs` `tty_adapter_refuses_controls_before_queries_or_privileged_handoff` | E `session_tty3_launcher.rs`; S keeps the generic recovery tests |
 | `xtask` `bemenu_artifact` tests | E `xtask/tests/bemenu_artifact.rs` |
@@ -128,5 +128,17 @@ Sophia's production 9P file export. It makes no physical rendering claim.
 
 ## Pending
 
-- Lom: the panel, launcher and dock gates, the GPU content proof and the
-  content-proof step, pending the Sophia 9P seams ([Lom content](lom-content.md)).
+The cleanup pin is Sophia `2d69924a9cac3ed1164089c7d1fae23b46d19d71`.
+Its relocated coverage passes here: 207 workspace tests, zero failures,
+10 ignored; clippy, fmt, the source-hidden installed tools, install/rollback
+and seven pinned self-tests pass. Go test/vet pass. Archive verification
+passes Hagia 5/5 and mirror 9/9 with explicit legacy classification.
+Provisioning fetched the signed Sophia commit locally with zero crate
+downloads and an unchanged registry index. Evidence is under
+`development-evidence/final-9p/niltempus/cleanup2-*.log`,
+`cleanup4-archives.log` and `cleanup-go-*.log`. Earlier failed logs retain the
+old dock preparation fixture and missing archive source arguments.
+
+- Lom: the 9P seams and runner conversion are implemented. A freshly bound
+  release artifact and attended GPU acceptance remain separate gates
+  ([Lom content](lom-content.md)).

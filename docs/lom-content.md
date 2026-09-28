@@ -27,10 +27,12 @@ repeated, late, wrong-wire or mismatched-epoch record. Sophia's protected
 content host has exchanged a complete candidate and resource release with
 Lom's CPU proof. This does not establish GPU execution or live presentation.
 
-The remaining runner work is conversion of the three Lom scripts to the
-prepared-input helper. Their existing private-target builds remain on the
-explicit bounds pending list until that conversion is gated. A freshly bound
-Lom artifact and any attended GPU run remain separate release evidence.
+The Lom runners now consume verified prepared inputs and prebuilt integration
+tools. The bounded helper builds Sophia and its profile-composition probe from
+the signed pin into private targets; the runners verify the prepared manifest
+before execution and after the proof. They perform no direct cargo builds.
+A freshly bound Lom artifact and any attended GPU run remain separate release
+evidence.
 
 ## Lom's side of the content path
 

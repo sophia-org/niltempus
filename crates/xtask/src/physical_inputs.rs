@@ -5,7 +5,7 @@
 //! ```text
 //! cargo xtask prepare-physical-inputs --sophia-root=/ABS --build-dir=/ABS \
 //!     --out=/ABS/NEW --sophia-features=native-session|atomic-scanout-live \
-//!     [--sophia-packages=sophia-cli|sophia-cli,sophia-wm-demo] \
+//!     [--sophia-packages=sophia-cli|sophia-cli,sophia-wm-demo|sophia-cli,sophia-conformance] \
 //!     [--hagia=/ABS/REPO --hagia-commit=<40> \
 //!      --hagia-nim-deps=/ABS --hagia-nim-deps-sha256=<64>] \
 //!     [--narthex=/ABS/REPO --narthex-commit=<40> \
@@ -46,7 +46,7 @@ use crate::{hex, pins, read, sha256};
 
 const USAGE: &str = "usage: cargo xtask prepare-physical-inputs --sophia-root=/ABS --build-dir=/ABS \
                      --out=/ABS/NEW --sophia-features=native-session|atomic-scanout-live \
-                     [--sophia-packages=sophia-cli[,sophia-wm-demo]] \
+                     [--sophia-packages=sophia-cli[,sophia-wm-demo|sophia-conformance]] \
                      [--hagia=/ABS --hagia-commit=SHA --hagia-nim-deps=/ABS --hagia-nim-deps-sha256=SHA] \
                      [--narthex=/ABS --narthex-commit=SHA --narthex-nim-deps=/ABS --narthex-nim-deps-sha256=SHA] \
                      [--profile=OWNER:PATH ...] | verify --out=/ABS --manifest-sha256=SHA";
@@ -82,7 +82,11 @@ const PRODUCT_KEYS: [&str; 9] = [
     "nim_command",
 ];
 pub const FEATURES: [&str; 2] = ["native-session", "atomic-scanout-live"];
-pub const PACKAGES: [&str; 2] = ["sophia-cli", "sophia-cli,sophia-wm-demo"];
+pub const PACKAGES: [&str; 3] = [
+    "sophia-cli",
+    "sophia-cli,sophia-wm-demo",
+    "sophia-cli,sophia-conformance",
+];
 
 pub fn run(repo: &Path, args: &[String]) -> Result<Vec<String>, String> {
     run_with(repo, args, std::env::var("CARGO_HOME").ok().as_deref())
@@ -195,6 +199,7 @@ impl<'a> Request<'a> {
         {
             "sophia-cli" => vec!["sophia-cli"],
             "sophia-cli,sophia-wm-demo" => vec!["sophia-cli", "sophia-wm-demo"],
+            "sophia-cli,sophia-conformance" => vec!["sophia-cli", "sophia-conformance"],
             other => {
                 return Err(format!(
                     "--sophia-packages must be one of {PACKAGES:?}: {other:?}"
@@ -354,10 +359,10 @@ impl<'a> Request<'a> {
             .packages
             .iter()
             .map(|p| {
-                let name = if *p == "sophia-cli" {
-                    "sophia"
-                } else {
-                    "sophia-wm-demo"
+                let name = match *p {
+                    "sophia-cli" => "sophia",
+                    "sophia-conformance" => "desktop_profile_probe",
+                    _ => "sophia-wm-demo",
                 };
                 (name.to_owned(), target.join("release").join(name))
             })
@@ -608,6 +613,12 @@ fn inputs_env(out: &Path, header: &[Record]) -> Result<String, String> {
     if field(header, "sophia", "packages").is_some_and(|p| p.contains("sophia-wm-demo")) {
         lines.push(("SOPHIA_WM_DEMO_BIN", format!("{dir}/bin/sophia-wm-demo")));
     }
+    if field(header, "sophia", "packages").is_some_and(|p| p.contains("sophia-conformance")) {
+        lines.push((
+            "SOPHIA_PROFILE_PROBE_BIN",
+            format!("{dir}/bin/desktop_profile_probe"),
+        ));
+    }
     for record in header.iter().filter(|r| r.kind == "product") {
         let name = &record.fields[0].1;
         let commit = &record.fields[1].1;
@@ -736,6 +747,25 @@ pub fn verify(out: &Path, expected: &str) -> Result<Sealed, String> {
     }
     let integration = header[1].expect(&["commit", "signer"])?;
     let sophia = header[2].expect(&["commit", "tree", "signer", "features", "packages"])?;
+    if !FEATURES.contains(&sophia[3]) || !PACKAGES.contains(&sophia[4]) {
+        return Err(format!(
+            "{MANIFEST} has unsupported Sophia features or packages"
+        ));
+    }
+    for package in sophia[4].split(',') {
+        use std::os::unix::fs::PermissionsExt as _;
+        let binary = match package {
+            "sophia-cli" => "sophia",
+            "sophia-conformance" => "desktop_profile_probe",
+            _ => "sophia-wm-demo",
+        };
+        let path = out.join("bin").join(binary);
+        if !std::fs::symlink_metadata(&path)
+            .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        {
+            return Err(format!("missing regular executable {}", path.display()));
+        }
+    }
     if !hex(integration[0], 40) || sophia[0] != pins::SOPHIA_REV || !hex(sophia[1], 40) {
         return Err(format!("{MANIFEST} names a malformed or unpinned commit"));
     }
@@ -815,13 +845,14 @@ pub fn verify(out: &Path, expected: &str) -> Result<Sealed, String> {
 }
 
 /// The inputs.env keys a runner may read, and nothing else.
-pub const ENV_KEYS: [&str; 11] = [
+pub const ENV_KEYS: [&str; 12] = [
     "SOPHIA_PHYSICAL_INPUTS",
     "SOPHIA_ROOT",
     "SOPHIA_COMMIT",
     "SOPHIA_INTEGRATION_COMMIT",
     "SOPHIA_BIN",
     "SOPHIA_WM_DEMO_BIN",
+    "SOPHIA_PROFILE_PROBE_BIN",
     "SOPHIA_HAGIA_BIN",
     "SOPHIA_HAGIA_COMMIT",
     "SOPHIA_NARTHEX_BIN",

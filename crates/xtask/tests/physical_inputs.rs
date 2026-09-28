@@ -361,3 +361,43 @@ fn builders_refuse_a_missing_or_misplaced_dependency_manifest_before_staging() {
         "{pair}"
     );
 }
+
+#[test]
+fn profile_probe_is_bound_and_required_by_the_package_selection() {
+    let dir = Dir::new("physical-profile-probe");
+    let (out, _) = prepared(&dir.0, &[]);
+    let tree = xtask::git_tree::inventory(&out.join("sophia-tree"))
+        .unwrap()
+        .tree;
+    let mut header = header_for_tests(&"2".repeat(40), &tree, &[]);
+    let packages = header[2]
+        .fields
+        .iter_mut()
+        .find(|(key, _)| key == "packages")
+        .unwrap();
+    packages.1 = "sophia-cli,sophia-conformance".into();
+    write_env_for_tests(&out, &header).unwrap();
+    let manifest = seal(&out, header.clone()).unwrap();
+    fs::write(out.join("physical-inputs.manifest"), &manifest).unwrap();
+    assert!(
+        verify(&out, &sha256(manifest.as_bytes()))
+            .unwrap_err()
+            .contains("desktop_profile_probe")
+    );
+
+    let probe = out.join("bin/desktop_profile_probe");
+    fs::write(&probe, "#!/bin/sh\nexit 0\n").unwrap();
+    fs::set_permissions(&probe, fs::Permissions::from_mode(0o555)).unwrap();
+    let manifest = seal(&out, header).unwrap();
+    fs::write(out.join("physical-inputs.manifest"), &manifest).unwrap();
+    let digest = sha256(manifest.as_bytes());
+    verify(&out, &digest).unwrap();
+    assert!(
+        fs::read_to_string(out.join("inputs.env"))
+            .unwrap()
+            .contains(&format!("SOPHIA_PROFILE_PROBE_BIN={}\n", probe.display()))
+    );
+    fs::set_permissions(&probe, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(&probe, "#!/bin/sh\nexit 1\n").unwrap();
+    assert!(verify(&out, &digest).is_err());
+}

@@ -154,8 +154,8 @@ impl Fixture {
         ] {
             fs::create_dir_all(root.join(name)).unwrap();
         }
-        // Every branch builds xtask and the host checker only from an
-        // accepted private CARGO_HOME; the fixture's cargo is a stub.
+        // The runner consumes prebuilt integration tools; only the bounded
+        // input-preparation operation is stubbed below.
         fs::write(
             root.join(".provision/accepted"),
             "url=fixture\nrev=fixture\ncargo_lock_sha256=fixture\ncargo_home=/nonexistent/fixture-cargo-home\n",
@@ -165,6 +165,7 @@ impl Fixture {
             "tools/run_current_lom_panel_gate_tty4.sh",
             "tools/session/run_desktop_session.sh",
             "tools/lib/artifacts.sh",
+            "tools/lib/physical_inputs.sh",
             "tools/fixtures/lom_panel_desktop.kdl",
             "tools/fixtures/lom_workload_budgets.json",
             "tools/probes/lom_workload/verify.py",
@@ -177,7 +178,7 @@ impl Fixture {
         fs::create_dir_all(build.join("integration-target/release")).unwrap();
         fs::copy(
             env!("CARGO_BIN_EXE_xtask"),
-            build.join("integration-target/release/xtask"),
+            build.join("integration-target/release/xtask-real"),
         )
         .unwrap();
         fs::copy(
@@ -221,7 +222,42 @@ exec {git} "$@""#,
                 git = real_git().display()
             ),
         );
-        script(&directory.join("bin/cargo"), "echo build >> \"$TRACE\"");
+        script(
+            &directory.join("bin/cargo"),
+            "echo forbidden-build >> \"$TRACE\"; exit 99",
+        );
+        script(
+            &build.join("integration-target/release/xtask"),
+            r#"
+if [[ "$1" != prepare-physical-inputs ]]; then
+    exec "$(dirname "$0")/xtask-real" "$@"
+fi
+shift
+sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+if [[ "${1:-}" == verify ]]; then
+    [[ "$*" == *"--manifest-sha256=$sha"* ]] || exit 99
+    exit 0
+fi
+[[ "$CARGO_BUILD_JOBS" == 2 && "$(ps -o ni= -p $$ | tr -d ' ')" == 19 ]] || exit 98
+[[ "$*" == *--sophia-packages=sophia-cli,sophia-conformance* ]] || exit 97
+out=
+for arg in "$@"; do
+    case "$arg" in --out=*) out=${arg#--out=} ;; esac
+done
+[[ "$out" == "$SOPHIA_GATE_BUILD_DIR/"* && ! -e "$out" ]] || exit 96
+mkdir -m 700 "$out"
+cat >"$out/inputs.env" <<ENV
+SOPHIA_PHYSICAL_INPUTS=$out
+SOPHIA_ROOT=$SOPHIA_GATE_BUILD_DIR/sophia-tree
+SOPHIA_COMMIT=$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)
+SOPHIA_INTEGRATION_COMMIT=0000000000000000000000000000000000000001
+SOPHIA_BIN=$SOPHIA_GATE_BUILD_DIR/sophia-target/release/sophia
+SOPHIA_PROFILE_PROBE_BIN=$SOPHIA_GATE_BUILD_DIR/sophia-target/release/examples/desktop_profile_probe
+ENV
+echo build >> "$TRACE"
+echo "physical_inputs status=prepared manifest_sha256=$sha dir=$out"
+"#,
+        );
         script(
             &build.join("sophia-target/release/sophia"),
             r#"case "$1 $2" in
@@ -306,6 +342,16 @@ exit "${SESSION_STATUS:-0}""#,
             .env("SOPHIA_LOM_NATIVE_GATE_ARM", "1")
             .env("SOPHIA_SOURCE", &self.sophia)
             .env("SOPHIA_GATE_BUILD_DIR", &self.build)
+            .env("CARGO_HOME", self.directory.join("cargo-home"))
+            .env(
+                "SOPHIA_INTEGRATION_XTASK",
+                self.build.join("integration-target/release/xtask"),
+            )
+            .env(
+                "SOPHIA_SESSION_PREFLIGHT",
+                self.build
+                    .join("integration-target/release/active-session-preflight"),
+            )
             .env("SOPHIA_DESKTOP_PROFILE", self.directory.join("wm.kdl"))
             .env(
                 "SOPHIA_LOM_NATIVE_EVIDENCE_DIR",

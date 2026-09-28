@@ -151,8 +151,8 @@ preflight with the prepared binary (Sophia's own preflight script
 `SOPHIA_BUILD_SESSION=false`, and verify the prepared inputs again before
 archiving. `crates/xtask/tests/physical_runner_bounds.rs` refuses any script
 that builds, reads a source checkout's target, uses a Nim cache or archives
-without that verification. Its pending list (the Lom scripts, frozen for the
-Lom lockstep; provisioning's self-check) may only shrink; its exempt list is
+without that verification. Its pending list contains only provisioning's
+self-check; its exempt list is
 fixed: tools/reload_policy_client.sh, the operator's own default-WM reload
 tool (not a gate; its conversion belongs with the niltempus prepare/reload
 path).

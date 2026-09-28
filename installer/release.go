@@ -27,7 +27,7 @@ export SOPHIA_INSTALL_PREFIX=` + prefix + `
 export SOPHIA_DESKTOP_PROFILE="$release/share/sophia-niltempus-desktop/` + profile + `"
 wm="${XDG_STATE_HOME:-$HOME/.local/state}/sophia-niltempus-desktop/development/hagia"
 if [[ ! -f "$wm" || ! -x "$wm" || ! -O "$wm" ]]; then
-    echo "Personal Hagia is missing or not user-owned; run ~/sophia-niltempus-desktop install." >&2
+    echo "Personal Hagia is missing or not user-owned; run niltempus prepare-hagia." >&2
     exit 1
 fi
 contract=$(timeout --kill-after=2s 10s "$wm" config check-environment-contract) || {

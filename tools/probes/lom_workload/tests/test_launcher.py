@@ -115,9 +115,8 @@ class LauncherTests(unittest.TestCase):
         shutil.copytree(repo / "tools/lib", self.tools / "lib")
         (self.tools / "session").mkdir()
         shutil.copy2(repo / "tools/session/run_desktop_session.sh", self.tools / "session/run_desktop_session.sh")
-        # The runner builds the recipe tool and host checker from an accepted
-        # private CARGO_HOME (the fixture's cargo is a stub) and runs the real
-        # binaries, which the gate supplies from its own build.
+        # The runner consumes prebuilt tools. Only preparation is stubbed;
+        # recipe dispatch reaches the real binary supplied by the gate.
         (self.root / ".provision").mkdir()
         (self.root / ".provision/accepted").write_text(
             "url=fixture\nrev=fixture\ncargo_lock_sha256=fixture\ncargo_home=/nonexistent/fixture-cargo-home\n")
@@ -142,6 +141,39 @@ class LauncherTests(unittest.TestCase):
             if not built.startswith("/") or not os.access(built, os.X_OK):
                 raise RuntimeError(f"{variable} must name this repository's built {name} (absolute)")
             shutil.copy2(built, integration / name)
+        (integration / "xtask").rename(integration / "xtask-real")
+        self.script(integration / "xtask", r'''
+if [[ "${1:-}" != prepare-physical-inputs ]]; then
+    exec "$(dirname "$0")/xtask-real" "$@"
+fi
+shift
+if [[ "${1:-}" == verify ]]; then
+    shift
+    [[ "$1" == --out=/* && "$2" == --manifest-sha256=* ]]
+    out=${1#--out=} expected=${2#--manifest-sha256=}
+    [[ "$(sha256sum "$out/inputs.env" | cut -d' ' -f1)" == "$expected" ]]
+    exit
+fi
+[[ "$(ps -o ni= -p $$ | tr -d ' ')" == 19 && "$CARGO_BUILD_JOBS" == 2 ]]
+out=
+for arg in "$@"; do
+    case "$arg" in --out=/*) out=${arg#--out=} ;; esac
+done
+[[ -n "$out" && ! -e "$out" ]]
+mkdir "$out"
+release="$SOPHIA_GATE_BUILD_DIR/sophia-target/release"
+cat > "$out/inputs.env" <<EOF
+SOPHIA_PHYSICAL_INPUTS=$out
+SOPHIA_ROOT=$SOPHIA_GATE_BUILD_DIR/sophia-tree
+SOPHIA_COMMIT=$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)
+SOPHIA_INTEGRATION_COMMIT=0000000000000000000000000000000000000001
+SOPHIA_BIN=$release/sophia
+SOPHIA_PROFILE_PROBE_BIN=$release/examples/desktop_profile_probe
+SOPHIA_PROFILE_DIR=$out/profiles
+EOF
+echo build >> "$TEST_TRACE"
+printf 'physical_inputs status=prepared manifest_sha256=%s sophia=fixture dir=%s\n' "$(sha256sum "$out/inputs.env" | cut -d' ' -f1)" "$out"
+''')
         # The explicit Sophia checkout: a real Git repository whose HEAD the
         # fixture pins (commit_sophia). The gate stages its exact tree.
         self.sophia = self.base / "sophia"
@@ -168,7 +200,7 @@ case "$*" in
     *"verify-commit "*) exit "${{TEST_BADSIG:-0}}" ;;
 esac
 exec {REAL_GIT} "$@"''')
-        self.script(self.fakebin / "cargo", 'echo build >> "$TEST_TRACE"')
+        self.script(self.fakebin / "cargo", 'echo forbidden-source-build >> "$TEST_TRACE"; exit 99')
         self.wm_profile = self.base / "wm.kdl"
         self.wm_profile.write_text('schema 1\nshortcut { profile "operator"; bind "Super+4" "policy:focus-workspace" "7"; }\n')
         # Configuration executables are supplied effects in this launcher test.
@@ -236,6 +268,8 @@ exit "${TEST_SESSION_STATUS:-0}"''')
                     "TEST_INTEGRATION_ROOT": str(self.root),
                     "SOPHIA_SOURCE": str(self.sophia), "SOPHIA_GATE_BUILD_DIR": str(self.build),
                     "SOPHIA_LOM_NATIVE_GATE_ARM": "1",
+                    "SOPHIA_INTEGRATION_XTASK": str(integration / "xtask"),
+                    "SOPHIA_SESSION_PREFLIGHT": str(integration / "active-session-preflight"),
                     "SOPHIA_DESKTOP_PROFILE": str(self.wm_profile),
                     "SOPHIA_LOM_NATIVE_EVIDENCE_DIR": str(self.evidence),
                     "TEST_TRACE": str(self.base / "trace"), "TEST_HOST": str(self.base / "host.log"),
@@ -294,7 +328,7 @@ exit "${TEST_SESSION_STATUS:-0}"''')
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["memory"]["slot_bound"], 4)
         self.assertEqual((self.evidence / "native-outcome.txt").read_text(), "native_exit_status=0\n")
-        self.assertEqual((self.base / "trace").read_text().splitlines(), ["build", "build", "build", "proof", "host", "session"])
+        self.assertEqual((self.base / "trace").read_text().splitlines(), ["build", "proof", "host", "session"])
         self.assertEqual((self.evidence / "wm-profile.kdl").read_bytes(), self.wm_profile.read_bytes())
         self.assertIn('bind "Super+4" "policy:focus-workspace" "7"', (self.evidence / "desktop.kdl").read_text())
         manifest = (self.evidence / "identity.manifest").read_text()
@@ -322,7 +356,8 @@ exit "${TEST_SESSION_STATUS:-0}"''')
     def test_missing_explicit_inputs_stop_before_build(self):
         for name in ("SOPHIA_SOURCE", "SOPHIA_GATE_BUILD_DIR", "SOPHIA_LOM_ARTIFACT", "SOPHIA_LOM_COMMIT",
                      "SOPHIA_LOM_SHA256", "SOPHIA_LOM_CONFIG_SHA256",
-                     "SOPHIA_HAGIA_ARTIFACT", "SOPHIA_HAGIA_COMMIT", "SOPHIA_HAGIA_SHA256"):
+                     "SOPHIA_HAGIA_ARTIFACT", "SOPHIA_HAGIA_COMMIT", "SOPHIA_HAGIA_SHA256",
+                     "SOPHIA_INTEGRATION_XTASK", "SOPHIA_SESSION_PREFLIGHT"):
             with self.subTest(name=name):
                 env = {k: v for k, v in self.env.items() if k != name}
                 result = subprocess.run(["bash", str(self.tools / "run.sh")], env=env,
@@ -331,6 +366,19 @@ exit "${TEST_SESSION_STATUS:-0}"''')
                 self.assertIn(f"{name} is required", result.stderr)
                 self.assertFalse((self.base / "trace").exists())
                 self.assertFalse(self.evidence.exists())
+
+    def test_prebuilt_tools_are_validated_before_preparation(self):
+        nonexec = self.base / "not-executable"
+        nonexec.write_text("fixture\n")
+        nonexec.chmod(0o600)
+        for name in ("SOPHIA_INTEGRATION_XTASK", "SOPHIA_SESSION_PREFLIGHT"):
+            for value in ("relative", str(nonexec)):
+                with self.subTest(name=name, value=value):
+                    result = self.run_launcher(**{name: value})
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("absolute prebuilt executable", result.stderr)
+                    self.assertFalse((self.base / "trace").exists())
+                    self.assertFalse(self.evidence.exists())
 
     def test_build_directory_must_be_explicit_private_and_outside_sources(self):
         for message, value in {"must be absolute": "build",

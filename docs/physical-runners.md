@@ -51,8 +51,8 @@ again before archiving. Sophia's session wrapper always receives
 
 `crates/xtask/tests/physical_runner_bounds.rs` refuses any script under
 `tools/` that builds, reads a source checkout's target, uses a Nim cache or
-archives without that verification. Its pending list (the Lom scripts,
-pending the Lom 9P seams; provisioning's self-check) only shrinks; its exempt
+archives without that verification. Its pending list contains only
+provisioning's self-check; its exempt
 list is fixed (`tools/reload_policy_client.sh`, the operator's own WM reload
 tool).
 
@@ -188,14 +188,16 @@ commit), reads the direct-scanout fixtures from the staged tree and verifies
 the inputs again before archiving. The archive verifier for
 `direct-scanout-runs` stays in Sophia (`sophia_conformance::direct_scanout_archive`).
 
-## Lom panel, launcher and dock gates (pending)
+## Lom panel, launcher and dock gates
 
 `tools/run_current_lom_panel_gate_tty4.sh [launcher|dock]`,
-`tools/lom_gpu_content_hardware_proof.sh` and their verifiers are pending the
-Lom 9P lockstep. Lom `0d1ff046` is 9P-only, and the pinned Sophia serves Lom's
-content proof and the legacy `--shell-process` shell over IPC only; see
-[Lom content](lom-content.md). They remain on the bounds pending list until the
-Sophia seams land; no IPC path is kept for them.
+`tools/lom_gpu_content_hardware_proof.sh` select 9P with Lom `0d1ff046` and
+consume verified prepared inputs. The panel gate also requests the pinned
+Sophia profile-composition binary. Both require an absolute prebuilt
+`SOPHIA_INTEGRATION_XTASK`; the panel gate additionally requires
+`SOPHIA_SESSION_PREFLIGHT`. Their controls exercise preparation and launch
+ordering; they do not establish an attended GPU pass. See
+[Lom content](lom-content.md).
 
 ## Retired: IPC product coverage
 

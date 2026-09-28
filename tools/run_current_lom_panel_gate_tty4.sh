@@ -24,7 +24,8 @@ if [[ "${1:-}" == launcher || "${1:-}" == dock ]]; then GATE_MODE="$1"; shift; f
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=tools/lib/artifacts.sh
 . "$ROOT_DIR/tools/lib/artifacts.sh"
-required=(SOPHIA_SOURCE SOPHIA_GATE_BUILD_DIR
+. "$ROOT_DIR/tools/lib/physical_inputs.sh"
+required=(SOPHIA_SOURCE SOPHIA_GATE_BUILD_DIR SOPHIA_INTEGRATION_XTASK SOPHIA_SESSION_PREFLIGHT
     SOPHIA_LOM_ARTIFACT SOPHIA_LOM_COMMIT SOPHIA_LOM_SHA256 SOPHIA_LOM_CONFIG_SHA256
     SOPHIA_HAGIA_ARTIFACT SOPHIA_HAGIA_COMMIT SOPHIA_HAGIA_SHA256)
 [[ "$GATE_MODE" == panel ]] || required+=(SOPHIA_BEMENU_ARTIFACT SOPHIA_BEMENU_COMMIT SOPHIA_BEMENU_SHA256)
@@ -38,6 +39,11 @@ EVIDENCE_DIR="${SOPHIA_LOM_NATIVE_EVIDENCE_DIR:-$ROOT_DIR/.artifacts/lom-panel-n
 for name in "${required[@]}"; do
     [[ -n "${!name:-}" ]] || { echo "$name is required (no default)" >&2; exit 2; }
 done
+for name in SOPHIA_INTEGRATION_XTASK SOPHIA_SESSION_PREFLIGHT; do
+    [[ "${!name}" == /* && -f "${!name}" && -x "${!name}" ]] || {
+        echo "$name must name an absolute prebuilt executable" >&2; exit 2;
+    }
+done
 [[ -z "$(git -C "$ROOT_DIR" status --short)" ]] || { echo "Integration source must be clean" >&2; exit 2; }
 git -C "$ROOT_DIR" verify-commit HEAD >/dev/null
 check_sophia_source "$SOPHIA_SOURCE"
@@ -50,8 +56,6 @@ mkdir -m 700 "$EVIDENCE_DIR"
 # Every build output and every staged Sophia file lives below this directory.
 BUILD_DIR="$(realpath -- "$SOPHIA_GATE_BUILD_DIR")"
 SOPHIA_TREE="$BUILD_DIR/sophia-tree"
-SOPHIA_TARGET="$BUILD_DIR/sophia-target"
-INTEGRATION_TARGET="$BUILD_DIR/integration-target"
 stage_sophia_tree "$SOPHIA_SOURCE" "$BUILD_DIR" "$SOPHIA_TREE"
 if [[ "$GATE_MODE" == panel ]]; then
     default_core="$ROOT_DIR/tools/fixtures/lom_panel_core.kdl"
@@ -83,26 +87,24 @@ from verify import budgets, unique_json_object
 with open(sys.argv[2], encoding="utf-8") as source:
     budgets(json.load(source, object_pairs_hook=unique_json_object))
 PY
-CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR="$SOPHIA_TARGET" nice -n 19 cargo build --locked --offline --release \
-    -p sophia-cli --features native-session --manifest-path "$SOPHIA_TREE/Cargo.toml"
-SOPHIA_BIN="$SOPHIA_TARGET/release/sophia"
+physical_inputs_prepare --sophia-features=native-session --sophia-packages=sophia-cli,sophia-conformance
+[[ "${PI[SOPHIA_INTEGRATION_COMMIT]}" == "$INTEGRATION_COMMIT" ]] || {
+    echo "Prepared inputs belong to another integration commit" >&2; exit 2;
+}
+SOPHIA_BIN="${PI[SOPHIA_BIN]}"
+PROFILE_PROBE_BIN="${PI[SOPHIA_PROFILE_PROBE_BIN]}"
+SOPHIA_TREE="${PI[SOPHIA_ROOT]}"
 if [[ "$GATE_MODE" == launcher ]]; then
     python3 "$ROOT_DIR/tools/probes/native_launcher/profile.py" \
         --lom "$LOM_BIN" --config "$LOM_CONFIG" --bemenu "$BEMENU_BIN" \
         > "$EVIDENCE_DIR/probe-overrides.kdl"
 fi
-# This repository's recipe tool and host checker drive the session through
-# the external launcher (tools/session/run_desktop_session.sh). They build
-# offline from the accepted private CARGO_HOME, which the marker names
-# (outside every source tree).
-XTASK_BIN="$INTEGRATION_TARGET/release/xtask"
-PREFLIGHT_BIN="$INTEGRATION_TARGET/release/active-session-preflight"
-[[ -f "$ROOT_DIR/.provision/accepted" ]] || { echo "Run tools/provision.sh first" >&2; exit 2; }
-provisioned_home=$(sed -n 's/^cargo_home=\(\/.*\)$/\1/p' "$ROOT_DIR/.provision/accepted")
-[[ -n "$provisioned_home" ]] || { echo "Re-run tools/provision.sh (marker has no cargo_home)" >&2; exit 2; }
-(export CARGO_HOME="$provisioned_home"
-    CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR="$INTEGRATION_TARGET" nice -n 19 cargo build --locked --offline \
-        --release -p xtask --bins --manifest-path "$ROOT_DIR/Cargo.toml")
+# Prebuilt integration tools are bound with the other candidate inputs.
+XTASK_BIN="$SOPHIA_INTEGRATION_XTASK"
+PREFLIGHT_BIN="$SOPHIA_SESSION_PREFLIGHT"
+for bin in "$XTASK_BIN" "$PREFLIGHT_BIN"; do
+    [[ "$bin" == /* && -f "$bin" && -x "$bin" ]] || { echo "Expected an absolute prebuilt tool: $bin" >&2; exit 2; }
+done
 if [[ "$GATE_MODE" == dock ]]; then
     "$XTASK_BIN" dock profile "$LOM_BIN" "$LOM_CONFIG" "$BEMENU_BIN" "$PROVLITA_BIN" "$PROVLITA_CONFIG" \
         > "$EVIDENCE_DIR/probe-overrides.kdl"
@@ -125,11 +127,9 @@ fi
 # and application declarations. Only the recorded probe overrides differ.
 "$SOPHIA_BIN" config print-effective --desktop-profile="$wm_profile" \
     > "$EVIDENCE_DIR/wm-profile.kdl"
-CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR="$SOPHIA_TARGET" nice -n 19 cargo build --locked --offline --release \
-    -p sophia-config --example desktop_profile_probe --manifest-path "$SOPHIA_TREE/Cargo.toml"
 probe_args=()
 [[ "$GATE_MODE" == panel ]] || probe_args+=(--require-launcher-binding)
-"$SOPHIA_TARGET/release/examples/desktop_profile_probe" \
+"$PROFILE_PROBE_BIN" \
     "$EVIDENCE_DIR/wm-profile.kdl" "$EVIDENCE_DIR/probe-overrides.kdl" "${probe_args[@]}" \
     > "$EVIDENCE_DIR/desktop.kdl"
 "$SOPHIA_BIN" config check --desktop-profile="$EVIDENCE_DIR/desktop.kdl"
@@ -147,6 +147,7 @@ probe_args=()
     fi
     printf 'integration_commit=%s\n' "$INTEGRATION_COMMIT"
     printf 'sophia_commit=%s\n' "$SOPHIA_COMMIT"
+    printf 'physical_inputs_manifest_sha256=%s\n' "$SOPHIA_PHYSICAL_INPUTS_SHA256"
     printf 'sophia_binary_sha256=%s\n' "$(sha256sum "$SOPHIA_BIN" | cut -d' ' -f1)"
     printf 'integration_xtask_sha256=%s\n' "$(sha256sum "$XTASK_BIN" | cut -d' ' -f1)"
     printf 'session_preflight_sha256=%s\n' "$(sha256sum "$PREFLIGHT_BIN" | cut -d' ' -f1)"
@@ -172,7 +173,9 @@ verify_candidate_inputs() {
     sha256sum --check --status "$EVIDENCE_DIR/inputs.sha256"
     [[ "integration_commit=$(git -C "$ROOT_DIR" rev-parse HEAD)" == "$(sed -n '/^integration_commit=/p' "$EVIDENCE_DIR/identity.manifest")" ]]
     [[ "sophia_commit=$(git -C "$SOPHIA_SOURCE" rev-parse HEAD)" == "$(sed -n '/^sophia_commit=/p' "$EVIDENCE_DIR/identity.manifest")" ]]
+    physical_inputs_verify_exported
     verify_staged_tree "$SOPHIA_SOURCE" "$SOPHIA_TREE"
+    git -C "$SOPHIA_SOURCE" verify-commit HEAD >/dev/null
     [[ -z "$(git -C "$ROOT_DIR" status --short)" && -z "$(git -C "$SOPHIA_SOURCE" status --short)" ]]
 }
 

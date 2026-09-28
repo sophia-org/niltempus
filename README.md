@@ -27,7 +27,7 @@ desktop's components and combinations live here.
 - [Hagia gates](docs/hagia-gates.md) and [Hagia workspaces](docs/hagia-workspaces.md).
 - [Narthex reference sheets](docs/narthex-reference-sheets.md).
 - [Same-hardware desktop comparison](docs/desktop-comparison.md).
-- [Lom content](docs/lom-content.md) (pending the Lom 9P seams).
+- [Lom content](docs/lom-content.md) (9P transport and scoped proof coverage).
 - [Quickshell](docs/quickshell.md): the X11 trace probe and panel probe, with
   the old coverage map.
 - [E1 descriptor hosts](docs/E1-descriptor-hosts.md): retained coverage of the
@@ -57,7 +57,7 @@ re-derives the copied files and contract digests from a Sophia clone.
 
 ## Attended Lom, launcher and dock gates
 
-Pending the Lom 9P lockstep (see [Lom content](docs/lom-content.md)). Moved
+The 9P Lom runners (see [Lom content](docs/lom-content.md)) moved
 from Sophia (rule 13): the Lom GPU/content proof, the tty4 panel,
 launcher and dock runners, their transcript verifiers, the workload budgets
 and fixtures, and the `xtask dock` profile generator and verifier. See
@@ -67,6 +67,8 @@ and fixtures, and the `xtask dock` profile generator and verifier. See
         --build-dir=/ABS [--nim-deps=/ABS --nim-deps-sha256=SHA]   # Hagia: reviewed deps required
     cargo xtask prepare-bemenu-artifact BEMENU-REPO SIGNED-COMMIT NEW-DIR
     SOPHIA_LOM_NATIVE_GATE_ARM=1 SOPHIA_SOURCE=/abs/sophia SOPHIA_GATE_BUILD_DIR=/abs/build \
+    CARGO_HOME=/abs/private-cargo-home SOPHIA_INTEGRATION_XTASK=/abs/xtask \
+    SOPHIA_SESSION_PREFLIGHT=/abs/active-session-preflight \
     SOPHIA_LOM_ARTIFACT=DIR SOPHIA_LOM_COMMIT=REV SOPHIA_LOM_SHA256=SHA SOPHIA_LOM_CONFIG_SHA256=SHA \
     SOPHIA_HAGIA_ARTIFACT=DIR SOPHIA_HAGIA_COMMIT=REV SOPHIA_HAGIA_SHA256=SHA \
     [SOPHIA_BEMENU_ARTIFACT=DIR SOPHIA_BEMENU_COMMIT=REV SOPHIA_BEMENU_SHA256=SHA] \
