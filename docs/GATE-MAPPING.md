@@ -128,6 +128,16 @@ Sophia's production 9P file export. It makes no physical rendering claim.
 
 ## Pending
 
+The final SDK-aligned Bemenu artifact also passes the isolated file fixture:
+source `8e0d56d3ca292edf056822eedcbf2985a1cd0083`, C SDK
+`8decca1d73699d6750c9228ecbf6e27f589d965d`, binary SHA-256
+`feac2f7fc211ea1fa99ffb3b297503643cf872b572c461ae23dcc890930c6194`.
+The helper and an independent digest agree. The fixture passes two openings,
+three candidates, one edit and activation, font isolation, unchanged neighbour
+state and held-lease retirement. Evidence:
+`development-evidence/final-9p/niltempus/bemenu-final-{prepare,live}.log`.
+No physical presentation or installed-session claim follows from this run.
+
 The cleanup pin is Sophia `2d69924a9cac3ed1164089c7d1fae23b46d19d71`.
 Its relocated coverage passes here: 207 workspace tests, zero failures,
 10 ignored; clippy, fmt, the source-hidden installed tools, install/rollback
