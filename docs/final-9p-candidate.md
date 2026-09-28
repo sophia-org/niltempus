@@ -1,5 +1,9 @@
 # Qualified 9P desktop candidate
 
+This records the first qualified release and its preparation. The operator
+subsequently installed it. The [Lom readiness update](lom-readiness-release.md)
+is now the prepared successor.
+
 Release `niltempus-583dcced3b89e9319866` was built by the Go installer from
 signed niltempus `4290d67c5427c1f08aaa8ebfd301e1ea67d795c1`. It has Plan 3,
 an external schema-7 manifest, one login entry and explicit 9P transports for
