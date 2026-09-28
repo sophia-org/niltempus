@@ -54,3 +54,19 @@ the previous component. See [component updates](component-updates.md).
 Evidence and the preservation receipt are under
 `development-evidence/component-updates/`, including `prepared-result.json`,
 `real-component-builds.log` and `actual-release-install-2.log`.
+
+## Namespace-init restart correction
+
+The first operator restart timed out: Lom ran as namespace PID 1 without a
+SIGTERM handler, so SIGTERM did not stop it. The original Go fixture installed
+a handler and missed this case. Fix `187386a` checks namespace identity and
+signal disposition, choosing SIGKILL only for init without a handler, and still
+signals the exact revalidated pidfd once. A native fixture first proves the
+ignored SIGTERM, then verifies replacement and neighbour survival. Go tests and
+vet passed; the CLI was updated without changing the installed release.
+
+One live retry succeeded: Lom PID 8823 became 14964 with the same selected
+binary hash. Sophia 8745, Hagia 8752 and Bemenu 9007 remained running. Evidence:
+`pid1-live-restart.log`. This confirms process replacement; no automated visual
+acceptance is claimed. Graceful SIGTERM handling remains product-side work for
+Lom, Hagia and Provlita; Bemenu already has a handler.
