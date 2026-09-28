@@ -305,11 +305,9 @@ conflicts, release tampering, provenance changes, symlink refusal, inherited
 session-variable removal and exclusive build ownership. Headless validation
 does not establish physical GPU or live-session acceptance.
 
-Nested Bubblewrap is **unverified** for a real build. The isolation test
-runs `bwrap` inside a sandboxed test run and passes, but no actual build has
-yet run the helper's own Bubblewrap-isolated Nim build inside this
-installer's `isolated()` Bubblewrap. Treat that combination as unverified
-until a real Plan-3 build exercises it.
+Nested Bubblewrap passed with the actual reviewed-dependency WM-pair build
+and the installed Hagia component builder. See the
+[component update release evidence](../docs/component-update-release.md).
 
 Build regressions cover a real Git checkout under umask 0002, safe child output
 permissions, unchanged source inode/mtime retention across commits, dirty-cache

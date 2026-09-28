@@ -1,6 +1,7 @@
 package main
 
 import (
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,7 +28,12 @@ func TestInstallAndRollbackInPrivateMounts(t *testing.T) {
 		t.Fatalf("%v: %s", err, out)
 	}
 	plan := manifest.Plan
-	plan.InstallerSHA256 = digest([]byte("alternate installer integration fixture"))
+	// A second spelling of the same Git commit gives the fixture a distinct
+	// release identity without falsifying the packaged installer's digest.
+	plan.Sources = maps.Clone(plan.Sources)
+	source := plan.Sources["lom"]
+	source.Reference = source.Commit + "^{commit}"
+	plan.Sources["lom"] = source
 	plan.ReleaseID = releaseID(plan)
 	for _, path := range []string{"manifest", "share/sophia-niltempus-desktop/desktop.kdl"} {
 		file := filepath.Join(second, path)
@@ -60,6 +66,26 @@ cmp "$wm" "$2/target/release/hagia"
 printf '\npersonal-wm-update\n' >> "$wm"
 chmod 700 "$wm"
 touch -t 200001010000 "$wm"
+# A managed update has matching binary and selection records. Historical
+# releases have no selection record and retain their original fixture behavior.
+python3 - "$wm" "$XDG_STATE_HOME/sophia-niltempus-desktop" <<'PY'
+import hashlib, json, pathlib, shutil, sys
+wm, state = map(pathlib.Path, sys.argv[1:])
+record = state / 'components/hagia/selection.json'
+if record.exists():
+    sha = hashlib.sha256(wm.read_bytes()).hexdigest()
+    selection = json.loads(record.read_text())
+    selection['previous'] = selection['current'].copy()
+    selection['current']['sha256'] = sha
+    record.write_text(json.dumps(selection))
+    version = record.parent / 'versions' / sha
+    shutil.copyfile(wm, version)
+    version.chmod(0o555)
+    metadata = wm.parent / 'hagia.json'
+    value = json.loads(metadata.read_text())
+    value['sha256'] = sha
+    metadata.write_text(json.dumps(value))
+PY
 cp -p "$wm" /tmp/fixture/personal-wm
 cp -p "$(dirname "$wm")/hagia.json" /tmp/fixture/personal-wm.json
 wm_identity=$(stat -c '%i:%a:%Y' "$wm")

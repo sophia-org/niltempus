@@ -93,6 +93,6 @@ denied. Logs are under `development-evidence/component-updates/`. A follow-up
 Go test run also passed after version publication was changed to publish a
 complete temporary file without overwriting an existing version.
 
-These checks do not qualify a newly built desktop release or exercise the full
-component-build command against a real product. The feature has not been
-installed into the running session.
+The subsequent [release verification](component-update-release.md) exercised
+the actual release and the component-build command for all three products.
+Live desktop acceptance remains separate.
