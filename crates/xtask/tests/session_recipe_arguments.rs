@@ -205,6 +205,39 @@ fn live_vectors_match_retained_builder_across_profiles_and_proofs() {
 }
 
 #[test]
+fn shell_selection_comes_from_the_profile_without_a_legacy_default_argument() {
+    let fixture = Fixture::new();
+    for retired in ["", "/not/a/fallback/shell"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_xtask"))
+            .args(["session-recipe", "prepare-arguments", "--profile=hagia"])
+            .arg(format!("--root={}", fixture.0.display()))
+            .arg(format!("--state-dir={}/state", fixture.0.display()))
+            .args([
+                "--binary=/bin/true",
+                "--terminal=/bin/true",
+                "--terminal-kind=kitty",
+                "--browser=/bin/true",
+                "--wm=/bin/true",
+            ])
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("SOPHIA_DESKTOP_PROFILE", fixture.0.join("desktop.kdl"))
+            .env("SOPHIA_HAGIA_SHELL_BIN", retired)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let args = String::from_utf8(output.stdout).unwrap();
+        assert!(
+            args.split('\0')
+                .any(|arg| arg.starts_with("--desktop-profile=")),
+            "{args:?}"
+        );
+        assert!(!args.contains("--shell-process"), "{args:?}");
+        assert!(!args.contains(retired) || retired.is_empty(), "{args:?}");
+    }
+}
+
+#[test]
 fn preparation_rejects_unknown_and_duplicate_options_without_output() {
     for options in [
         vec!["--unknown=true"],

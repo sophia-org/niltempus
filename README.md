@@ -16,6 +16,10 @@ manifest fields and installed paths retain their names for compatibility.
 Conformance tests for Sophia's generic contracts stay in Sophia; tests of this
 desktop's components and combinations live here.
 
+Session recipes select shell components from the desktop profile. They no
+longer pass the legacy `--shell-process-default` fallback; setting
+`SOPHIA_HAGIA_SHELL_BIN` does not add a shell to the session.
+
 ## Documentation
 
 - [Qualified 9P candidate](docs/final-9p-candidate.md): exact binaries, gates

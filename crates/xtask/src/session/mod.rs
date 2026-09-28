@@ -239,10 +239,6 @@ fn prepare(options: &BTreeMap<String, String>, extra: &[String]) -> Result<Vec<S
         if !wm.is_empty() {
             args.push(format!("--wm-process-default={wm}"));
         }
-        let shell = env("SOPHIA_HAGIA_SHELL_BIN", "")?;
-        if !shell.is_empty() {
-            args.push(format!("--shell-process-default={shell}"));
-        }
         if truecolor == "true" {
             args.push(format!(
                 "--session-app=palette={}",
