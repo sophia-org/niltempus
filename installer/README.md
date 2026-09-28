@@ -120,13 +120,13 @@ Update each repository's local `master` deliberately before planning if newer
 sources are wanted. Change a `reference` to an exact SHA to hold that component.
 Each plan records the resolved commits and Git signature status (`G`: valid
 trusted signature; `N`: unsigned). Present signatures must verify. Unsigned
-commits remain visible as such; currently Lom master has an unsigned docs tip.
+commits remain visible as such.
 The niltempus packager requires trusted signatures for its own source,
 Sophia, Hagia and Narthex.
 
 `build` checks out those exact commits in private clones. The signed
 niltempus Rust tool prepares the WM pair and packages Sophia;
-the personal assembler adds Lom, Bemenu and the two login profiles. Changed or
+the personal assembler adds Lom, Bemenu and the single 9P-only login profile. Changed or
 unexpected cached inputs are refused, never reset over. Bemenu uses a fresh checkout because Make
 does not track its embedded commit's compiler flags. Every attempt records the
 source paths, plan, stage logs and elapsed times; cached checkouts may advance on
