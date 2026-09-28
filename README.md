@@ -19,7 +19,7 @@ desktop's components and combinations live here.
 ## Documentation
 
 - [Qualified 9P candidate](docs/final-9p-candidate.md): exact binaries, gates
-  and the remaining personal-WM selection before installation.
+  and the approved preparation for installation.
 
 - [Operations](docs/operations.md): the installed runbook, bound Nim
   dependencies and prepared physical inputs.

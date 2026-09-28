@@ -3,7 +3,7 @@
 Release `niltempus-583dcced3b89e9319866` was built by the Go installer from
 signed niltempus `4290d67c5427c1f08aaa8ebfd301e1ea67d795c1`. It has Plan 3,
 an external schema-7 manifest, one login entry and explicit 9P transports for
-Hagia, Lom and Bemenu. It is prepared in private state, not installed.
+Hagia, Lom and Bemenu. It is selected for `niltempus install`, not installed.
 
 ## Source and binary binding
 
@@ -71,3 +71,21 @@ launcher therefore cannot use that binary. Installation deliberately does not
 replace an existing personal WM. The operator must explicitly select the
 qualified Hagia before using this candidate at the next login; changing the
 running WM is a separate action.
+
+## Approved preparation
+
+After qualification, the operator approved replacing the personal Hagia and
+selecting this release. The tested installer and exact qualified Hagia were
+published atomically to their user-owned paths. The old executables, WM
+metadata and prepared selection were backed up under
+`preparation-backups/20260928T002841Z` in the installer's user state.
+The new personal Hagia passes the environment-contract probe.
+
+The verified release was copied from the build cache into the installer's
+durable `releases/` directory. `niltempus prepare` recorded its canonical path,
+release ID and manifest SHA-256
+`3d24b28179983f723f52af305150e2e2bf0be54a224d0c7b1d844275cba6f91c`.
+Bare `niltempus install` now selects it. No installation, activation or reload
+was performed; the installed current link still selects `a37a709`, and the
+user's profile is unchanged. The preparation receipt is
+`final-9p/niltempus/approved-preparation.json` in development evidence.
