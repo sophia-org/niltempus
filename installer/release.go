@@ -24,7 +24,6 @@ script=$(readlink -f "${BASH_SOURCE[0]}")
 release=$(cd "$(dirname "$script")/.." && pwd)
 unset SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE SOPHIA_HAGIA_PROFILE_MODE SOPHIA_DESKTOP_PROFILE_MODE
 export SOPHIA_INSTALL_PREFIX=` + prefix + `
-export SOPHIA_DESKTOP_PROFILE="$release/share/sophia-niltempus-desktop/` + profile + `"
 wm="${XDG_STATE_HOME:-$HOME/.local/state}/sophia-niltempus-desktop/development/hagia"
 if [[ ! -f "$wm" || ! -x "$wm" || ! -O "$wm" ]]; then
     echo "Personal Hagia is missing or not user-owned; run niltempus prepare-hagia." >&2
@@ -38,6 +37,12 @@ if [[ "$contract" != '` + policyEnvironmentContract + `' ]]; then
     echo "Personal Hagia reports an incompatible WM environment contract." >&2
     exit 1
 fi
+profile=$(mktemp "${XDG_RUNTIME_DIR:?}/niltempus-components.XXXXXX.kdl")
+if ! "$release/target/release/niltempus" component-profile "$release" > "$profile"; then
+    rm -f -- "$profile"
+    exit 1
+fi
+export SOPHIA_DESKTOP_PROFILE="$profile"
 export SOPHIA_HAGIA_BIN="$wm"
 export SOPHIA_WM_BIN="$wm"
 export SOPHIA_INSTALLED_ATTEMPT_MODE=hagia
@@ -130,6 +135,12 @@ func verifyRelease(root string) (Manifest, error) {
 	}
 	if !maps.Equal(actual, manifest.Files) {
 		return manifest, fmt.Errorf("release contents or permissions differ from manifest")
+	}
+	if manifest.Plan.ComponentUpdates {
+		tool, ok := actual["target/release/niltempus"]
+		if !ok || tool.Mode&0111 == 0 || tool.SHA256 != manifest.Plan.InstallerSHA256 {
+			return manifest, fmt.Errorf("component launcher requires the exact plan-bound installer executable")
+		}
 	}
 	sums, err := os.ReadFile(filepath.Join(root, "SHA256SUMS"))
 	if err != nil {

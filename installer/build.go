@@ -82,6 +82,9 @@ func buildRelease(plan Plan, loc Locations) (string, error) {
 	if err := validateInputs(plan.Inputs, plan.Sources); err != nil {
 		return "", err
 	}
+	if !plan.ComponentUpdates {
+		return "", fmt.Errorf("new builds require component update support; rerun plan")
+	}
 	profile, err := os.ReadFile(plan.Profile)
 	if err != nil {
 		return "", err
@@ -177,6 +180,13 @@ func buildRelease(plan Plan, loc Locations) (string, error) {
 		return "", err
 	}
 	if err := writeFile(filepath.Join(stage, "bin/sophia-niltempus-desktop-session"), []byte(sessionLauncher()), 0755); err != nil {
+		return "", err
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	if err := copyFile(self, filepath.Join(stage, "target/release/niltempus"), 0755); err != nil {
 		return "", err
 	}
 	if err := writeFile(filepath.Join(stage, "share/wayland-sessions", desktopFile), []byte(desktopEntry()), 0644); err != nil {

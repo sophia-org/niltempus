@@ -46,6 +46,9 @@ type Plan struct {
 	// Plan schema 3: the reviewed Nim dependency manifests (paths and
 	// independently supplied digests) and the Hagia C SDK revision.
 	Inputs *PlanInputs `json:"inputs,omitempty"`
+	// Historical sealed-path releases omit this. New launches select managed
+	// component paths while the base desktop release stays immutable.
+	ComponentUpdates bool `json:"component_updates,omitempty"`
 }
 
 // Omitted on historical plans so their release identities stay unchanged.

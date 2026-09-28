@@ -12,6 +12,7 @@ const USAGE: &str = "usage:
   xtask direct-scanout-gate [WIDTH HEIGHT HOLD WORKLOAD] [--overlay-proof] [--cost] [--cursor] [--atomic-cursor]
   xtask verify-archives [--legacy]
   xtask verify-release /ABS/RELEASE-DIR --c-sdk-rev=<40 lowercase hex>   (read-only; runs without the checkout)
+  xtask verify-c-sdk /ABS/SNAPSHOT --revision=<40 lowercase hex>   (read-only; runs without the checkout)
   xtask desktop-comparison install-reference|prepare|prepare-soak|cursor-theme|gate|status|attest|preflight|qualify|capture|finalize|replay|workload|verify|report ...
   xtask session-recipe prepare-arguments|prepare-inputs|stage-proofs|prepare-environment --name=value ... -- [session arguments]
   xtask check-pins
@@ -51,10 +52,30 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
     if arguments.first().map(String::as_str) == Some("verify-release") {
         return xtask::release_verify::run(&arguments[1..]);
     }
+    // Product builders take explicit signed sources and private build inputs.
+    // The installed component updater must not need this build checkout.
+    if arguments.first().map(String::as_str) == Some("prepare-product-artifact") {
+        return xtask::product_artifact::run(&arguments[1..]);
+    }
+    if arguments.first().map(String::as_str) == Some("verify-c-sdk") {
+        let [_, path, revision] = arguments else {
+            return Err("usage: xtask verify-c-sdk /ABS/SNAPSHOT --revision=40hex".into());
+        };
+        let revision = revision
+            .strip_prefix("--revision=")
+            .ok_or("missing SDK revision")?;
+        if !Path::new(path).is_absolute() {
+            return Err("SDK snapshot must be absolute".into());
+        }
+        let snapshot = xtask::c_sdk_pin::verify_vendored(Path::new(path), revision)?;
+        return Ok(vec![format!(
+            "c_sdk_verification schema=1 status=pass revision={} manifest_sha256={}",
+            snapshot.revision, snapshot.manifest_sha256
+        )]);
+    }
     let repo = workspace_root()?;
     match arguments.first().map(String::as_str) {
         Some("prepare-bemenu-artifact") => xtask::bemenu_artifact::run(&repo, &arguments[1..]),
-        Some("prepare-product-artifact") => xtask::product_artifact::run(&arguments[1..]),
         Some("prepare-wm-pair") => xtask::wm_pair::run(&arguments[1..]),
         Some("prepare-physical-inputs") => xtask::physical_inputs::run(&repo, &arguments[1..]),
         Some("nim-deps") => xtask::nim_deps::run(&arguments[1..]),

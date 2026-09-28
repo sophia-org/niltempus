@@ -147,3 +147,16 @@ fn the_installed_tool_verifies_a_release_with_its_checkout_hidden() {
     let output = hidden(&binary, &["verify-release", &out, &rev]);
     assert!(!output.status.success(), "{output:?}");
 }
+
+#[test]
+fn installed_product_builder_dispatch_is_independent_of_its_checkout() {
+    let (_release, binary) = installed_binary();
+    let output = hidden(&binary, &["prepare-product-artifact"]);
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        error.contains("usage: cargo xtask prepare-product-artifact"),
+        "{error}"
+    );
+    assert!(!error.contains("No such file or directory"), "{error}");
+}

@@ -121,6 +121,7 @@ func createSourcePlan(config Config) (Plan, error) {
 		return Plan{}, err
 	}
 	plan := Plan{Schema: currentPlanSchema, Sources: map[string]Source{}, Profile: profile, ProfileSHA256: digest(data), InstallerSHA256: installerHash}
+	plan.ComponentUpdates = true
 	for _, name := range components {
 		repo, ok := config.Repositories[name]
 		if !ok {

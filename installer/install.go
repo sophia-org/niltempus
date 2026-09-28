@@ -53,6 +53,11 @@ func installRelease(artifact string, loc Locations) error {
 	if err := installPersonalHagia(artifact, manifest, loc); err != nil {
 		return err
 	}
+	if manifest.Plan.ComponentUpdates {
+		if err := seedComponents(artifact, manifest, loc); err != nil {
+			return err
+		}
+	}
 	// Sophia's generic entries stay under our prefix. Only this personal login
 	// entry is registered with the display manager.
 	if err := checked(exec.Command("sudo", "install", "-m", "644", filepath.Join(target, "share/wayland-sessions", desktopFile), filepath.Join("/usr/share/wayland-sessions", desktopFile))); err != nil {

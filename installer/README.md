@@ -209,10 +209,23 @@ Neither command
 logs out or restarts a running session. External application and Lom config
 files stay user-owned and are not rolled back with the release.
 
-## Hagia updates and IPC reload
+## Component updates
+
+See [Independent component updates](../docs/component-updates.md) for the full
+selection, verification and restart contract. After one login with an updated
+launcher, use `niltempus reload lom`, `niltempus reload bemenu`, or
+`niltempus reload hagia`. `restart NAME` skips the build;
+`prepare-component NAME` selects without signalling, and
+`rollback-component NAME` restores the previous component.
+
+The generated login profile selects stable user-owned component paths. The
+sealed desktop and its launch policies stay intact. Existing sessions using
+sealed executable paths require one new login to adopt this setup.
+
+### Hagia restart
 
 The normal **Sophia niltempus Desktop** login uses the user-owned Hagia path.
-Sophia and the other packaged components remain root-owned under `/opt`. The
+Sophia and the base packaged components remain root-owned under `/opt`. The
 packaged Hagia is retained for provenance and initial setup; restarting the WM uses
 the prepared personal binary, with no temporary release swap.
 
@@ -222,7 +235,7 @@ For WM source changes, run:
 niltempus reload-hagia
 ```
 
-This builds only committed Hagia source, validates it against installed Sophia
+This builds only signed Hagia source with its reviewed dependencies, validates it against installed Sophia
 and the installed desktop profile, atomically replaces the user-owned executable,
 and requests restart through Sophia's control IPC. It never invokes Cargo or
 rebuilds Sophia or the shells. An unchanged, hash-verified Hagia build is reused.

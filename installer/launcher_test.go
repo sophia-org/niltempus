@@ -24,13 +24,16 @@ printf '%s\n' "$SOPHIA_HAGIA_BIN" "$SOPHIA_DESKTOP_PROFILE" "${SOPHIA_HAGIA_PROF
 		t.Fatal(err)
 	}
 	cmd := exec.Command(launcher, "one argument", "second")
+	if err := writeFile(filepath.Join(root, "target/release/niltempus"), []byte("#!/bin/sh\ntest \"$1\" = component-profile || exit 99\nprintf '# profile fixture\\n'\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	state := filepath.Join(root, "user state")
 	wm = filepath.Join(state, "sophia-niltempus-desktop/development/hagia")
 	wmSource := "#!/bin/sh\ntest \"$#\" = 2 && test \"$1\" = config && test \"$2\" = check-environment-contract || exit 99\nprintf '%s\\n' '" + policyEnvironmentContract + "'\n"
 	if err := writeFile(wm, []byte(wmSource), 0755); err != nil {
 		t.Fatal(err)
 	}
-	cmd.Env = append(os.Environ(), "XDG_STATE_HOME="+state, "SOPHIA_HAGIA_BIN=/stale/hagia", "SOPHIA_DESKTOP_PROFILE=/stale/profile", "SOPHIA_HAGIA_PROFILE_MODE=packaged-promotion", "SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1")
+	cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR="+root, "XDG_STATE_HOME="+state, "SOPHIA_HAGIA_BIN=/stale/hagia", "SOPHIA_DESKTOP_PROFILE=/stale/profile", "SOPHIA_HAGIA_PROFILE_MODE=packaged-promotion", "SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1")
 	got, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%v: %s", err, got)
@@ -40,7 +43,14 @@ printf '%s\n' "$SOPHIA_HAGIA_BIN" "$SOPHIA_DESKTOP_PROFILE" "${SOPHIA_HAGIA_PROF
 
 func TestDefaultLauncherRunsTheWMOverNineP(t *testing.T) {
 	root, wm, out := runLauncher(t, "bin/sophia-niltempus-desktop-session", sessionLauncher())
-	want := strings.Join([]string{wm, filepath.Join(root, "share/sophia-niltempus-desktop/desktop.kdl"), "unset", "unset", prefix, "--wm-process=" + wm, "--wm-transport=9p2000.L", "one argument", "second", ""}, "\n")
+	profile := strings.Split(out, "\n")[1]
+	if !strings.HasPrefix(profile, filepath.Join(root, "niltempus-components.")) {
+		t.Fatal(profile)
+	}
+	if data, err := os.ReadFile(profile); err != nil || string(data) != "# profile fixture\n" {
+		t.Fatal("missing private profile", err)
+	}
+	want := strings.Join([]string{wm, profile, "unset", "unset", prefix, "--wm-process=" + wm, "--wm-transport=9p2000.L", "one argument", "second", ""}, "\n")
 	if out != want {
 		t.Fatalf("got %s; want %s", out, want)
 	}

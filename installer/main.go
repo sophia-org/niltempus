@@ -19,6 +19,10 @@ status            Inspect the selected installed release
 rollback          Select the previous desktop release (sudo)
 prepare-hagia     Build/preflight only Hagia into its user-owned executable path
 reload-hagia      Prepare Hagia, then restart it through Sophia control IPC
+prepare-component NAME Build/verify hagia, lom or bemenu without restarting
+reload NAME       Build/verify and restart only that component
+restart NAME      Restart the selected component without building
+rollback-component NAME Select the previous component and restart it
 
 The niltempus repository owns the installer and desktop tooling.
 Existing sophia-niltempus-desktop configuration and state paths are retained.
@@ -110,15 +114,11 @@ func run(args []string) error {
 				return err
 			}
 			defer unlock()
-			binary, err := prepareHagia(loc)
-			if err != nil {
-				return err
-			}
-			fmt.Printf("Personal Hagia ready: %s\n", binary)
+			action := "reload"
 			if args[0] == "prepare-hagia" {
-				return nil
+				action = "prepare-component"
 			}
-			return reloadHagia(binary, filepath.Join(prefix, "current/target/release/sophia"), os.Getenv("SOPHIA_CONTROL_SOCKET"))
+			return componentCommand(action, "hagia", loc)
 		case "status":
 			current := filepath.Join(prefix, "current")
 			if _, err := os.Lstat(current); os.IsNotExist(err) {
@@ -134,6 +134,20 @@ func run(args []string) error {
 	}
 	if len(args) == 2 {
 		switch args[0] {
+		case "prepare-component", "reload", "restart", "rollback-component":
+			unlock, err := buildLock(loc)
+			if err != nil {
+				return err
+			}
+			defer unlock()
+			return componentCommand(args[0], args[1], loc)
+		case "component-profile":
+			profile, err := componentProfile(args[1], loc)
+			if err != nil {
+				return err
+			}
+			fmt.Print(profile)
+			return nil
 		case "prepare":
 			unlock, err := buildLock(loc)
 			if err != nil {

@@ -126,7 +126,7 @@ func TestPersonalWMPreparationDoesNotRequireIntegrationProvisioning(t *testing.T
 	if err := writeJSON(loc.Config, config); err != nil {
 		t.Fatal(err)
 	}
-	selected, err := developmentSource(loc)
+	_, selected, err := componentInputs(loc, "hagia")
 	if err != nil || selected.Commit != source.Commit || selected.Path != source.Path {
 		t.Fatalf("WM-only source selection needs desktop provisioning: %+v: %v", selected, err)
 	}

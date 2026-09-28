@@ -130,3 +130,26 @@ fn a_missing_manifest_or_unbound_commit_is_refused() {
         "{error}"
     );
 }
+
+#[test]
+fn installed_snapshot_verifier_has_a_versioned_verdict_and_refuses_tamper() {
+    let dir = Dir::new("sdk-vendored-cli");
+    let revision = snapshot(&dir.0);
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_xtask"))
+            .arg("verify-c-sdk")
+            .arg(&dir.0)
+            .arg(format!("--revision={revision}"))
+            .output()
+            .unwrap()
+    };
+    let output = run();
+    assert!(output.status.success(), "{output:?}");
+    let record = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(record.lines().count(), 1);
+    assert!(record.starts_with(&format!(
+        "c_sdk_verification schema=1 status=pass revision={revision} manifest_sha256="
+    )));
+    fs::write(dir.0.join("source/src/client.c"), "changed").unwrap();
+    assert!(!run().status.success());
+}
