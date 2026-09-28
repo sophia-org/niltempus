@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -39,10 +40,11 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 func TestExactPidfdRestartObservesReplacementAndPreservesNeighbour(t *testing.T) {
-	t.Run("ordinary", func(t *testing.T) { testShellReplacement(t, false) })
-	t.Run("protected", func(t *testing.T) { testShellReplacement(t, true) })
+	t.Run("ordinary", func(t *testing.T) { testShellReplacement(t, false, false) })
+	t.Run("protected", func(t *testing.T) { testShellReplacement(t, true, false) })
+	t.Run("protected_without_term_handler", func(t *testing.T) { testShellReplacement(t, true, true) })
 }
-func testShellReplacement(t *testing.T, protected bool) {
+func testShellReplacement(t *testing.T, protected, defaultTERM bool) {
 	loc := Locations{State: t.TempDir()}
 	self, err := os.Executable()
 	if err != nil {
@@ -52,13 +54,29 @@ func testShellReplacement(t *testing.T, protected bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := ComponentVersion{Name: "lom", Source: Source{Commit: fmt.Sprintf("%040x", 1), Signature: "G"}, SHA256: digest(bytes)}
-	if err := selectComponent(loc, old, self); err != nil {
-		t.Fatal(err)
-	}
+	supervisorHash := digest(bytes)
 	dir := t.TempDir()
 	supervisor := filepath.Join(dir, "sophia")
 	if err := os.WriteFile(supervisor, bytes, 0755); err != nil {
+		t.Fatal(err)
+	}
+	peer := self
+	if defaultTERM {
+		// Go installs a SIGTERM handler; this native peer deliberately doesn't,
+		// matching Lom under --as-pid-1 and exposing the original timeout.
+		peer = filepath.Join(dir, "default-term-peer")
+		compile := exec.Command("cc", "-Wall", "-Werror", "-x", "c", "-", "-o", peer)
+		compile.Stdin = strings.NewReader("#include <unistd.h>\nint main(void) { for (;;) pause(); }\n")
+		if output, err := compile.CombinedOutput(); err != nil {
+			t.Fatalf("native fixture: %v: %s", err, output)
+		}
+		bytes, err = os.ReadFile(peer)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := ComponentVersion{Name: "lom", Source: Source{Commit: fmt.Sprintf("%040x", 1), Signature: "G"}, SHA256: digest(bytes)}
+	if err := selectComponent(loc, old, peer); err != nil {
 		t.Fatal(err)
 	}
 	pidfile := filepath.Join(dir, "pid")
@@ -80,7 +98,7 @@ func testShellReplacement(t *testing.T, protected bool) {
 	var running ShellProcess
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		running, err = findShell(componentPath(loc, "lom"), digest(bytes))
+		running, err = findShell(componentPath(loc, "lom"), supervisorHash)
 		if err == nil {
 			break
 		}
@@ -94,6 +112,18 @@ func testShellReplacement(t *testing.T, protected bool) {
 		t.Fatal(err)
 	}
 	defer unix.Close(fd)
+	if defaultTERM {
+		if running.StopSignal != unix.SIGKILL {
+			t.Fatal("namespace init without a handler needs SIGKILL")
+		}
+		if err := unix.PidfdSendSignal(fd, unix.SIGTERM, nil, 0); err != nil {
+			t.Fatal(err)
+		}
+		ready := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+		if n, err := unix.Poll(ready, 100); err != nil || n != 0 {
+			t.Fatalf("control: default SIGTERM unexpectedly stopped namespace init: %d %v", n, err)
+		}
+	}
 	if _, err := findShell(componentPath(loc, "bemenu"), digest(bytes)); err == nil {
 		t.Fatal("matched unrelated path")
 	}
@@ -108,17 +138,38 @@ func testShellReplacement(t *testing.T, protected bool) {
 	if err := selectComponent(loc, next, candidate); err != nil {
 		t.Fatal(err)
 	}
-	if err := restartShell(loc, "lom", running, fd, old.SHA256); err != nil {
+	if err := restartShell(loc, "lom", running, fd, supervisorHash); err != nil {
 		t.Fatal(err)
 	}
 	if err := neighbour.Process.Signal(syscall.Signal(0)); err != nil {
 		t.Fatal("neighbour stopped", err)
 	}
 	// Reusing the captured identity cannot signal the successor.
-	if err := restartShell(loc, "lom", running, fd, old.SHA256); err == nil {
+	if err := restartShell(loc, "lom", running, fd, supervisorHash); err == nil {
 		t.Fatal("stale restart accepted")
 	}
 	selection, _ := componentSelection(loc, "lom")
 	encoded, _ := json.Marshal(selection)
 	t.Log(string(encoded))
+}
+
+func TestComponentStopSignal(t *testing.T) {
+	for _, c := range []struct {
+		status string
+		signal unix.Signal
+	}{
+		{"NSpid:\t42\t1\nSigCgt:\t0\n", unix.SIGKILL},
+		{"NSpid:\t42\t1\nSigCgt:\t4000\n", unix.SIGTERM},
+		{"NSpid:\t42\nSigCgt:\t0\n", unix.SIGTERM},
+	} {
+		got, err := componentStopSignal(c.status)
+		if err != nil || got != c.signal {
+			t.Fatalf("%q: %v %v", c.status, got, err)
+		}
+	}
+	for _, status := range []string{"", "NSpid: 1\n", "NSpid: 1\nSigCgt: x\n", "NSpid: 0\nSigCgt: 0\n", "NSpid: 1\nNSpid: 2\nSigCgt: 0\n"} {
+		if _, err := componentStopSignal(status); err == nil {
+			t.Fatalf("accepted %q", status)
+		}
+	}
 }

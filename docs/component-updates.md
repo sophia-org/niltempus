@@ -59,8 +59,11 @@ protocol changes.
 For shell components, the installer finds exactly one owned process at the
 managed executable path, with the exact `--serve` argv, one 9P socket variable
 and the installed Sophia binary in its ancestry. It opens a pidfd and checks the
-identity again before sending one SIGTERM. There is no process-name kill,
-PID-reuse race, process-group signal, sudo or forced-kill fallback. Sophia's
+identity again before sending one signal. Ordinarily this is SIGTERM. A
+namespace PID 1 without a SIGTERM handler ignores that signal, so the updater
+uses SIGKILL for that exact process and reports why. The namespace identity and
+signal disposition are checked again before signalling. There is no process-name
+kill, PID-reuse race, process-group signal, sudo or timed escalation. Sophia's
 existing supervisor retires the old connection and resources and respawns the
 component. The command observes the replacement PID, binary hash, endpoint and
 supervisor. This confirms process replacement, not negotiation, a rendered
@@ -82,7 +85,9 @@ Tests cover atomic publication, previous-version retention, neighbour isolation,
 stale requests, malformed metadata, changed hashes, private login-profile
 rendering and real CLI installation in private mounts. The signal test uses
 actual pidfds and private supervised fixture processes, including a Bubblewrap
-PID/user namespace; it is not a live Lom or Bemenu rendering test. Existing WM
+PID/user namespace and a native peer with no SIGTERM handler. The latter first
+proves that SIGTERM leaves namespace init running, then verifies replacement
+with the selected signal. This is not a live Lom or Bemenu rendering test. Existing WM
 restart tests retain their private CLI fixture. Live desktop acceptance remains
 separate. No running desktop is changed by these tests.
 

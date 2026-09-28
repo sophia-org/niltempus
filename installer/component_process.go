@@ -18,6 +18,47 @@ type ShellProcess struct {
 	SHA256     string
 	Socket     string
 	Supervisor int
+	StopSignal unix.Signal
+}
+
+// A PID namespace's init ignores default-fatal signals without a handler.
+// SIGKILL from the ancestor namespace still stops it, after which Session owns
+// connection retirement and respawn. Choose once; never escalate on a timer.
+func componentStopSignal(status string) (unix.Signal, error) {
+	init, havePID, haveCaught := false, false, false
+	var caught uint64
+	for _, line := range strings.Split(status, "\n") {
+		key, value, _ := strings.Cut(line, ":")
+		switch key {
+		case "NSpid":
+			ids := strings.Fields(value)
+			if havePID || len(ids) == 0 {
+				return 0, fmt.Errorf("invalid namespace PID record")
+			}
+			for _, id := range ids {
+				pid, err := strconv.Atoi(id)
+				if err != nil || pid <= 0 {
+					return 0, fmt.Errorf("invalid namespace PID")
+				}
+				init = pid == 1
+			}
+			havePID = true
+		case "SigCgt":
+			var err error
+			caught, err = strconv.ParseUint(strings.TrimSpace(value), 16, 64)
+			if haveCaught || err != nil {
+				return 0, fmt.Errorf("invalid caught-signal mask")
+			}
+			haveCaught = true
+		}
+	}
+	if !havePID || !haveCaught {
+		return 0, fmt.Errorf("missing process signal or namespace identity")
+	}
+	if init && caught&(1<<(unix.SIGTERM-1)) == 0 {
+		return unix.SIGKILL, nil
+	}
+	return unix.SIGTERM, nil
 }
 
 func procFields(pid int) ([]string, error) {
@@ -103,12 +144,20 @@ func shellProcess(pid int, binary, sophiaHash string) (ShellProcess, error) {
 	if supervisor == 0 {
 		return ShellProcess{}, fmt.Errorf("no matching Sophia supervisor")
 	}
+	status, err := os.ReadFile(root + "/status")
+	if err != nil {
+		return ShellProcess{}, err
+	}
+	stop, err := componentStopSignal(string(status))
+	if err != nil {
+		return ShellProcess{}, err
+	}
 	// Don't combine observations across a PID's lifetime.
 	again, err := procFields(pid)
 	if err != nil || again[19] != fields[19] {
 		return ShellProcess{}, fmt.Errorf("process changed")
 	}
-	return ShellProcess{pid, fields[19], hash, socket, supervisor}, nil
+	return ShellProcess{pid, fields[19], hash, socket, supervisor, stop}, nil
 }
 func findShell(binary, sophiaHash string) (ShellProcess, error) {
 	entries, err := os.ReadDir("/proc")
@@ -143,7 +192,12 @@ func restartShell(loc Locations, name string, old ShellProcess, fd int, sophiaHa
 	if err != nil {
 		return err
 	}
-	if err := unix.PidfdSendSignal(fd, unix.SIGTERM, nil, 0); err != nil {
+	signalName := "SIGTERM"
+	if old.StopSignal == unix.SIGKILL {
+		signalName = "SIGKILL (namespace init has no SIGTERM handler)"
+	}
+	fmt.Fprintf(os.Stderr, "Restarting %s: stopping PID %d with %s; waiting for Session replacement...\n", name, old.PID, signalName)
+	if err := unix.PidfdSendSignal(fd, old.StopSignal, nil, 0); err != nil {
 		return fmt.Errorf("shell stop refused: %w", err)
 	}
 	deadline := time.Now().Add(20 * time.Second)
