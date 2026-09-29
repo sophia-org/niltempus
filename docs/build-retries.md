@@ -49,3 +49,24 @@ all-target clippy pass. Added controls retain cached outputs across retries,
 keep logs separate, reject redirected/shared caches, and detect changed tool
 bytes or symlink targets without executing the changed tool. These checks do
 not qualify a graphical session or authorize desktop activation.
+
+## Installation permissions
+
+The successful build produced `niltempus-932fe18006b8d7617cb6`. Installation
+then exposed a private directory inherited from the assembler's umask:
+`share/sophia-niltempus-desktop` had mode 0700. The privileged copy preserved
+that mode and changed ownership to root, preventing the user from reading the
+profile. The release had already been selected as `current`; `previous`
+still pointed to `niltempus-4f498ff25c3a6d89c16f`.
+
+Sealing now sets staged release directories to 0755, and verification refuses
+other directory modes before invoking sudo. This changes no file inventory or
+release identity. Repairing that one directory in the existing artifact and
+installed copy requires no compilation or resealing. Repeating installation
+of the current release preserves the previous selection.
+
+Validation: the installer suite and `go vet` pass. A subprocess under umask
+077 checks publication and refusal before sudo while retaining private parent
+permissions. Real installation, repeated installation and rollback pass with
+the built release in private mounts, including directory-mode checks and
+preservation of `previous` when reinstalling `current`.

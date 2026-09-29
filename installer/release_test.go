@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -147,6 +148,11 @@ func TestVerifyReleaseAndCurrentLink(t *testing.T) {
 
 func TestVerifyRefusesReleaseDamage(t *testing.T) {
 	cases := map[string]func(string, Plan) error{
+		"private profile directory": func(root string, _ Plan) error {
+			return os.Chmod(filepath.Join(root, "share/sophia-niltempus-desktop"), 0700)
+		},
+		"private release directory":  func(root string, _ Plan) error { return os.Chmod(root, 0700) },
+		"writable release directory": func(root string, _ Plan) error { return os.Chmod(root, 0775) },
 		"modified binary": func(root string, _ Plan) error {
 			return os.WriteFile(filepath.Join(root, "target/release/hagia"), []byte("wrong"), 0755)
 		},
@@ -237,6 +243,38 @@ func TestVerifyRefusesReleaseDamage(t *testing.T) {
 				t.Fatal("accepted damaged release")
 			}
 		})
+	}
+}
+
+func TestReleaseDirectoriesUnderPrivateUmask(t *testing.T) {
+	if os.Getenv("NILTEMPUS_PRIVATE_UMASK_TEST") != "1" {
+		cmd := exec.Command("sh", "-c", `umask 077; exec "$@"`, "umask-test", os.Args[0], "-test.run=^TestReleaseDirectoriesUnderPrivateUmask$")
+		cmd.Env = append(os.Environ(), "NILTEMPUS_PRIVATE_UMASK_TEST=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("private-umask child: %v: %s", err, out)
+		}
+		return
+	}
+	root, _ := fixtureRelease(t)
+	if _, err := verifyRelease(root); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{root, filepath.Join(root, "share/sophia-niltempus-desktop")} {
+		info, err := os.Stat(path)
+		if err != nil || info.Mode().Perm() != 0755 {
+			t.Fatalf("published directory: %v: %v", info, err)
+		}
+	}
+	info, err := os.Stat(filepath.Dir(root))
+	if err != nil || info.Mode().Perm() != 0700 {
+		t.Fatalf("private parent changed: %v: %v", info, err)
+	}
+	// This remains readable to its owner, but would fail after root's cp -a.
+	if err := os.Chmod(filepath.Join(root, "share/sophia-niltempus-desktop"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := installRelease(root, Locations{}); err == nil || !strings.Contains(err.Error(), "release directory must have mode 0755") {
+		t.Fatalf("install must reject private directories before sudo: %v", err)
 	}
 }
 

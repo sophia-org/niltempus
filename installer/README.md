@@ -149,6 +149,10 @@ Cargo uses two jobs. Git checkout and compiler children use umask
 that Hagia rejects as group-writable. The original repositories and profile are
 never chmodded. The WM pair binds Hagia's shipped profile by its digest, and
 the assembled release's profiles are checked before sealing.
+Sealing sets release directories to mode 0755, including directories added by
+the Go assembler under a private umask. Verification checks these modes before
+installation, so root ownership cannot make the session profile inaccessible.
+Private cache and state parents retain their permissions.
 Build and profile-check commands run without network access at reduced CPU
 priority under Bubblewrap with DRM
 devices, display sockets, runtime sockets and inherited Sophia variables hidden.

@@ -60,6 +60,7 @@ test ! -e /opt/sophia
 "$1" prepare "$2"
 "$1" install
 test "$(readlink /opt/sophia-niltempus-desktop/current)" = "releases/$3"
+test -z "$(find /opt/sophia-niltempus-desktop/releases/"$3" -type d ! -perm 0755 -print)"
 wm="$XDG_STATE_HOME/sophia-niltempus-desktop/development/hagia"
 test -x "$wm" && test -O "$wm"
 cmp "$wm" "$2/target/release/hagia"
@@ -93,6 +94,8 @@ grep -q 'control host-admin' /opt/sophia-niltempus-desktop/current/share/sophia-
 "$1" install
 "$1" install /tmp/fixture/second
 test "$(readlink /opt/sophia-niltempus-desktop/current)" = "releases/$4"
+test "$(readlink /opt/sophia-niltempus-desktop/previous)" = "releases/$3"
+"$1" install /tmp/fixture/second
 test "$(readlink /opt/sophia-niltempus-desktop/previous)" = "releases/$3"
 "$1" rollback
 test "$(readlink /opt/sophia-niltempus-desktop/current)" = "releases/$3"

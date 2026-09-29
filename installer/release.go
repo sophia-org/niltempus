@@ -62,6 +62,13 @@ func collectFiles(root string) (map[string]FileRecord, error) {
 			return err
 		}
 		if entry.IsDir() {
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			if info.Mode().Perm() != 0755 {
+				return fmt.Errorf("release directory must have mode 0755 for root-owned installation: %s (mode %04o)", path, info.Mode().Perm())
+			}
 			return nil
 		}
 		if !entry.Type().IsRegular() {
@@ -100,6 +107,22 @@ func checksums(files map[string]FileRecord) string {
 }
 
 func sealRelease(root string, plan Plan) error {
+	// Go's MkdirAll honors the caller's umask. Publish only the staged release
+	// directories so the session user can still read them after root takes ownership.
+	if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return os.Chmod(path, 0755)
+		}
+		if !entry.Type().IsRegular() {
+			return fmt.Errorf("release contains non-regular entry: %s", path)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
 	files, err := collectFiles(root)
 	if err != nil {
 		return err
