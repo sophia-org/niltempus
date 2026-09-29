@@ -159,12 +159,16 @@ func carryIntegrationProvision(plan Plan, root string) error {
 	return writeFile(filepath.Join(root, ".provision/accepted"), []byte(marker), 0600)
 }
 
-func packageDesktop(plan Plan, roots map[string]string, work string) (string, error) {
+func packageDesktop(plan Plan, roots map[string]string, work, cache string) (string, error) {
 	root := roots["integration"]
 	if err := carryIntegrationProvision(plan, root); err != nil {
 		return "", err
 	}
-	env := map[string]string{"CARGO_HOME": plan.Niltempus.CargoHome, "CARGO_TARGET_DIR": filepath.Join(work, "integration-bootstrap")}
+	bootstrap, buildDir, err := packageBuildTargets(cache, work)
+	if err != nil {
+		return "", err
+	}
+	env := map[string]string{"CARGO_HOME": plan.Niltempus.CargoHome, "CARGO_TARGET_DIR": bootstrap}
 	if err := logged(isolated(root, env, "cargo", "build", "--offline", "--locked", "--jobs", "2", "-p", "xtask", "--bin", "xtask"), filepath.Join(work, "build-integration.log")); err != nil {
 		return "", err
 	}
@@ -204,10 +208,6 @@ func packageDesktop(plan Plan, roots map[string]string, work string) (string, er
 			return "", err
 		}
 		hashes[i] = hash
-	}
-	buildDir := filepath.Join(work, "package-build")
-	if err := os.Mkdir(buildDir, 0700); err != nil {
-		return "", err
 	}
 	stage := filepath.Join(work, "package")
 	if err := logged(isolated(root, env, packageDesktopArgs(tool, plan, roots, pair, hashes, buildDir, stage)...), filepath.Join(work, "package-desktop.log")); err != nil {

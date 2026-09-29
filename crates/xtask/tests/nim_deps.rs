@@ -9,7 +9,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use xtask::nim_deps::{
-    Manifest, inventory, load_reviewed, nimble_requires, parse_requirement, resolve,
+    Manifest, Toolchain, inventory, load_reviewed, nimble_requires, parse_requirement, resolve,
 };
 use xtask::product_artifact::nim_flags;
 use xtask::records::{Record, parse_line, parse_text, relative_path};
@@ -66,6 +66,40 @@ fn pins(values: &[(&str, &str)]) -> BTreeMap<String, String> {
 }
 
 const NIM: [u64; 3] = [2, 2, 12];
+
+#[test]
+fn changed_tool_bytes_and_redirected_paths_are_named_before_execution() {
+    let dir = Dir::new("tool-identity");
+    let executable = dir.0.join("bwrap");
+    fs::write(&executable, b"reviewed bytes").unwrap();
+    let toolchain = Toolchain {
+        records: vec![
+            Record::of("tool")
+                .with("role", "bwrap")
+                .with("path", executable.to_string_lossy())
+                .with("resolved", executable.to_string_lossy())
+                .with("version", "reviewed version")
+                .with("sha256", sha256(b"reviewed bytes")),
+        ],
+        nim_version: NIM.to_vec(),
+    };
+    toolchain.check_executables().unwrap();
+    fs::write(&executable, b"changed bytes").unwrap();
+    let error = toolchain.check_executables().unwrap_err();
+    assert!(error.contains("bwrap"), "{error}");
+    assert!(error.contains(&sha256(b"reviewed bytes")), "{error}");
+    assert!(error.contains(&sha256(b"changed bytes")), "{error}");
+    let other = dir.0.join("other");
+    fs::write(&other, b"reviewed bytes").unwrap();
+    fs::remove_file(&executable).unwrap();
+    std::os::unix::fs::symlink(&other, &executable).unwrap();
+    let error = toolchain.check_executables().unwrap_err();
+    assert!(error.contains(other.to_str().unwrap()), "{error}");
+    assert!(
+        error.contains("review a new dependency manifest"),
+        "{error}"
+    );
+}
 
 #[test]
 fn records_have_exactly_one_spelling() {

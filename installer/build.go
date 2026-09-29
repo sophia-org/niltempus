@@ -134,7 +134,7 @@ func buildRelease(plan Plan, loc Locations) (string, error) {
 			return "", err
 		}
 	}
-	stage, err := packageDesktop(plan, roots, work)
+	stage, err := packageDesktop(plan, roots, work, loc.Cache)
 	if err != nil {
 		return "", err
 	}

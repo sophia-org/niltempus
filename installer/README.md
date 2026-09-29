@@ -9,6 +9,17 @@ those repositories.
 
 ## Commands
 
+Build retries reuse Cargo targets under the private cache's `package-targets`
+directory. Each attempt keeps its own logs and release output. The build lock
+serializes access; Cargo checks source and compiler changes on every attempt,
+and signed source, toolchain and release verification still run.
+
+If a system update changes a reviewed tool such as Bubblewrap, the build refuses
+it and reports the executable path and expected/actual hashes. Generate and
+review replacement dependency manifests, update their configured paths and
+digests, then run `niltempus plan` and `niltempus build` again. Keep the old
+manifests as evidence for releases built with the earlier toolchain.
+
 For the next session, run this as your normal user:
 
 ```sh

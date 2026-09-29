@@ -318,6 +318,25 @@ pub struct Toolchain {
 }
 
 impl Toolchain {
+    /// Refuse changed executables before the slower inventory and package
+    /// probes. This is an early refusal only; full identity checks still run.
+    pub fn check_executables(&self) -> Result<(), String> {
+        for record in self.records.iter().filter(|r| r.kind == "tool") {
+            let fields = record.expect(&["role", "path", "resolved", "version", "sha256"])?;
+            let (role, path, expected_path, expected_hash) =
+                (fields[0], fields[1], fields[2], fields[4]);
+            let resolved = regular(Path::new(path), role)?;
+            let actual_hash = sha256(&read(&resolved)?);
+            if resolved != Path::new(expected_path) || actual_hash != expected_hash {
+                return Err(format!(
+                    "reviewed toolchain changed: {role} at {path}; expected resolved={expected_path} sha256={expected_hash}; actual resolved={} sha256={actual_hash}; review a new dependency manifest and update its configured digest",
+                    resolved.display()
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub fn tool(&self, role: &str) -> Result<PathBuf, String> {
         self.records
             .iter()
@@ -1179,6 +1198,7 @@ impl Reviewed {
     /// The host toolchain must be exactly the reviewed one.
     pub fn check_toolchain(&self) -> Result<Toolchain, String> {
         let recorded = self.manifest.toolchain_view()?;
+        recorded.check_executables()?;
         let path = |role: &str| {
             recorded
                 .records
@@ -1195,7 +1215,17 @@ impl Reviewed {
             &path("bwrap")?,
         )?;
         if probed != recorded {
-            return Err("the host toolchain is not the reviewed one".into());
+            let expected = recorded
+                .records
+                .iter()
+                .find(|r| !probed.records.contains(r));
+            let actual = probed
+                .records
+                .iter()
+                .find(|r| !recorded.records.contains(r));
+            return Err(format!(
+                "the host toolchain is not the reviewed one: expected {expected:?}; actual {actual:?}; review a new dependency manifest and update its configured digest"
+            ));
         }
         Ok(recorded)
     }
