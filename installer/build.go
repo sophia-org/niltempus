@@ -134,6 +134,11 @@ func buildRelease(plan Plan, loc Locations) (string, error) {
 			return "", err
 		}
 	}
+	// Check the independent client cache before compiling the desktop. Fetch
+	// remains offline; provisioning missing dependencies is a separate action.
+	if err := logged(isolated(roots["lom"], nil, "cargo", "fetch", "--locked", "--offline"), filepath.Join(work, "check-lom-dependencies.log")); err != nil {
+		return "", fmt.Errorf("provision Lom's locked Cargo dependencies before building: %w", err)
+	}
 	stage, err := packageDesktop(plan, roots, work, loc.Cache)
 	if err != nil {
 		return "", err

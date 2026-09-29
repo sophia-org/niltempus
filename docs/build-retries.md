@@ -23,6 +23,13 @@ The new reviewed manifest digests are:
 
 The old manifests remain unchanged. A new plan binds the replacements.
 
+The subsequent build passed WM-pair preparation (4m2.468s), desktop packaging
+(4m48.937s) and package verification, then exposed a second missing prerequisite:
+Lom's locked SDK revision `c1323401b7e336606408499b13097d1270a2319d` was absent
+from the default Cargo cache. Explicit `cargo fetch --locked` provisioned it.
+The installer now runs an offline locked dependency check for Lom before any
+desktop compilation, so future missing-cache failures precede those stages.
+
 Previously each attempt allocated fresh Cargo targets for the packaging-tool
 bootstrap, Sophia release build and packaging-tool release build. These targets
 now persist under the private cache's `package-targets`, under the existing
