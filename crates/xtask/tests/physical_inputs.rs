@@ -161,11 +161,17 @@ fn profiles_resolve_only_to_regular_files_inside_their_source() {
         profile_for_tests("hagia:examples/config/default.kdl", &root).unwrap(),
         root.join("examples/config/default.kdl")
     );
+    assert_eq!(
+        profile_for_tests("integration:examples/config/default.kdl", &root).unwrap(),
+        root.join("examples/config/default.kdl")
+    );
     for bad in [
         "hagia:linked/config/default.kdl",
         "hagia:examples/config",
         "hagia:examples/config/missing.kdl",
         "hagia:examples/../examples/config/default.kdl",
+        "integration:linked/config/default.kdl",
+        "integration:examples/../examples/config/default.kdl",
     ] {
         assert!(profile_for_tests(bad, &root).is_err(), "{bad}");
     }

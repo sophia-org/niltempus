@@ -1,0 +1,162 @@
+# Output file native acceptance
+
+This gate joins the independent C-SDK peer to Sophia's native output owner.
+It runs validate, admission rejection, commit A-to-B-to-A, and peer death after
+all cards apply B. T253 requires this evidence before T272 removes output IPC.
+The C executable is a protocol proof; the future Rust `sophia output` product
+command belongs to T254.
+
+## Prepare without devices
+
+First prepare the generic peer in the clean signed Sophia checkout:
+
+```sh
+cargo xtask check output-file-native-proof prepare --output=/PRIVATE/NEW/PEER
+```
+
+Prepare physical inputs separately with this repository's existing
+`prepare-physical-inputs`: `native-session`, the signed Hagia product and its
+reviewed Nim dependencies, and a complete desktop output profile. A profile
+owned here uses `--profile=integration:RELATIVE/PATH`; it is copied from this
+repository's signed commit. Preparation builds; execution never does.
+Set `CARGO_BUILD_JOBS=1` for preparation; both Rust and Nim builds honor that
+limit while retaining nice 19 priority.
+The Sophia revision, SDK manifest and contracts must match this repository's
+pins. Hash `prepared.json` and the host `active-session-preflight` binary too.
+
+The run planner needs explicit A/B layouts, not hardware discovery. A names
+the profile's committed startup topology epoch, enabled heads, modes, transforms,
+VRR, groups and primary group. B changes a mode timing, with the same enabled
+heads and connector/CRTC/plane selections. Use the peer's compact layout grammar:
+heads `HEAD:MODE:TRANSFORM:VRR,...`; groups
+`OUTPUT@X,Y,WxH=HEAD/MAP[+HEAD/MAP][;...]`; primary is a zero-based group index.
+Quote group values in the shell. Revision 1 cannot report current transform
+or VRR: their declared values must agree with the baseline profile.
+
+`validation/output-file-native/baseline.kdl` declares the reference rig's A:
+DP-1 at 2560×1440/120 Hz and DP-2 at 1920×1080/60 Hz, side by side,
+normal transforms, scale 1 and VRR disabled. It is a proof profile, not a
+replacement for the user's profile. Before sealing a run plan, bind explicit
+head/mode IDs from a reviewed topology inventory and choose a supported B
+timing. A different connected set or missing mode must refuse qualification.
+
+```sh
+cargo xtask output-file-native prepare-run \
+  --inputs=/ABS/SEALED --inputs-manifest-sha256=SHA256 \
+  --preparation=/ABS/PEER --preparation-sha256=SHA256 \
+  --profile=integration/RELATIVE/PATH --out=/PRIVATE/NEW/PLAN \
+  --preflight=/ABS/active-session-preflight --preflight-sha256=SHA256 \
+  --tty=/dev/tty4 --display=:91 --input-seat=seat0 --runtime-ms=60000 \
+  --a-topology-epoch=E --a-heads=HEADS --a-groups=GROUPS --a-primary=0 \
+  --b-heads=HEADS --b-groups=GROUPS --b-primary=0
+```
+
+This writes `run-plan.json` with the exact four Session argument vectors and
+prints its digest. It does not open DRM/input devices, start Session or install
+anything. Review that file and the whole-release recovery route before requesting
+an attended hardware window. Only private displays `:90`–`:99` are accepted. Runtime is bounded to 60–600
+seconds per stage; the peer has 30 seconds per wait. Allow enough time for startup,
+apply and physical restoration inside the Session runtime bound.
+
+## Run only in an authorized attended window
+
+From the exact prepared text console, with another VT available for recovery:
+
+```sh
+SOPHIA_FRAME_FED_OUTPUT_ARM=1 cargo xtask output-file-native run \
+  --plan=/ABS/PLAN/run-plan.json --plan-sha256=SHA256 --out=/PRIVATE/NEW/RUN
+```
+
+The runner rechecks identities before and after each stage. It calls Sophia's
+staged generic TTY wrapper with the prepared binary and arguments. The wrapper
+owns the independent input guard, host preflight, bounded Session watchdog and
+console restoration. The runner clears inherited display/bus/proof overrides,
+does not manage services, and refuses a mismatched console or missing arm.
+The wrapper's exit must be zero and its TTY/keyboard restoration must be proved.
+Each stage's proof evidence must also pass before the next Session starts;
+a clean process exit alone cannot authorize a later apply stage.
+The existing wrapper/helper programs are from the sealed Sophia source tree;
+host programs such as Bash, Python and the kernel remain host dependencies.
+
+Each stage uses a private `XDG_STATE_HOME` under its evidence directory and leaves
+daily diagnostic capture unset. Proof/runtime flags prevent automatic daily
+capture, so Session start and completion retain their display identity in the
+mixed proof log. `NO_COLOR=1` keeps tracing records free of ANSI escapes. The
+wrapper's recovery and guard logs remain under `state/sophia/output-file-native-session/`;
+the runner moves the mixed transcript to the canonical `NAME/session.log` after
+clean wrapper exit and verified console restoration.
+
+Four separate Session runs end normally at their runtime bound. For peer death,
+the proof must pass before that shutdown: the outer runtime interrupt is never
+restoration evidence. A timeout, log overflow or failed stage stops the sequence
+and retains all logs and attempted arguments. A wrapper cleanup failure requires
+operator recovery; the runner cannot infer native restoration from process exit.
+Successful execution writes `run.manifest` and runs the offline verifier.
+
+## Verify retained evidence
+
+```sh
+cargo xtask output-file-native verify \
+  --inputs=/ABS/SEALED --inputs-manifest-sha256=SHA256 \
+  --preparation=/ABS/PEER --preparation-sha256=SHA256 \
+  --run=/ABS/RUN --run-manifest-sha256=SHA256
+```
+
+Verification only reads files. It binds source, SDK, peer/harness hashes,
+profile, binaries, exact arguments and stage logs. Each stage needs one Session
+start and one bounded completion on its declared private display, with native
+presentation and physical input enabled and no native work left in flight or
+awaiting cleanup. Peer death requires the
+captured child's signalled exit, matching disconnect, local RolledBack
+settlement, and both KMS and native-owner state restored to their before values.
+Neither unchanged publication nor a peer exit alone is sufficient. Every
+readback set needs complete row counts, and a mode timing must actually change.
+
+The runner attests execution of the recorded paths. The verifier checks that
+attestation against sealed inputs and logs; it cannot prove execution from
+hashes alone. Session and child stdout share the wrapper's explicitly untrusted
+log: the reader cannot distinguish a Session record from an identical line
+printed by a child. This gate trusts the hash-bound frozen peer and signed,
+pinned Hagia; it is not a verifier for arbitrary hostile children. Separating
+per-role logs would strengthen that boundary without changing the wire.
+These records do not prove rendered pixels, global desktop origins
+or the primary output in hardware. Origin/primary intent is bound by the declared
+layout and peer snapshot checks. Head disabling, routing changes and unselected
+object leaks remain outside this gate. Promotion and archiving are separate.
+
+## Candidate preparation (2026-09-30)
+
+Signed Sophia `170d606b6b3a398e18db5f52a85e4263ecbde54f` is the T253 proof
+candidate, with C SDK `7ccfece173b4b01e563a27b8fe5cc07d4369b55a` (0.3.0).
+The exact release build passed all 13 real-export peer tests and the protected
+Session fixture's four stages. Preparation is retained under the operator's
+`development-evidence/ipc-retirement/t253-native-170d606b6-01/`; its
+`prepared.json` digest is
+`2b6ef35e518126bf7891d504553022991827e5c3b1d8a862d7352f530a5fe736`.
+These tests supply physical observations and claim no hardware acceptance.
+
+Niltempus's updated-pin checks, provisioning and source audit passed. Its
+workspace ran 225 tests with zero failures and 10 existing ignored tests;
+strict clippy and formatting passed. After the one-job builder adjustment,
+the affected builder tests and strict clippy passed again. Sophia's profile
+checker accepted the reference baseline as schema 1 and resolved exactly the
+two declared outputs. Logs are retained in `t253-niltempus-170d606b6-01/`.
+
+The single performance run at `t253-perf-170d606b6-01/` passed on the same
+revision. Small/maximum topology connection p99 was 30.745/30.918 ms;
+proposal p99 was 7.467/7.492 ms. All samples met the declared maxima, each
+fixture delivered all 1,020 proposals exactly once including warm-ups, and
+idle CPU was 0.215–0.231% of one core across six ten-second intervals.
+Every worker joined on cleanup. The worker still wakes about 950 times per
+second; this result meets the existing CPU gate and does not claim event-driven
+idle behavior. Raw samples and machine/toolchain identities remain in that
+directory.
+
+The pin update does not repin Hagia or Bemenu. Hagia's artifact path verifies
+its own explicitly named vendored SDK, so it can participate in this proof.
+The existing Bemenu artifact and live-gate paths require equality with the
+integration SDK pin and refuse its older SDK snapshot. Updating that product
+or qualifying a launcher-specific compatibility bridge is separate work;
+this output gate has no Bemenu dependency. The installed release and recovery
+baseline remain unchanged. T253 stays open until attended native acceptance,
+and T272 source retirement remains gated on it.

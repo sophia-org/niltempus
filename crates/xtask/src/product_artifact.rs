@@ -372,7 +372,7 @@ pub(crate) fn build(
     let mut staged = None;
     let mut install = None;
     let mut record = None;
-    // Low-priority, two-job build inside the scratch tree only.
+    // Low-priority build inside the scratch tree, capped at two jobs.
     let log = scratch.join("build.log");
     let log_file = File::create(&log).map_err(|e| e.to_string())?;
     let out = scratch.join("out");
@@ -382,9 +382,9 @@ pub(crate) fn build(
             let mut command = Command::new("nice");
             command
                 .args(["-n", "19", "cargo", "build", "--offline", "--locked"])
-                .args(["--release", "--jobs", "2"])
+                .args(["--release", "--jobs", build_jobs()])
                 .env("CARGO_TARGET_DIR", &out)
-                .env("CARGO_BUILD_JOBS", "2")
+                .env("CARGO_BUILD_JOBS", build_jobs())
                 .env_remove("RUSTFLAGS")
                 .env_remove("CARGO_ENCODED_RUSTFLAGS")
                 .env_remove("CARGO_BUILD_TARGET");
@@ -501,13 +501,23 @@ pub fn nim_command(
     argv.extend(nim_flags(&prefix.lib, &gcc, paths.dep_dirs));
     argv.extend([
         "--path:src".to_owned(),
-        "--parallelBuild:2".to_owned(),
+        format!("--parallelBuild:{}", build_jobs()),
         format!("--nimcache:{}", paths.scratch.join("nimcache").display()),
         format!("-o:{}", paths.binary.display()),
         main.to_owned(),
     ]);
     let command = sandboxed(toolchain, &prefix.root, paths, &argv)?;
     Ok((command, argv))
+}
+
+/// Preserve the preparation ceiling while allowing an explicitly serialized
+/// build. Apply the same caller limit to Rust and Nim's C compilation.
+pub(crate) fn build_jobs() -> &'static str {
+    if std::env::var("CARGO_BUILD_JOBS").as_deref() == Ok("1") {
+        "1"
+    } else {
+        "2"
+    }
 }
 
 /// `argv` at nice 19 in bwrap: no network, a private /tmp, every home,

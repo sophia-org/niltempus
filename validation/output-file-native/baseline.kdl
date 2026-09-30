@@ -1,0 +1,38 @@
+schema 1
+
+// Explicit baseline for the two-display reference rig. The attended run plan
+// must bind these modes to its recorded head/mode IDs before execution.
+policy {
+    layout "scroller"
+    view-count 9
+    outer-gap 0
+    inner-gap 0
+}
+shell { enabled #false; }
+shortcut { profile "output-file-native-proof"; }
+session { terminal "terminal"; }
+input { inherit-sophia #true; }
+output {
+    inherit-sophia #false
+    named "DP-1" {
+        policy-key 1
+        mode "2560x1440@120"
+        scale 1
+        position 0 0
+        transform "normal"
+        enabled #true
+        focus-at-startup #true
+        vrr 0
+    }
+    named "DP-2" {
+        policy-key 2
+        mode "1920x1080@60"
+        scale 1
+        position 2560 0
+        transform "normal"
+        enabled #true
+        focus-at-startup #false
+        vrr 0
+    }
+}
+broker { enabled #false; }

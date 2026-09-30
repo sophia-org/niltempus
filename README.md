@@ -57,7 +57,7 @@ separate output-role migration, before moving its pin to a demo-free Sophia.
   `https://github.com/sophia-org/sophia.git` at the revision in
   `pins/sophia.toml`. No sibling path is named anywhere.
 - `pins/c-desktop-sdk/manifest.json` is Sophia's vendored C SDK manifest at
-  that revision; `pins/contracts.sha256` holds the eighteen protocol contract
+  that revision; `pins/contracts.sha256` holds the eleven protocol contract
   digests a client's SDK snapshot must carry.
 - `assets/fonts/` holds the pinned test font and its license, copied from
   Sophia at that revision.

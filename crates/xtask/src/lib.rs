@@ -11,6 +11,8 @@ pub mod dock;
 pub mod git_tree;
 pub mod nim_deps;
 pub mod nim_install;
+pub mod output_file_native;
+pub mod output_file_native_run;
 pub mod package_desktop;
 pub mod panel;
 pub mod physical_inputs;

@@ -1,8 +1,8 @@
 // Provenance: adapted from Sophia crates/xtask/src/c_desktop_sdk.rs at
 // 9fcaec782ce4fe9978568c0466ee17a78b3d4571. Temporary duplicate. Sophia read
 // its own vendor/c-desktop-sdk and contract files; here the manifest is the
-// pinned copy in pins/c-desktop-sdk and the contracts are the eighteen
-// digests in pins/contracts.sha256, both taken from that revision.
+// pinned copy in pins/c-desktop-sdk and the contracts are the digests in
+// pins/contracts.sha256, both taken at the revision in pins/sophia.toml.
 //! Verify a client's vendored C SDK snapshot against the pinned SDK identity.
 //!
 //! This repository never compiles or reads the SDK's own repository: a client

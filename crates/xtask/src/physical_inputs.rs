@@ -22,8 +22,9 @@
 //! `--build-dir/sophia-target`; Hagia and Narthex through the one corrected
 //! builder (product_artifact::build) from their reviewed dependency
 //! manifests; every staged tree re-proven after its build. `--profile`
-//! names a file inside its OWNING staged source (`sophia:`, `hagia:` or
-//! `narthex:`), never traversing or escaping it.
+//! names a file inside its OWNING staged source (`sophia:`, `hagia:`,
+//! `narthex:` or `integration:`), never traversing or escaping it. Integration
+//! profiles are read from an archive of the bound signed integration commit.
 //!
 //! The output is new, created last and made read-only: `bin/`, the exact
 //! pinned Sophia tree (`sophia-tree/`, the runners' SOPHIA_ROOT), the
@@ -235,7 +236,9 @@ impl<'a> Request<'a> {
             }
         }
         for (owner, _) in &profiles {
-            if owner != "sophia" && !halves.iter().any(|h| h.name == owner) {
+            if !["sophia", "integration"].contains(&owner.as_str())
+                && !halves.iter().any(|h| h.name == owner)
+            {
                 return Err(format!("--profile names {owner}, which is not staged"));
             }
         }
@@ -337,10 +340,20 @@ impl<'a> Request<'a> {
             ));
         }
         // Profiles come from the staged trees only, after every proof.
+        let integration = self
+            .profiles
+            .iter()
+            .any(|(owner, _)| owner == "integration")
+            .then(|| signed_tree_under(&self.build_dir, &repo, &integration_commit, "integration"))
+            .transpose()?;
         let mut profiles = Vec::new();
         for (owner, path) in &self.profiles {
             let tree = if owner == "sophia" {
                 &sophia
+            } else if owner == "integration" {
+                integration
+                    .as_ref()
+                    .expect("requested integration profile was staged")
             } else {
                 &built
                     .iter()
@@ -412,9 +425,9 @@ fn profile(value: &str) -> Result<(String, String), String> {
     let (owner, path) = value
         .split_once(':')
         .ok_or_else(|| format!("--profile must be OWNER:PATH: {value:?}"))?;
-    if !["sophia", "hagia", "narthex"].contains(&owner) {
+    if !["sophia", "hagia", "narthex", "integration"].contains(&owner) {
         return Err(format!(
-            "--profile owner must be sophia, hagia or narthex: {owner:?}"
+            "--profile owner must be sophia, hagia, narthex or integration: {owner:?}"
         ));
     }
     relative_path(path)?;

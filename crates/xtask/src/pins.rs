@@ -12,7 +12,7 @@ use std::process::Command;
 use std::time::Duration;
 
 pub const SOPHIA_URL: &str = "https://github.com/sophia-org/sophia.git";
-pub const SOPHIA_REV: &str = "2d69924a9cac3ed1164089c7d1fae23b46d19d71";
+pub const SOPHIA_REV: &str = "170d606b6b3a398e18db5f52a85e4263ecbde54f";
 /// The Sophia crates this repository names directly.
 pub const SOPHIA_CRATES: [&str; 8] = [
     "sophia-backend-live",
@@ -29,7 +29,7 @@ pub const FONT: &str = "assets/fonts/JetBrainsMonoNL-Regular.ttf";
 pub const FONT_SHA256: &str = "fb3b2575d7b0657359707993288f12a7360344d39387bb26050e276d61f6bd2a";
 pub const SDK_MANIFEST: &str = "pins/c-desktop-sdk/manifest.json";
 pub const SDK_MANIFEST_SHA256: &str =
-    "e22b18cc3bf80b9158a263a7b54537c35f704e927ffe22722114f1bf4ca63e8b";
+    "2259db2fc97b0c31dccfb3b93b8e64fea53c64de267e25c43be4ffff9a140907";
 const SOPHIA_PIN: &str = "pins/sophia.toml";
 const CONTRACTS: &str = "pins/contracts.sha256";
 const MANIFESTS: [&str; 6] = [
@@ -63,62 +63,38 @@ const COPIES: [(&str, &str, &str); 3] = [
 
 /// Every contract binding the C SDK snapshot must carry unchanged:
 /// (path in the SDK snapshot source, authoritative path in Sophia). The
-/// digests live in pins/contracts.sha256; this list keeps any of the
-/// eighteen from being dropped silently.
-const BINDINGS: [(&str, &str); 18] = [
+/// digests live in pins/contracts.sha256; this list keeps any of the eleven
+/// from being dropped silently. It is Sophia's own list at the pinned
+/// revision (crates/xtask/src/c_desktop_sdk.rs), in the same order.
+const BINDINGS: [(&str, &str); 11] = [
+    (
+        "spec/sophia-shell-descriptors.md",
+        "docs/sophia-shell-descriptors.md",
+    ),
     (
         "spec/sophia-shell-files-v1.kdl",
         "protocol/sophia-shell-files-v1.kdl",
     ),
-    ("spec/sophia-shell-v1.kdl", "protocol/sophia-shell-v1.kdl"),
     ("spec/sophia-9p-profile.md", "docs/sophia-9p-profile.md"),
     ("spec/sophia-shell-files.md", "docs/sophia-shell-files.md"),
     ("spec/sophia-wm-files.md", "docs/sophia-wm-files.md"),
     (
+        "spec/sophia-wm-files-v1.kdl",
+        "protocol/sophia-wm-files-v1.kdl",
+    ),
+    ("spec/sophia-wm-api.md", "docs/sophia-wm-api.md"),
+    ("spec/sophia-output-files.md", "docs/sophia-output-files.md"),
+    (
+        "spec/sophia-output-files-v1.kdl",
+        "protocol/sophia-output-files-v1.kdl",
+    ),
+    (
+        "spec/golden/sophia-wm-v1.records",
+        "protocol/golden/sophia-wm-v1.records",
+    ),
+    (
         "spec/references/diod-9p2000L-protocol.md",
         "docs/references/diod-9p2000L-protocol.md",
-    ),
-    ("src/sophia_wm_v1.c", "bindings/c/sophia_wm_v1.c"),
-    ("src/sophia_wm_v1.h", "bindings/c/sophia_wm_v1.h"),
-    (
-        "spec/golden/sophia-shell-catalog-actions.frames",
-        "protocol/golden/sophia-shell-catalog-actions.frames",
-    ),
-    (
-        "spec/golden/sophia-shell-content-malformed.frames",
-        "protocol/golden/sophia-shell-content-malformed.frames",
-    ),
-    (
-        "spec/golden/sophia-shell-content.frames",
-        "protocol/golden/sophia-shell-content.frames",
-    ),
-    (
-        "spec/golden/sophia-shell-indicators.frames",
-        "protocol/golden/sophia-shell-indicators.frames",
-    ),
-    (
-        "spec/golden/sophia-shell-launcher.frames",
-        "protocol/golden/sophia-shell-launcher.frames",
-    ),
-    (
-        "spec/golden/sophia-shell-native-launcher.frames",
-        "protocol/golden/sophia-shell-native-launcher.frames",
-    ),
-    (
-        "spec/golden/sophia-shell-reference.frames",
-        "protocol/golden/sophia-shell-reference.frames",
-    ),
-    (
-        "spec/golden/sophia-shell-tabs.frames",
-        "protocol/golden/sophia-shell-tabs.frames",
-    ),
-    (
-        "spec/golden/sophia-shell-v1-malformed.frames",
-        "protocol/golden/sophia-shell-v1-malformed.frames",
-    ),
-    (
-        "spec/golden/sophia-shell-v1.frames",
-        "protocol/golden/sophia-shell-v1.frames",
     ),
 ];
 
@@ -130,7 +106,7 @@ pub struct Contract {
     pub authoritative: String,
 }
 
-/// The eighteen contract digests, in BINDINGS order, fail closed.
+/// The eleven contract digests, in BINDINGS order, fail closed.
 pub fn contracts(repo: &Path) -> Result<Vec<Contract>, String> {
     parse_contracts(&String::from_utf8(read(&repo.join(CONTRACTS))?).map_err(|e| e.to_string())?)
 }
@@ -153,7 +129,7 @@ pub fn parse_contracts(text: &str) -> Result<Vec<Contract>, String> {
         .collect::<Vec<_>>();
     if pairs != BINDINGS {
         return Err(format!(
-            "{CONTRACTS}: bindings differ from the eighteen required contract paths"
+            "{CONTRACTS}: bindings differ from the eleven required contract paths"
         ));
     }
     for contract in &contracts {
@@ -177,7 +153,7 @@ pub fn check(repo: &Path) -> Result<Vec<String>, String> {
             return Err(format!("{path} differs from its pinned digest"));
         }
     }
-    // The pinned SDK manifest must itself carry the eighteen contract digests.
+    // The pinned SDK manifest must itself carry the eleven contract digests.
     let manifest: serde_json::Value =
         serde_json::from_slice(&read(&repo.join(SDK_MANIFEST))?).map_err(|e| e.to_string())?;
     let contracts = contracts(repo)?;

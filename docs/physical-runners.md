@@ -65,6 +65,12 @@ See [Hagia gates](hagia-gates.md) for the native session gate
 
 ## Output topology loss and return
 
+The revision-1 output file role has a separate
+[native acceptance runner](output-file-native.md). Its Rust planner and verifier
+run without devices; only its explicitly armed `run` command starts the staged
+Session through the existing TTY recovery wrapper. It uses the independent SDK
+peer, not the older startup-only frame-fed IPC-WM proof below.
+
 ```sh
 tools/run_output_topology_gate_tty4.sh
 ```

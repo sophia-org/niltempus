@@ -11,6 +11,9 @@ const USAGE: &str = "usage:
   xtask package-desktop --sophia-root=/ABS --sophia-rev=SHA --wm-pair=/ABS --wm-pair-commits=H,N --wm-pair-sha256=H,N --wm-pair-profile-sha256=SHA --wm-pair-c-sdk-rev=REV --build-dir=/ABS --out=/ABS/NEW
   xtask direct-scanout-gate [WIDTH HEIGHT HOLD WORKLOAD] [--overlay-proof] [--cost] [--cursor] [--atomic-cursor]
   xtask verify-archives [--legacy]
+  xtask output-file-native verify --inputs=/ABS --inputs-manifest-sha256=SHA --preparation=/ABS --preparation-sha256=SHA --run=/ABS --run-manifest-sha256=SHA
+  xtask output-file-native prepare-run ...   (explicit inputs and layouts: docs/output-file-native.md)
+  xtask output-file-native run --plan=/ABS/run-plan.json --plan-sha256=SHA --out=/ABS/NEW
   xtask verify-release /ABS/RELEASE-DIR --c-sdk-rev=<40 lowercase hex>   (read-only; runs without the checkout)
   xtask verify-c-sdk /ABS/SNAPSHOT --revision=<40 lowercase hex>   (read-only; runs without the checkout)
   xtask desktop-comparison install-reference|prepare|prepare-soak|cursor-theme|gate|status|attest|preflight|qualify|capture|finalize|replay|workload|verify|report ...
@@ -82,6 +85,15 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
         Some("package-desktop") => xtask::package_desktop::run(&repo, &arguments[1..]),
         Some("direct-scanout-gate") => gate_direct_scanout(&repo, &arguments[1..]),
         Some("verify-archives") => xtask::verify_archives::run(&repo, &arguments[1..]),
+        Some("output-file-native")
+            if matches!(
+                arguments.get(1).map(String::as_str),
+                Some("prepare-run" | "run")
+            ) =>
+        {
+            xtask::output_file_native_run::run(&repo, &arguments[1..])
+        }
+        Some("output-file-native") => xtask::output_file_native::run(&repo, &arguments[1..]),
         Some("desktop-comparison") => run_desktop_comparison(&repo, &arguments[1..]),
         // Moved from Sophia crates/xtask/src/main.rs:53-70 at 9fcaec782.
         Some("dock") => match &arguments[1..] {

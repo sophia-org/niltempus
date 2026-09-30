@@ -170,10 +170,10 @@ fn lock_revision_or_source_drift_is_refused() {
 #[test]
 fn contract_bindings_cannot_be_dropped_or_rebound() {
     let good = text("pins/contracts.sha256");
-    assert_eq!(parse_contracts(&good).unwrap().len(), 18);
+    assert_eq!(parse_contracts(&good).unwrap().len(), 11);
     let dropped = good.lines().skip(1).collect::<Vec<_>>().join("\n");
     let rebound = good.replacen(
-        "protocol/sophia-shell-v1.kdl",
+        "protocol/sophia-wm-files-v1.kdl",
         "protocol/sophia-shell-files-v1.kdl",
         1,
     );

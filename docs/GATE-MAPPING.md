@@ -78,6 +78,11 @@ New external tests with no Sophia predecessor: `session_preflight`,
 `physical_runner_bounds`, `verify_archives`, `pins`, `provision_script`,
 `xtask_alias`, `verify_release`, and `quickshell-probe`'s `evaluate` and `runner`.
 
+`output_file_native` verifies synthetic native output evidence and refusal
+controls offline. `output_file_native_run` checks exact argument construction
+and TTY recovery refusal. Actual KMS acceptance remains the separately armed
+[four-stage native run](output-file-native.md); no ordinary test opens a device.
+
 ## Recipes (justfile) and xtask commands
 
 | Sophia | Now |

@@ -658,8 +658,8 @@ fn workspace_version(tree: &Path) -> Result<String, String> {
         .ok_or_else(|| "could not resolve Sophia's workspace version".into())
 }
 
-/// Low-priority, two-job, offline, locked release build in a private
-/// process group, bounded by time and log size.
+/// Offline, locked release build at low priority with at most two jobs,
+/// in a private process group and bounded by time and log size.
 pub(crate) fn cargo(
     dir: &Path,
     target: &Path,
@@ -680,11 +680,11 @@ pub(crate) fn cargo(
             "--locked",
             "--release",
         ])
-        .args(["--jobs", "2"])
+        .args(["--jobs", crate::product_artifact::build_jobs()])
         .args(packages)
         .current_dir(dir)
         .env("CARGO_TARGET_DIR", target)
-        .env("CARGO_BUILD_JOBS", "2")
+        .env("CARGO_BUILD_JOBS", crate::product_artifact::build_jobs())
         .env_remove("RUSTFLAGS")
         .env_remove("CARGO_ENCODED_RUSTFLAGS")
         .env_remove("CARGO_BUILD_TARGET")
