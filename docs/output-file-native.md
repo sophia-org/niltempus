@@ -245,3 +245,28 @@ small/maximum connection p99 30.682/30.929 ms, proposal p99 7.487/7.502 ms,
 and six idle intervals at 0.206–0.210% of one core. Counts, exactly-once
 delivery and cleanup passed the unchanged gate. No compiler ran during the
 measurement; the normal-priority build used 32 jobs.
+
+### Singleton framebuffer custody correction
+
+The `t253-native-run-e5dbf36-01/` attended attempt passed validate and reject.
+Commit-restore passed the corrected rollback timing projection and prepared
+both candidate images, then exhausted renderer slots while preparing rollback.
+The peer timed out after 30 seconds. No candidate KMS submission occurred;
+readback remained at the baseline and all three console recoveries were clean.
+Peer-death did not run. This was a production failure, not a verifier failure.
+
+Sophia `e51a17b8681123a53ca3f7b632c35dbe71e3a4ee` transfers the displayed
+topology buffer into ordinary singleton runtime custody during rebind. The
+first accepted frame can then release that predecessor. Rebind also explicitly
+retires old runtime buffers through DRM and retains failed cleanup. Mirror
+heads keep their existing custody. Candidate and rollback preparation share a
+five-second limit; retries and the quarantined owner loop are paced instead of
+spinning until the client disappears.
+
+The backend's isolated library and DRM-resource tests passed (209 and 305);
+Session's output-file group passed 14 tests with three opt-in tests ignored.
+Transfer and deadline negative controls failed as expected. Strict backend and
+Session Clippy passed for all targets and features. These checks supply cleanup
+and timing observations and are not physical acceptance. The new candidate
+requires fresh signed preparation, performance evidence and sealed inputs;
+the previous attempts and their logs remain intact.
