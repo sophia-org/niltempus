@@ -270,3 +270,15 @@ Session Clippy passed for all targets and features. These checks supply cleanup
 and timing observations and are not physical acceptance. The new candidate
 requires fresh signed preparation, performance evidence and sealed inputs;
 the previous attempts and their logs remain intact.
+
+Before an attended run of that revision, a final audit found that rollback can
+replace a topology buffer before any ordinary frame has supplied a native
+frame identity. Sophia `344e9534b32e176f2ffb4cea8694269758ad57f0` assigns each
+singleton runtime a separate native owner/head cleanup scope. Both semantic
+startup and topology adoption use it; ordinary frame identities, when present,
+must agree. The new regression hands off a candidate and then its rollback
+without an intervening ordinary frame. Requiring the old identity makes it
+fail. Backend checks pass 210 library and 305 feature tests, Session's
+output-file group passes 14 with three opt-in tests ignored, and strict
+backend/Session Clippy passes. The e51 preparation and performance evidence
+remain retained as superseded; no attended run used that candidate.
