@@ -282,3 +282,29 @@ fail. Backend checks pass 210 library and 305 feature tests, Session's
 output-file group passes 14 with three opt-in tests ignored, and strict
 backend/Session Clippy passes. The e51 preparation and performance evidence
 remain retained as superseded; no attended run used that candidate.
+
+### Rollback waits for candidate presentation retirement
+
+The `t253-native-run-4f4e5ba-01/` attended attempt passed validate, rejection
+and commit-restore on Sophia `344e9534b`. Peer-death reached accepted reverse
+KMS programming but failed runtime rebind with two candidate first frames still
+in flight. Installation had replaced their completion trackers before their
+owners retired. There was no restored readback, local RolledBack settlement or
+peer-loss pass. Console recovery was clean; the run remains failed.
+
+Sophia `ddd27bd6d9ac6d8e73394d9326705a7a62916f35` drains unsubmitted work and
+retires submitted candidate frames before reverse programming. Normal operation
+and shutdown use the same runtime step, with a paced, two-second Session wait.
+The displayed buffer remains owned until blocking restoration and the existing
+rebind handoff. No topology first-presentation acceptance runs during the drain.
+
+The backend checks passed 211 library, 305 feature and three presentation-skip
+tests; Session output checks passed 90 with three ignored. Seven helper tests
+and two failing mutant controls cover the wait, deadline and readiness latch.
+Workspace strict Clippy passes. The full repository gate encountered an
+unchanged shell-fixture race (`--serve` passed to the test binary), retained in
+`t253-rollback-drain-01/06-xtask-check-runtime.log`; it is not claimed green.
+The composed DRM/renderer drain still needs attended proof. SDK, contracts,
+layouts and profile are unchanged; new preparation, performance and sealed
+inputs must bind this revision before another run. See Sophia investigation
+`0bc9j2k2` for the failure and validation limits.
