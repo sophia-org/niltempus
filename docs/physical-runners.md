@@ -83,11 +83,19 @@ security-epoch barrier per change, complete `N - 1` loss and `N` return
 publications with advancing generations, matching policy settlements, later
 page-flip retirements, a surviving Kitty input proof and clean shutdown.
 
-## Frame-fed output apply and rollback
+## Frame-fed output apply and rollback (historical)
 
 ```sh
 SOPHIA_FRAME_FED_OUTPUT_ARM=1 tools/run_frame_fed_output_gate_tty4.sh
 ```
+
+Historical. Phase two needs Sophia's startup-only
+`--output-proof-rollback-after-apply` hook, which t272 retired at Sophia
+`ae5a746c553584bff8bb54eeeeee8d2bc63431f8`. The launcher refuses a source
+without the hook before preparing anything. Archived pairs remain verifiable
+for their own pins. The native output gate (`xtask output-file-native`)
+qualifies peer-transaction rollback. No current runner proves startup-transaction
+rollback after physical apply.
 
 Reference-rig specific (exactly DP-1 2560x1440 and DP-2 1920x1080). Phase one
 applies, first-presents and publishes the checked-in profile; phase two forces

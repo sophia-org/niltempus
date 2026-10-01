@@ -73,6 +73,12 @@ integration_commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
 # Archives bind this signed integration commit of this checkout.
 export SOPHIA_INTEGRATION_COMMIT="$integration_commit" SOPHIA_INTEGRATION_SOURCE="$ROOT_DIR"
 hagia_commit="$(git -C "$HAGIA_ROOT" rev-parse HEAD)"
+# Historical: phase two needs Sophia's startup-only rollback hook, which t272
+# (Sophia ae5a746c) retired. Refuse a source without it before any preparation;
+# archived pairs stay verifiable for their own pins.
+git -C "$SOPHIA_SOURCE" grep -q -F OutputProofRollbackAfterApply "$sophia_commit" \
+    -- crates/sophia-session/src \
+    || refuse "Sophia $sophia_commit lacks --output-proof-rollback-after-apply; this runner is historical and qualifies only pre-t272 sources"
 
 echo "Preparing exact signed Sophia and Hagia binaries before DRM takeover..."
 nim_options="$(physical_inputs_nim_options hagia "$HAGIA_ROOT")" || exit 2

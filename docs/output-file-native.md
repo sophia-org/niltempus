@@ -308,3 +308,31 @@ The composed DRM/renderer drain still needs attended proof. SDK, contracts,
 layouts and profile are unchanged; new preparation, performance and sealed
 inputs must bind this revision before another run. See Sophia investigation
 `0bc9j2k2` for the failure and validation limits.
+
+### Accepted t253 proof and t272 retirement candidate
+
+The four attended stages subsequently passed on Sophia `ddd27bd6d9`,
+integration `bec6db1`, Hagia `b36af295` and SDK 0.3.0. The retained
+`t253-native-run-bec6db1-01/run` manifest has digest
+`3caee597b97ba77c4e6a87f26c5359abc3000310e82843c3147e53ff1f425b3d`.
+Peer death reached observed restoration, local RolledBack settlement and the
+typed proof verdict; all four stages exited zero with clean console recovery.
+That evidence closes t253 within the one-card, two-head, refresh-only scope.
+
+The t272 candidate is Sophia `ee3819e1685bc926f888c3cc8fe55904d6c21239`,
+with SDK 0.4.0 `497e7e01531415078a4a3da2455ebe82ec18fd0e` and Hagia
+`0de7ef229146e6abedff98d726f0afb0815bb218`. It removes the output socket,
+keeps native profile authority without an output client, and requires the WM
+API to name `output_transport=9p2000.L`. SDK and Hagia both test refusal of the
+retired `current_ipc` API. The final Sophia follow-up repairs asynchronous EOF
+and launch preparation in test fixtures; it changes no production contract.
+Fresh preparation, performance and attended evidence must bind this assembled
+candidate before t272 acceptance. The t253 evidence remains bound to its own
+source pair.
+
+Rollback must restore the entire previous pair: pre-retirement Sophia with
+Hagia `b36af295` and its older SDK. New Hagia refuses the old API, and old Hagia
+refuses the new one. The historical frame-fed runner refuses Sophia sources
+without its removed startup rollback hook; archived evidence stays verifiable
+for its original pins. Current native acceptance covers peer-transaction
+rollback, with no physical startup-transaction rollback claim.

@@ -100,6 +100,9 @@ git() {
         verify-commit\ *)
             [[ "$fault" != unsigned ]]
             ;;
+        'grep -q -F OutputProofRollbackAfterApply '*' -- crates/sophia-session/src')
+            [[ "$fault" != retired ]]
+            ;;
         *)
             printf '%s\n' "$*" >>"$UNEXPECTED_GIT"
             return 98
@@ -177,6 +180,11 @@ class PhysicalGateIdentity(unittest.TestCase):
                         result = self.run_preflight(gate, repo=repo, fault=fault, phase="after")
                         self.assertNotEqual(result.returncode, 0)
                         self.assertRegex(result.stderr, "clean|changed")
+
+    def test_frame_runner_refuses_a_source_without_the_retired_rollback_hook(self):
+        result = self.run_preflight("frame", repo="Sophia", fault="retired")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("historical", result.stderr)
 
     def test_reporter_refuses_missing_checkout(self):
         for repo in ("Sophia", "Hagia", "Narthex"):
