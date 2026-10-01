@@ -34,20 +34,20 @@ sha2 = "0.10.9"
 # The public session-log record reader (seam B). Only an exact git checkout
 # builds this package (its conformance-host bins use ../ paths), so
 # provisioning fetches into a private CARGO_HOME rather than `cargo vendor`.
-sophia-conformance = { git = "https://github.com/sophia-org/sophia.git", rev = "ee3819e1685bc926f888c3cc8fe55904d6c21239" }
+sophia-conformance = { git = "https://github.com/sophia-org/sophia.git", rev = "21bdf9f60ec1aca53e13f8d6f828be8ddebcb21d" }
 # The public desktop-profile loader, for the moved dock profile test (it was a
 # dev-dependency of Sophia's sophia-conformance).
-sophia-config = { git = "https://github.com/sophia-org/sophia.git", rev = "ee3819e1685bc926f888c3cc8fe55904d6c21239" }
-sophia-protocol = { git = "https://github.com/sophia-org/sophia.git", rev = "ee3819e1685bc926f888c3cc8fe55904d6c21239" }
-sophia-runtime = { git = "https://github.com/sophia-org/sophia.git", rev = "ee3819e1685bc926f888c3cc8fe55904d6c21239" }
+sophia-config = { git = "https://github.com/sophia-org/sophia.git", rev = "21bdf9f60ec1aca53e13f8d6f828be8ddebcb21d" }
+sophia-protocol = { git = "https://github.com/sophia-org/sophia.git", rev = "21bdf9f60ec1aca53e13f8d6f828be8ddebcb21d" }
+sophia-runtime = { git = "https://github.com/sophia-org/sophia.git", rev = "21bdf9f60ec1aca53e13f8d6f828be8ddebcb21d" }
 # The Rust desktop SDK's shell client, as vendored by Sophia at the same pin:
 # the neighbour bar in the live Bemenu gate (9P).
-sophia-shell-client = { git = "https://github.com/sophia-org/sophia.git", rev = "ee3819e1685bc926f888c3cc8fe55904d6c21239" }
+sophia-shell-client = { git = "https://github.com/sophia-org/sophia.git", rev = "21bdf9f60ec1aca53e13f8d6f828be8ddebcb21d" }
 # The Engine's public types, for the desktop comparison, at the same pin.
-sophia-engine = { git = "https://github.com/sophia-org/sophia.git", rev = "ee3819e1685bc926f888c3cc8fe55904d6c21239" }
+sophia-engine = { git = "https://github.com/sophia-org/sophia.git", rev = "21bdf9f60ec1aca53e13f8d6f828be8ddebcb21d" }
 # The public X server frontend, for the moved Quickshell trace probe
 # (crates/quickshell-probe, docs/quickshell.md).
-sophia-x-authority = { git = "https://github.com/sophia-org/sophia.git", rev = "ee3819e1685bc926f888c3cc8fe55904d6c21239" }
+sophia-x-authority = { git = "https://github.com/sophia-org/sophia.git", rev = "21bdf9f60ec1aca53e13f8d6f828be8ddebcb21d" }
 # The public render-node measurement and buffer allocator (feature gbm-probe),
 # for the probe's GPU variant only, as the old probe used them.
-sophia-backend-live = { git = "https://github.com/sophia-org/sophia.git", rev = "ee3819e1685bc926f888c3cc8fe55904d6c21239" }
+sophia-backend-live = { git = "https://github.com/sophia-org/sophia.git", rev = "21bdf9f60ec1aca53e13f8d6f828be8ddebcb21d" }
