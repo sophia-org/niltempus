@@ -144,7 +144,9 @@ source paths, plan, stage logs and elapsed times; cached checkouts may advance o
 the next build, but these records and sealed releases remain.
 
 WM-pair builds run serially and build only the packaged executables;
-Cargo uses two jobs. Git checkout and compiler children use umask
+Builds inherit the caller's priority and use available CPUs by default.
+Set `CARGO_BUILD_JOBS` to a positive integer to override Cargo, Nim and Make
+parallelism. Git checkout and compiler children use umask
 022, independently of the caller, so a permissive shell cannot create a profile
 that Hagia rejects as group-writable. The original repositories and profile are
 never chmodded. The WM pair binds Hagia's shipped profile by its digest, and

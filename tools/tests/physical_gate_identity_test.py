@@ -571,10 +571,10 @@ exit 97
                          __import__("hashlib").sha256(built).hexdigest())
 
     def test_preparation_is_bounded_and_touches_no_source(self):
-        # The runners never build: they run the helper at nice 19 with two
-        # jobs, with an explicit private build directory and a new output
-        # below it, Hagia and Narthex from their reviewed dependency manifests,
-        # and verify the output before use. No file appears in any checkout.
+        # The runners never build: they run the helper at the caller's
+        # priority and jobs, with an explicit private build directory and a
+        # new output below it, Hagia and Narthex from their reviewed
+        # dependency manifests, and verify the output before use. No file appears in any checkout.
         profile = self.integration / "tools/fixtures/t018_tab_reference.kdl"
         for script, extra in (("run_current_hagia_native_gate_tty4.sh",
                                {"SOPHIA_HAGIA_NATIVE_PROFILE": str(profile)}),
@@ -582,9 +582,9 @@ exit 97
             with self.subTest(script=script):
                 for mark in ("bounds", "helper-calls", "build"):
                     (self.marks / mark).unlink(missing_ok=True)
-                result = self.run_script(script, self.environment(**extra))
+                result = self.run_script(script, self.environment(CARGO_BUILD_JOBS="3", **extra))
                 self.assertEqual(result.returncode, 3, result.stderr)
-                self.assertEqual(self.mark("bounds").splitlines(), ["nice=19 jobs=2"])
+                self.assertEqual(self.mark("bounds").splitlines(), [f"nice={os.nice(0)} jobs=3"])
                 calls = self.mark("helper-calls").splitlines()
                 prepare = [c for c in calls if not c.startswith("prepare-physical-inputs verify")]
                 self.assertEqual(len(prepare), 1, calls)

@@ -18,7 +18,8 @@
 //! repository clean with a signed HEAD (bound); Sophia's clean checkout at
 //! the pinned, signed revision; every source staged as its exact signed tree
 //! (git archive, tree-hash proven) in a private scratch under `--build-dir`;
-//! Sophia built there offline, `--locked`, nice 19, two jobs, bounded, into
+//! Sophia built there offline, `--locked`, at the caller's priority and
+//! parallelism, bounded, into
 //! `--build-dir/sophia-target`; Hagia and Narthex through the one corrected
 //! builder (product_artifact::build) from their reviewed dependency
 //! manifests; every staged tree re-proven after its build. `--profile`

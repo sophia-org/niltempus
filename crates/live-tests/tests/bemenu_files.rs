@@ -20,7 +20,7 @@
 //!
 //!   cargo xtask prepare-bemenu-artifact <source-repo> <signed-commit> <new-output-dir>
 //!   SOPHIA_BEMENU_ARTIFACT=<output-dir> SOPHIA_BEMENU_SHA256=<binary sha256> \
-//!   SOPHIA_BEMENU_COMMIT=<signed commit> nice -n 19 \
+//!   SOPHIA_BEMENU_COMMIT=<signed commit> \
 //!   cargo test -p live-tests --test bemenu_files -- --ignored --nocapture
 //!
 //! (After tools/provision.sh, every cargo command here runs with the

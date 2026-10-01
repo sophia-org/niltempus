@@ -658,8 +658,8 @@ fn workspace_version(tree: &Path) -> Result<String, String> {
         .ok_or_else(|| "could not resolve Sophia's workspace version".into())
 }
 
-/// Offline, locked release build at low priority with at most two jobs,
-/// in a private process group and bounded by time and log size.
+/// Offline, locked release build at the caller's priority with
+/// [`crate::product_artifact::build_jobs`] jobs, in a private process group and bounded by time and log size.
 pub(crate) fn cargo(
     dir: &Path,
     target: &Path,
@@ -669,22 +669,15 @@ pub(crate) fn cargo(
     what: &str,
 ) -> Result<(), String> {
     let log_file = File::create(log).map_err(|e| format!("{}: {e}", log.display()))?;
-    let mut command = Command::new("nice");
+    let jobs = crate::product_artifact::build_jobs()?;
+    let mut command = Command::new("cargo");
     command
-        .args([
-            "-n",
-            "19",
-            "cargo",
-            "build",
-            "--offline",
-            "--locked",
-            "--release",
-        ])
-        .args(["--jobs", crate::product_artifact::build_jobs()])
+        .args(["build", "--offline", "--locked", "--release"])
+        .args(["--jobs", &jobs])
         .args(packages)
         .current_dir(dir)
         .env("CARGO_TARGET_DIR", target)
-        .env("CARGO_BUILD_JOBS", crate::product_artifact::build_jobs())
+        .env("CARGO_BUILD_JOBS", &jobs)
         .env_remove("RUSTFLAGS")
         .env_remove("CARGO_ENCODED_RUSTFLAGS")
         .env_remove("CARGO_BUILD_TARGET")

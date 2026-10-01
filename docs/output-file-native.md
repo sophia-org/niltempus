@@ -19,8 +19,8 @@ Prepare physical inputs separately with this repository's existing
 reviewed Nim dependencies, and a complete desktop output profile. A profile
 owned here uses `--profile=integration:RELATIVE/PATH`; it is copied from this
 repository's signed commit. Preparation builds; execution never does.
-Set `CARGO_BUILD_JOBS=1` for preparation; both Rust and Nim builds honor that
-limit while retaining nice 19 priority.
+Preparation runs at the caller's priority; Rust and Nim builds use the
+caller's `CARGO_BUILD_JOBS`, or every CPU when it is unset.
 The Sophia revision, SDK manifest and contracts must match this repository's
 pins. Hash `prepared.json` and the host `active-session-preflight` binary too.
 
@@ -132,6 +132,23 @@ layout and peer snapshot checks. Head disabling, routing changes and unselected
 object leaks remain outside this gate. Promotion and archiving are separate.
 
 ## Candidate preparation (2026-09-30)
+
+The first four-stage attempt (`t253-native-run-2808fcc-01/`) stopped after
+validate because the integration verifier counted startup's apply and commit
+as effects of ValidateOnly. The peer received Validated at epoch 2; Session
+completed normally with 15 nonzero application exports, and console recovery
+passed. Reject, commit-restore and peer-death did not run. The failed run and
+its original verdict remain intact.
+
+The corrected verifier binds startup's apply, presentation, settlement,
+publication and commit before baseline capture. Snapshot publication IDs use
+Session's separate counter: they are joined by topology epoch and owner-record
+order, not client transaction ID. A byte-preserved extract of the attended
+validate records is an offline regression fixture. Other regressions refuse
+extra effects, missing startup evidence and stray publications, and allow peer
+records to overtake owner logging after a transport command is enqueued.
+The peer-death rollback check currently qualifies one DRM card; its exactly-one
+rollback record does not establish multi-card recovery.
 
 The first attended inventory (`t253-inventory-a503c31-01/`) recorded the
 startup commit at topology epoch 2, DP-1 as head/output 1 with mode 260 at

@@ -291,10 +291,10 @@ fn converted_runners_prepare_through_the_bounded_helper() {
         );
     }
     let library = fs::read_to_string(root.join(PREPARING[16])).unwrap();
-    // The one invocation of the helper, and its bounds.
+    // The one invocation of the helper, and its bounds: a deadline, and the
+    // caller's priority and jobs (no forced nice value or job count).
     for required in [
-        "CARGO_BUILD_JOBS=2 timeout -s KILL \"$PHYSICAL_INPUTS_DEADLINE\"",
-        "nice -n 19 \"$SOPHIA_INTEGRATION_XTASK\" prepare-physical-inputs",
+        "timeout -s KILL \"$PHYSICAL_INPUTS_DEADLINE\" \\\n        \"$SOPHIA_INTEGRATION_XTASK\" prepare-physical-inputs",
         "--sophia-root=\"$SOPHIA_SOURCE\" --build-dir=\"$build\" --out=\"$out\"",
         "prepare-physical-inputs verify",
         "--manifest-sha256=\"$sha\"",
@@ -308,6 +308,12 @@ fn converted_runners_prepare_through_the_bounded_helper() {
         );
     }
     assert_eq!(library.matches("prepare-physical-inputs \\").count(), 1);
+    for line in library.lines().filter(|l| !l.trim_start().starts_with('#')) {
+        assert!(
+            !line.contains("nice ") && !line.contains("CARGO_BUILD_JOBS="),
+            "physical_inputs.sh overrides the caller's priority or jobs: {line}"
+        );
+    }
     assert!(
         !library.contains("source \"$dir/inputs.env\"")
             && !library.contains(". \"$dir/inputs.env\"")

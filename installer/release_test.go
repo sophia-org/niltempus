@@ -326,12 +326,12 @@ func TestLegacyReleaseWithoutIPCEntryRemainsAvailableForRollback(t *testing.T) {
 func TestBuildEnvironmentDropsSessionAndBinaryOverrides(t *testing.T) {
 	env := buildEnvironment([]string{"HOME=/home/test", "PATH=/usr/bin", "SOPHIA_HAGIA_BIN=/old/hagia", "SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1", "DISPLAY=:77", "WAYLAND_DISPLAY=socket", "CARGO_TARGET_DIR=/other/tree", "CARGO_BUILD_JOBS=100"})
 	joined := strings.Join(env, "\n")
-	for _, absent := range []string{"SOPHIA_", "DISPLAY=", "/other/tree", "JOBS=100"} {
+	for _, absent := range []string{"SOPHIA_", "DISPLAY=", "/other/tree"} {
 		if strings.Contains(joined, absent) {
 			t.Fatal(joined)
 		}
 	}
-	for _, present := range []string{"HOME=/home/test", "CARGO_BUILD_JOBS=2", "CARGO_NET_OFFLINE=true", "XDG_RUNTIME_DIR=/tmp/runtime"} {
+	for _, present := range []string{"HOME=/home/test", "CARGO_BUILD_JOBS=100", "CARGO_NET_OFFLINE=true", "XDG_RUNTIME_DIR=/tmp/runtime"} {
 		if !strings.Contains(joined, present) {
 			t.Fatal(joined)
 		}

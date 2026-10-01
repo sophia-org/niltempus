@@ -13,7 +13,7 @@ and Hagia; it is retired together with that IPC, not moved.
 
 | Sophia entry (check.rs line) | Now |
 | --- | --- |
-| `python3 -m unittest ... physical_gate_identity_test.py` (:80) | E `physical_selftests::physical_gate_identity` (dry runs now stub the prepared-inputs helper and require nice 19, two jobs, no build and untouched checkouts) |
+| `python3 -m unittest ... physical_gate_identity_test.py` (:80) | E `physical_selftests::physical_gate_identity` (dry runs now stub the prepared-inputs helper and require the caller's nice value and jobs, no build and untouched checkouts) |
 | `archives()`: hagia-native-runs, mirror-group-runs (:160, :164) | E `cargo xtask verify-archives` (integration schema 1; `--legacy` for older runs) |
 | `archives()`: direct-scanout-runs | S (Rust `direct_scanout_archive`) |
 | `run_sophia_terminal_gate_tty3.sh --self-test` (:110) | E `physical_selftests::run_sophia_terminal_gate_tty3_self_test` |

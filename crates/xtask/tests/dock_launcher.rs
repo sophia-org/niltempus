@@ -23,6 +23,14 @@ fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+/// This process's nice value (proc_pid_stat(5) field 19), which the
+/// launcher's children inherit unless something renices them.
+fn caller_nice() -> i32 {
+    let stat = fs::read_to_string("/proc/self/stat").unwrap();
+    let (_, fields) = stat.rsplit_once(')').unwrap();
+    fields.split_whitespace().nth(16).unwrap().parse().unwrap()
+}
+
 fn real_git() -> PathBuf {
     std::env::split_paths(&std::env::var_os("PATH").unwrap())
         .map(|dir| dir.join("git"))
@@ -238,7 +246,8 @@ if [[ "${1:-}" == verify ]]; then
     [[ "$*" == *"--manifest-sha256=$sha"* ]] || exit 99
     exit 0
 fi
-[[ "$CARGO_BUILD_JOBS" == 2 && "$(ps -o ni= -p $$ | tr -d ' ')" == 19 ]] || exit 98
+# The caller's jobs and priority reach the helper unchanged.
+[[ "$CARGO_BUILD_JOBS" == 3 && "$(ps -o ni= -p $$ | tr -d ' ')" == "$CALLER_NICE" ]] || exit 98
 [[ "$*" == *--sophia-packages=sophia-cli,sophia-conformance* ]] || exit 97
 out=
 for arg in "$@"; do
@@ -358,6 +367,8 @@ exit "${SESSION_STATUS:-0}""#,
                 self.directory.join(evidence),
             )
             .env("TRACE", self.directory.join("trace"))
+            .env("CARGO_BUILD_JOBS", "3")
+            .env("CALLER_NICE", caller_nice().to_string())
             .env("PROOF_STATUS", proof)
             .env("SESSION_STATUS", session);
         for (kind, identity) in &self.identities {

@@ -66,13 +66,15 @@ pub fn run(repo: &Path, args: &[String]) -> Result<Vec<String>, String> {
         return Err("SDK manifest differs between Bemenu and the pin".into());
     }
 
-    // Low-priority, two-job build inside the scratch tree only.
+    // Build inside the scratch tree only, at the caller's priority and
+    // parallelism (`CARGO_BUILD_JOBS`; the caller's MAKEFLAGS are removed).
     let log = scratch.join("build.log");
     let log_file = File::create(&log).map_err(|e| e.to_string())?;
     // CFLAGS/CPPFLAGS/LDFLAGS from the caller would replace the recipe's
     // `?=` warning set, so they are removed; EXTRA_WARNINGS makes it fatal.
-    let child = Command::new("nice")
-        .args(["-n", "19", "make", "-j2", "EXTRA_WARNINGS=-Werror"])
+    let child = Command::new("make")
+        .arg(format!("-j{}", crate::product_artifact::build_jobs()?))
+        .arg("EXTRA_WARNINGS=-Werror")
         .arg(format!("GIT_SHA1={commit}"))
         .arg(BINARY)
         .current_dir(&tree_dir)

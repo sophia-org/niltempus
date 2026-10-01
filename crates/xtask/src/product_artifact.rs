@@ -6,8 +6,8 @@
 //! The same custody rules as `prepare-bemenu-artifact`: SOURCE AUTHORIZATION
 //! (`git verify-commit`, status G) happens only here, the build input is
 //! `git archive` of the signed commit whose extracted tree must hash to
-//! exactly that commit's tree, the build runs low-priority with two jobs in a
-//! private process group with a deadline and a log cap, and the output
+//! exactly that commit's tree, the build runs at the caller's priority with
+//! [`build_jobs`] jobs in a private process group with a deadline and a log cap, and the output
 //! directory is created last and made read-only. ARTIFACT BINDING is the
 //! gates' separate job: the manifest is not signed, so they require the
 //! operator's expected commit and digests (printed here) for every file. Nothing is read from the
@@ -328,9 +328,9 @@ impl NimBuild {
 }
 
 /// Signer authorization and the exact signed tree, staged in a private
-/// scratch under `build_dir`, then the product's low-priority, two-job,
-/// bounded build inside that scratch, then the post-build tree proof. Nim
-/// products need their reviewed dependency manifest (`deps`); Cargo
+/// scratch under `build_dir`, then the product's bounded build inside
+/// that scratch at the caller's priority and [`build_jobs`], then the
+/// post-build tree proof. Nim products need their reviewed dependency manifest (`deps`); Cargo
 /// products refuse one.
 pub(crate) fn build(
     product: &Product,
@@ -372,19 +372,20 @@ pub(crate) fn build(
     let mut staged = None;
     let mut install = None;
     let mut record = None;
-    // Low-priority build inside the scratch tree, capped at two jobs.
+    // Build inside the scratch tree at the caller's priority.
     let log = scratch.join("build.log");
     let log_file = File::create(&log).map_err(|e| e.to_string())?;
     let out = scratch.join("out");
     std::fs::create_dir(&out).map_err(|e| e.to_string())?;
     let (mut command, binary, limit) = match product.kind {
         Kind::Cargo => {
-            let mut command = Command::new("nice");
+            let jobs = build_jobs()?;
+            let mut command = Command::new("cargo");
             command
-                .args(["-n", "19", "cargo", "build", "--offline", "--locked"])
-                .args(["--release", "--jobs", build_jobs()])
+                .args(["build", "--offline", "--locked"])
+                .args(["--release", "--jobs", &jobs])
                 .env("CARGO_TARGET_DIR", &out)
-                .env("CARGO_BUILD_JOBS", build_jobs())
+                .env("CARGO_BUILD_JOBS", &jobs)
                 .env_remove("RUSTFLAGS")
                 .env_remove("CARGO_ENCODED_RUSTFLAGS")
                 .env_remove("CARGO_BUILD_TARGET");
@@ -501,7 +502,7 @@ pub fn nim_command(
     argv.extend(nim_flags(&prefix.lib, &gcc, paths.dep_dirs));
     argv.extend([
         "--path:src".to_owned(),
-        format!("--parallelBuild:{}", build_jobs()),
+        format!("--parallelBuild:{}", build_jobs()?),
         format!("--nimcache:{}", paths.scratch.join("nimcache").display()),
         format!("-o:{}", paths.binary.display()),
         main.to_owned(),
@@ -510,17 +511,28 @@ pub fn nim_command(
     Ok((command, argv))
 }
 
-/// Preserve the preparation ceiling while allowing an explicitly serialized
-/// build. Apply the same caller limit to Rust and Nim's C compilation.
-pub(crate) fn build_jobs() -> &'static str {
-    if std::env::var("CARGO_BUILD_JOBS").as_deref() == Ok("1") {
-        "1"
-    } else {
-        "2"
-    }
+/// Rust and Nim's C compilation share one parallelism: the caller's
+/// `CARGO_BUILD_JOBS`, or every available CPU.
+pub fn build_jobs() -> Result<String, String> {
+    let available = std::thread::available_parallelism().map_or(1, usize::from);
+    jobs(std::env::var_os("CARGO_BUILD_JOBS").as_deref(), available).map(|jobs| jobs.to_string())
 }
 
-/// `argv` at nice 19 in bwrap: no network, a private /tmp, every home,
+/// An explicit job count must be a canonical positive integer, so the
+/// recorded argv names exactly what ran; without one, `available` (at
+/// least 1).
+pub fn jobs(explicit: Option<&std::ffi::OsStr>, available: usize) -> Result<usize, String> {
+    let Some(value) = explicit else {
+        return Ok(available.max(1));
+    };
+    value
+        .to_str()
+        .filter(|v| !v.starts_with('0') && v.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|v| v.parse().ok())
+        .ok_or_else(|| format!("CARGO_BUILD_JOBS must be a positive integer, not {value:?}"))
+}
+
+/// `argv` at the caller's priority in bwrap: no network, a private /tmp, every home,
 /// /opt, /root and the LIVE Nim installation (the reviewed compiler's
 /// prefix, and /etc/nim) hidden, and only the private scratch (read-write),
 /// the staged dependencies and the staged installation (read-only) bound
@@ -538,14 +550,12 @@ pub fn sandboxed(
         .and_then(Path::parent)
         .map(Path::to_path_buf)
         .ok_or("the reviewed nim has no installation prefix")?;
-    let mut command = Command::new("nice");
+    let mut command = Command::new(toolchain.tool("bwrap")?);
     command
         .env_clear()
         .env("PATH", gcc.parent().ok_or("gcc has no directory")?)
         .env("HOME", paths.home)
         .env("LC_ALL", "C")
-        .args(["-n", "19"])
-        .arg(toolchain.tool("bwrap")?)
         .args(["--unshare-net", "--die-with-parent", "--ro-bind", "/", "/"])
         .args(["--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"]);
     let hidden = [

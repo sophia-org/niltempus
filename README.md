@@ -126,21 +126,22 @@ Afterwards every command is offline:
 
 ## Gates
 
-All with a private target outside this tree, two jobs, low priority and a hard
-timeout:
+All with a private target outside this tree and a hard timeout. Builds use
+the caller's priority and every CPU; set `CARGO_BUILD_JOBS` (or prefix
+`nice`) to limit them:
 
-    export CARGO_HOME=/abs/private-cargo-home CARGO_TARGET_DIR=/abs/private-target CARGO_BUILD_JOBS=2
-    timeout -s KILL 600 nice -n 19 cargo run --offline --locked -p xtask -- check-pins
-    timeout -s KILL 600 nice -n 19 cargo run --offline --locked -p xtask -- check-provision
-    timeout -s KILL 3600 nice -n 19 cargo test --workspace --offline --locked
-    timeout -s KILL 3600 nice -n 19 cargo clippy --workspace --all-targets --offline --locked -- -D warnings
+    export CARGO_HOME=/abs/private-cargo-home CARGO_TARGET_DIR=/abs/private-target
+    timeout -s KILL 600 cargo run --offline --locked -p xtask -- check-pins
+    timeout -s KILL 600 cargo run --offline --locked -p xtask -- check-provision
+    timeout -s KILL 3600 cargo test --workspace --offline --locked
+    timeout -s KILL 3600 cargo clippy --workspace --all-targets --offline --locked -- -D warnings
     cargo fmt --check
-    timeout -s KILL 600 nice -n 19 bash tools/check_lom_gpu_content_proof_verifiers.sh
+    timeout -s KILL 600 bash tools/check_lom_gpu_content_proof_verifiers.sh
 
 The live Bemenu gate is ignored by default and fails closed on any missing or
 mismatched input:
 
-    CARGO_BUILD_JOBS=2 nice -n 19 cargo xtask prepare-bemenu-artifact SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR
+    cargo xtask prepare-bemenu-artifact SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR
     SOPHIA_BEMENU_ARTIFACT=OUTPUT-DIR SOPHIA_BEMENU_SHA256=BINARY-SHA256 \
-    SOPHIA_BEMENU_COMMIT=SIGNED-COMMIT CARGO_BUILD_JOBS=2 nice -n 19 \
+    SOPHIA_BEMENU_COMMIT=SIGNED-COMMIT \
     cargo test --offline --locked -p live-tests --test bemenu_files -- --ignored --nocapture

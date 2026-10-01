@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -20,20 +22,37 @@ func buildCommand(name string, args ...string) *exec.Cmd {
 // may enter a build or profile validation command.
 func buildEnvironment(environ []string) []string {
 	var result []string
-	blocked := map[string]bool{"DISPLAY": true, "WAYLAND_DISPLAY": true, "WAYLAND_SOCKET": true, "XAUTHORITY": true, "DBUS_SESSION_BUS_ADDRESS": true, "CARGO_TARGET_DIR": true, "RUSTFLAGS": true, "CARGO_ENCODED_RUSTFLAGS": true, "XDG_CONFIG_HOME": true, "XDG_RUNTIME_DIR": true, "TMPDIR": true, "CARGO_BUILD_JOBS": true, "CARGO_NET_OFFLINE": true}
+	blocked := map[string]bool{"DISPLAY": true, "WAYLAND_DISPLAY": true, "WAYLAND_SOCKET": true, "XAUTHORITY": true, "DBUS_SESSION_BUS_ADDRESS": true, "CARGO_TARGET_DIR": true, "RUSTFLAGS": true, "CARGO_ENCODED_RUSTFLAGS": true, "XDG_CONFIG_HOME": true, "XDG_RUNTIME_DIR": true, "TMPDIR": true, "CARGO_NET_OFFLINE": true}
 	for _, item := range environ {
 		name, _, _ := strings.Cut(item, "=")
 		if !strings.HasPrefix(name, "SOPHIA_") && !strings.HasPrefix(name, "HAGIA_") && !blocked[name] {
 			result = append(result, item)
 		}
 	}
-	return append(result, "XDG_CONFIG_HOME=/tmp/config", "XDG_RUNTIME_DIR=/tmp/runtime", "TMPDIR=/tmp", "CARGO_BUILD_JOBS=2", "CARGO_NET_OFFLINE=true")
+	return append(result, "XDG_CONFIG_HOME=/tmp/config", "XDG_RUNTIME_DIR=/tmp/runtime", "TMPDIR=/tmp", "CARGO_NET_OFFLINE=true")
+}
+
+// Make shares Cargo's explicit job override. With none, both use the
+// available CPUs; never turn an invalid override into an unbounded make -j.
+func buildJobs() (string, error) {
+	value, set := os.LookupEnv("CARGO_BUILD_JOBS")
+	if !set {
+		return strconv.Itoa(runtime.NumCPU()), nil
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil || n <= 0 || strconv.Itoa(n) != value {
+		return "", fmt.Errorf("CARGO_BUILD_JOBS must be a positive integer, not %q", value)
+	}
+	return value, nil
 }
 
 func isolated(root string, extra map[string]string, command ...string) *exec.Cmd {
-	args := []string{"--die-with-parent", "--unshare-pid", "--unshare-net", "--bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/run/user", "--tmpfs", "/tmp", "--dir", "/tmp/config", "--dir", "/tmp/runtime", "--", "sh", "-c", `umask 022; exec "$@"`, "desktop-build", "nice", "-n", "19"}
+	args := []string{"--die-with-parent", "--unshare-pid", "--unshare-net", "--bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/run/user", "--tmpfs", "/tmp", "--dir", "/tmp/config", "--dir", "/tmp/runtime", "--", "sh", "-c", `umask 022; exec "$@"`, "desktop-build"}
 	cmd := exec.Command("bwrap", append(args, command...)...)
 	cmd.Dir, cmd.Env = root, buildEnvironment(os.Environ())
+	if _, err := buildJobs(); err != nil {
+		cmd.Err = err
+	}
 	for name, value := range extra {
 		cmd.Env = append(cmd.Env, name+"="+value)
 	}
@@ -146,7 +165,11 @@ func buildRelease(plan Plan, loc Locations) (string, error) {
 	if err := logged(isolated(roots["lom"], nil, "cargo", "build", "--locked", "--offline", "--release"), filepath.Join(work, "build-lom.log")); err != nil {
 		return "", err
 	}
-	if err := logged(isolated(roots["bemenu"], nil, "make", "-j2", "bemenu-sophia", "EXTRA_WARNINGS=-Werror", "GIT_SHA1="+plan.Sources["bemenu"].Commit, "GIT_TAG="+plan.Sources["bemenu"].Commit), filepath.Join(work, "build-bemenu.log")); err != nil {
+	jobs, err := buildJobs()
+	if err != nil {
+		return "", err
+	}
+	if err := logged(isolated(roots["bemenu"], nil, "make", "-j"+jobs, "bemenu-sophia", "EXTRA_WARNINGS=-Werror", "GIT_SHA1="+plan.Sources["bemenu"].Commit, "GIT_TAG="+plan.Sources["bemenu"].Commit), filepath.Join(work, "build-bemenu.log")); err != nil {
 		return "", err
 	}
 	for _, pair := range [][2]string{{filepath.Join(roots["lom"], "target/release/lom"), "target/release/lom"}, {filepath.Join(roots["bemenu"], "bemenu-sophia"), "target/release/bemenu-sophia"}} {

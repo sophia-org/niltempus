@@ -232,6 +232,7 @@ pub(super) fn verify_stage(plan: &StageRecord, a: &Layout, text: &str) -> Result
         stage.sets.iter().filter(|s| s.stage == "peer_exit"),
         "peer_exit readback",
     )?;
+    startup_and_publications(&stage, plan, startup, baseline)?;
     if baseline.connection_epoch != 0
         || baseline.transaction != 0
         || baseline.base_topology_epoch != epoch
@@ -268,6 +269,105 @@ pub(super) fn verify_stage(plan: &StageRecord, a: &Layout, text: &str) -> Result
         "commit-restore" => commit_restore(&stage, exited, peer_exit),
         _ => peer_death(&stage, exited, peer_exit, disconnected),
     }
+}
+
+/// Startup is a real physical transaction, completed before baseline capture.
+/// Snapshot publication IDs belong to a separate Session counter; bind them
+/// to the committed topology epoch and owner-thread ordering, never peer IDs.
+fn startup_and_publications(
+    stage: &Stage<'_>,
+    plan: &StageRecord,
+    startup: &Entry,
+    baseline: &Snapshot,
+) -> Result<(), String> {
+    let applied = exactly_one(
+        stage.for_transaction(2, "apply_started", STARTUP_TRANSACTION),
+        "startup apply",
+    )?;
+    let presented = exactly_one(
+        stage.for_transaction(2, "first_presented", STARTUP_TRANSACTION),
+        "startup presentation",
+    )?;
+    let committed = exactly_one(
+        stage.for_transaction(2, "committed", STARTUP_TRANSACTION),
+        "startup commit",
+    )?;
+    if committed.u64("topology_epoch")? != stage.epoch
+        || !(applied.line < presented.line
+            && presented.line < startup.line
+            && startup.line < committed.line
+            && committed.line < baseline.line)
+    {
+        return Err("startup effects do not establish the declared baseline".into());
+    }
+    let publications = stage.authority(2, "committed_snapshot_published");
+    let expected = if plan.name == "commit-restore" { 3 } else { 1 };
+    if publications.len() != expected {
+        return Err(format!(
+            "expected {expected} committed snapshot publications"
+        ));
+    }
+    let submits = stage.events("submit");
+    // No other physical candidate may hide beside the expected transactions.
+    for status in ["apply_started", "first_presented", "committed"] {
+        let runtime_allowed = plan.name == "commit-restore"
+            || (plan.name == "peer-death" && status == "apply_started");
+        for record in stage.authority(2, status) {
+            let txn = record.u64("transaction")?;
+            if txn != STARTUP_TRANSACTION
+                && (!runtime_allowed || !submits.iter().any(|s| s.is("txn", &txn.to_string())))
+            {
+                return Err(format!(
+                    "unexpected physical effect: {status} transaction={txn}"
+                ));
+            }
+        }
+    }
+    let mut last_id = 0;
+    for (index, publication) in publications.iter().enumerate() {
+        let id = publication.u64("transaction")?;
+        let epoch = stage
+            .epoch
+            .checked_add(index as u64)
+            .ok_or("epoch overflow")?;
+        if id <= last_id
+            || publication.u64("topology_epoch")? != epoch
+            || !publication.truth("transport_published")?
+        {
+            return Err("snapshot publication identity, epoch or transport differs".into());
+        }
+        last_id = id;
+        let (settled, committed) = if index == 0 {
+            (startup, committed)
+        } else {
+            let txn = submits
+                .get(index - 1)
+                .ok_or("missing commit submit")?
+                .u64("txn")?;
+            (
+                exactly_one(
+                    stage.for_transaction(1, "settled", txn),
+                    "commit settlement",
+                )?,
+                exactly_one(
+                    stage.for_transaction(2, "committed", txn),
+                    "candidate commit",
+                )?,
+            )
+        };
+        // Worker and peer stdout can overtake these owner records after the
+        // command is enqueued. Only owner-thread order is a synchronization fact.
+        if !(settled.line < publication.line && publication.line < committed.line)
+            || settled.u64("topology_epoch")? != epoch
+            || committed.u64("topology_epoch")? != epoch
+            || !settled.is("outcome", "Committed")
+        {
+            return Err(
+                "snapshot publication is not bracketed by its owner settlement and commit".into(),
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Session's own start and ordinary bounded completion around the stage
@@ -385,8 +485,14 @@ fn submit<'e>(stage: &Stage<'e>) -> Result<(&'e Entry, u64), String> {
 /// Validate and reject apply nothing and publish nothing new.
 fn no_effects(stage: &Stage<'_>) -> Result<(), String> {
     if stage.sets.iter().any(|s| s.transaction != 0)
-        || !stage.authority(2, "apply_started").is_empty()
-        || !stage.authority(2, "committed").is_empty()
+        || ["apply_started", "committed", "first_presented"]
+            .iter()
+            .any(|status| {
+                stage
+                    .authority(2, status)
+                    .iter()
+                    .any(|entry| !entry.is("transaction", &STARTUP_TRANSACTION.to_string()))
+            })
         || !stage.published().is_empty()
     {
         return Err("a stage without a physical effect applied or published one".into());
@@ -533,11 +639,7 @@ fn commit_restore(stage: &Stage<'_>, exited: &Entry, peer_exit: &Snapshot) -> Re
             stage.for_transaction(2, "apply_started", txn),
             "apply start",
         )?;
-        for (schema, status) in [
-            (2, "committed"),
-            (1, "settled"),
-            (2, "committed_snapshot_published"),
-        ] {
+        for (schema, status) in [(2, "committed"), (1, "settled")] {
             let record = exactly_one(stage.for_transaction(schema, status, txn), status)?;
             if record.u64("topology_epoch")? != committed_epoch
                 || (status == "settled" && !record.is("outcome", "Committed"))
@@ -546,6 +648,14 @@ fn commit_restore(stage: &Stage<'_>, exited: &Entry, peer_exit: &Snapshot) -> Re
                     "transaction {txn} {status} names another epoch or outcome"
                 ));
             }
+        }
+        let first_presented = exactly_one(
+            stage.for_transaction(2, "first_presented", txn),
+            "candidate first presentation",
+        )?;
+        let settlement = exactly_one(stage.for_transaction(1, "settled", txn), "settlement")?;
+        if first_presented.line >= settlement.line {
+            return Err("candidate settlement precedes first presentation".into());
         }
         let [before, _, installed] = physical_sequence(stage, txn, base)?;
         let presented = stage.set("presented", txn)?;
@@ -618,7 +728,10 @@ fn peer_death(
     {
         return Err("the requested peer did not exit by TERM or KILL".into());
     }
-    exactly_one(stage.authority(2, "apply_started"), "apply start")?;
+    exactly_one(
+        stage.for_transaction(2, "apply_started", txn),
+        "apply start",
+    )?;
     if stage
         .for_transaction(2, "cancellation_observed", txn)
         .is_empty()
@@ -633,12 +746,7 @@ fn peer_death(
     if !settled.is("outcome", "RolledBack") || settled.u64("topology_epoch")? != stage.epoch {
         return Err("the held transaction did not settle RolledBack at the declared epoch".into());
     }
-    for (schema, status) in [
-        (1, "settled"),
-        (2, "committed"),
-        (2, "committed_snapshot_published"),
-        (2, "first_presented"),
-    ] {
+    for (schema, status) in [(1, "settled"), (2, "committed"), (2, "first_presented")] {
         if !stage.for_transaction(schema, status, txn).is_empty() {
             return Err(format!("the held transaction reached {status}"));
         }

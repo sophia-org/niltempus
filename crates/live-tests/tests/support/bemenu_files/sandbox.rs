@@ -10,8 +10,9 @@
 //!
 //! ProcessLaunchSpec cannot redirect stdio, so the program is /usr/bin/sh with
 //! quoted positional arguments that only exec: `env -i` leaves exactly PATH and
-//! the wire's one endpoint variable (no shell-added PWD/SHLVL), then `nice -n 19` execs
-//! the binary with stdout/stderr on files in a bound log directory. Every exec
+//! the wire's one endpoint variable (no shell-added PWD/SHLVL), then execs the
+//! binary at the test's own priority with stdout/stderr on files in a bound
+//! log directory. Every exec
 //! keeps the PID, so the evidence's peer PID is Bemenu's; `verify_domain`
 //! proves that after exec rather than assuming it.
 //!
@@ -34,8 +35,8 @@ const LOCAL_FONTS: &str = "/usr/local/share/fonts";
 const LOG_CAP: u64 = 64 * 1024;
 const EXEC_TIMEOUT: Duration = Duration::from_secs(15);
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
-const LAUNCHER: &str = "exec /usr/bin/env -i PATH=/usr/bin \"$5=$2\" \
-     /usr/bin/nice -n 19 \"$1\" --serve >\"$3\" 2>\"$4\"";
+const LAUNCHER: &str =
+    "exec /usr/bin/env -i PATH=/usr/bin \"$5=$2\" \"$1\" --serve >\"$3\" 2>\"$4\"";
 
 pub struct Peer {
     supervisor: ProcessSupervisor,
@@ -170,8 +171,8 @@ impl Peer {
     }
 
     /// Prove what actually runs inside the domain, after every exec:
-    /// the verified copy with exactly one endpoint at nice 19, as PID 1 of a
-    /// private PID namespace, with one font visible and no host devices.
+    /// the verified copy with exactly one endpoint at the test's nice value,
+    /// as PID 1 of a private PID namespace, with one font visible and no host devices.
     pub fn verify_domain(
         &mut self,
         binary: &Path,
@@ -231,14 +232,21 @@ impl Peer {
             "bemenu environment carries the retired {}",
             crate::fixture::RETIRED_IPC_ENV
         );
-        let stat = std::fs::read_to_string(proc(pid, "stat")).unwrap();
-        let fields = stat
-            .rsplit_once(") ")
-            .unwrap()
-            .1
-            .split(' ')
-            .collect::<Vec<_>>();
-        assert_eq!(fields[16], "19", "bemenu nice value");
+        // proc_pid_stat(5) field 19, counted from the end of the name.
+        let nice = |stat: String| {
+            stat.rsplit_once(") ")
+                .unwrap()
+                .1
+                .split(' ')
+                .nth(16)
+                .unwrap()
+                .to_owned()
+        };
+        assert_eq!(
+            nice(std::fs::read_to_string(proc(pid, "stat")).unwrap()),
+            nice(std::fs::read_to_string("/proc/self/stat").unwrap()),
+            "bemenu runs at the test's nice value"
+        );
         let status = std::fs::read_to_string(proc(pid, "status")).unwrap();
         let nspid = status
             .lines()

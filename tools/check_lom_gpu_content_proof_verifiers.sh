@@ -198,8 +198,7 @@ for script in "$runner" "$ROOT_DIR/tools/lom_gpu_content_hardware_proof.sh"; do
     fi
 done
 # Sophia is read only from the staged pinned tree: no path below the
-# operator's checkout, and every build writes only to the private build dir
-# at low priority with two jobs.
+# operator's checkout, and every build writes only to the private build dir.
 for script in "$runner" "$ROOT_DIR/tools/lom_gpu_content_hardware_proof.sh" "$ROOT_DIR/tools/lib/artifacts.sh"; do
     if grep -nE '\$\{?SOPHIA_SOURCE\}?/' "$script"; then
         echo "$script reads Sophia outside the staged pinned tree" >&2

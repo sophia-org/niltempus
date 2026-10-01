@@ -13,10 +13,11 @@
 #     SOPHIA_GATE_BUILD_DIR (0700, owned, outside every source tree), the
 #     pinned SOPHIA_SOURCE checkout, the provisioned CARGO_HOME. The helper
 #     stages every source as its exact signed tree (git archive, tree-hash
-#     proven), builds offline and --locked at nice 19 with two jobs into
-#     private targets below the build directory, proves the trees again after
-#     the builds, and writes a new read-only output there. This call runs it
-#     at nice 19 with two jobs under a KILL deadline, then loads the result.
+#     proven), builds offline and --locked into private targets below the
+#     build directory, proves the trees again after the builds, and writes a
+#     new read-only output there. This call runs it under a KILL deadline at
+#     the caller's priority and CARGO_BUILD_JOBS (default: every CPU), then
+#     loads the result.
 # physical_inputs_use DIR MANIFEST-SHA256
 #     For runners that take an already prepared directory: loads it.
 # physical_inputs_load DIR MANIFEST-SHA256
@@ -51,8 +52,8 @@ physical_inputs_prepare() {
         physical_inputs_fail "CARGO_HOME must name the provisioned private CARGO_HOME"
     out="$build/inputs-$(date -u +%Y%m%dT%H%M%SZ)-$$"
     echo "Preparing physical inputs (signed trees, private builds) in $out ..."
-    summary="$(CARGO_BUILD_JOBS=2 timeout -s KILL "$PHYSICAL_INPUTS_DEADLINE" \
-        nice -n 19 "$SOPHIA_INTEGRATION_XTASK" prepare-physical-inputs \
+    summary="$(timeout -s KILL "$PHYSICAL_INPUTS_DEADLINE" \
+        "$SOPHIA_INTEGRATION_XTASK" prepare-physical-inputs \
         --sophia-root="$SOPHIA_SOURCE" --build-dir="$build" --out="$out" "$@")" ||
         physical_inputs_fail "prepare-physical-inputs failed"
     printf '%s\n' "$summary"
@@ -70,7 +71,7 @@ physical_inputs_load() {
     [[ "$dir" == /* && -d "$dir" && ! -L "$dir" ]] ||
         physical_inputs_fail "the input directory must be absolute and real: ${dir:-unset}"
     [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || physical_inputs_fail "the expected manifest sha256 is required"
-    timeout -s KILL 600 nice -n 19 "$SOPHIA_INTEGRATION_XTASK" prepare-physical-inputs verify \
+    timeout -s KILL 600 "$SOPHIA_INTEGRATION_XTASK" prepare-physical-inputs verify \
         --out="$dir" --manifest-sha256="$sha" ||
         physical_inputs_fail "$dir is not the expected prepared inputs"
     declare -gA PI=()
@@ -97,7 +98,7 @@ physical_inputs_verify_exported() {
         physical_inputs_fail "SOPHIA_PHYSICAL_INPUTS and SOPHIA_PHYSICAL_INPUTS_SHA256 are required before archiving"
     [[ "${SOPHIA_INTEGRATION_XTASK:-}" == /* && -x "${SOPHIA_INTEGRATION_XTASK:-}" ]] ||
         physical_inputs_fail "SOPHIA_INTEGRATION_XTASK must name the absolute prebuilt recipe tool"
-    timeout -s KILL 600 nice -n 19 "$SOPHIA_INTEGRATION_XTASK" prepare-physical-inputs verify \
+    timeout -s KILL 600 "$SOPHIA_INTEGRATION_XTASK" prepare-physical-inputs verify \
         --out="$SOPHIA_PHYSICAL_INPUTS" --manifest-sha256="$SOPHIA_PHYSICAL_INPUTS_SHA256" ||
         physical_inputs_fail "the prepared inputs changed before archiving"
 }

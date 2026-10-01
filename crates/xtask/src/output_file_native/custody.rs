@@ -295,8 +295,18 @@ fn verify_preparation(dir: &Path, expected: &str, sdk_revision: &str) -> Result<
             value["rust_profile"] == "release",
             "rust_profile is not release",
         ),
-        (value["cargo_jobs"] == 1, "cargo_jobs is not 1"),
-        (value["nice"] == 19, "nice is not 19"),
+        // What preparation recorded: 1 and 19 in preparations before Sophia
+        // builds ran at the caller's priority and parallelism.
+        (
+            value["cargo_jobs"].as_u64().is_some_and(|jobs| jobs > 0),
+            "cargo_jobs is not a positive integer",
+        ),
+        (
+            value["nice"]
+                .as_i64()
+                .is_some_and(|nice| (-20..=19).contains(&nice)),
+            "nice is not a nice value",
+        ),
         (value["c_flags"].is_string(), "c_flags is not a string"),
         (value["limits"].is_string(), "limits is not a string"),
         (value["device_hidden"] == true, "devices were not hidden"),

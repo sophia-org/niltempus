@@ -4,7 +4,8 @@
 //! Each half follows the product-artifact custody rules: SOURCE AUTHORIZATION
 //! (`git verify-commit`, status G) happens only here, the build input is the
 //! signed commit's exact tree (`git archive`, tree hash proven), and the build
-//! runs low-priority, two jobs, bounded, in a private scratch tree. Nothing is
+//! runs at the caller's priority and parallelism, bounded, in a private
+//! scratch tree. Nothing is
 //! read from a checkout's working tree and no sibling checkout is consulted:
 //! both repositories and commits are explicit. The canonical default profile
 //! comes from Hagia's signed tree. The output directory is created last and

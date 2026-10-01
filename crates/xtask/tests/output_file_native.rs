@@ -19,6 +19,9 @@ use xtask::pins;
 mod fixture;
 use fixture::{Dir, NIM_CONFIG_SHA256, NIM_STDLIB_SHA256, repo, reviewed_deps, sha256};
 
+#[path = "support/output_native/regressions.rs"]
+mod regressions;
+
 const PROFILE: &str = "integration/output-native.kdl";
 const PROFILE_TEXT: &str = "output profile\n";
 const PEER_BYTES: &[u8] = b"generic peer";
@@ -118,9 +121,25 @@ fn set(stage: &str, t: u64, connection: u64, txn: u64, base: u64, state: State) 
 }
 
 fn prelude(stage: &str, with_b: bool) -> Vec<String> {
-    let mut lines = vec![traced(
-        "sophia_live_output_authority schema=3 status=settled_locally transaction=18446744073709551615 outcome=Committed topology_epoch=2 reason=\"desktop profile startup\" preserved_topology=false",
-    )];
+    // These owner records follow the attended validate log, including the
+    // startup apply that precedes the peer's own physical work in every stage.
+    let mut lines = vec![
+        traced(
+            "sophia_live_output_authority schema=2 status=apply_started transaction=18446744073709551615 heads=2 cards=ordered published=false",
+        ),
+        traced(
+            "sophia_live_output_authority schema=2 status=first_presented transaction=18446744073709551615 outputs=2 published=false rollback_retained=true",
+        ),
+        traced(
+            "sophia_live_output_authority schema=3 status=settled_locally transaction=18446744073709551615 outcome=Committed topology_epoch=2 reason=\"desktop profile startup\" preserved_topology=false",
+        ),
+        traced(
+            "sophia_live_output_authority schema=2 status=committed_snapshot_published transaction=2 topology_epoch=2 transport_published=true",
+        ),
+        traced(
+            "sophia_live_output_authority schema=2 status=committed transaction=18446744073709551615 topology_epoch=2 outputs=2 policy_required=false input=quarantined",
+        ),
+    ];
     lines.extend(set("baseline", 100, 0, 0, 2, State::A));
     lines.extend([
         peer(
@@ -187,15 +206,19 @@ fn reject_log() -> Vec<String> {
 
 fn commit(txn: u64, base: u64, t: u64) -> Vec<String> {
     let epoch = base + 1;
+    let publication = txn + 2;
     vec![
         traced(&format!(
-            "sophia_live_output_authority schema=2 status=committed transaction={txn} topology_epoch={epoch} outputs=1 policy_required=false input=quarantined"
+            "sophia_live_output_authority schema=2 status=first_presented transaction={txn} outputs=1 published=false rollback_retained=true"
         )),
         traced(&format!(
             "sophia_live_output_authority schema=1 status=settled transaction={txn} outcome=Committed topology_epoch={epoch}"
         )),
         traced(&format!(
-            "sophia_live_output_authority schema=2 status=committed_snapshot_published transaction={txn} topology_epoch={epoch} transport_published=true"
+            "sophia_live_output_authority schema=2 status=committed_snapshot_published transaction={publication} topology_epoch={epoch} transport_published=true"
+        )),
+        traced(&format!(
+            "sophia_live_output_authority schema=2 status=committed transaction={txn} topology_epoch={epoch} outputs=1 policy_required=false input=quarantined"
         )),
         peer(
             "commit-restore",
@@ -1162,4 +1185,30 @@ fn each_stage_verifies_alone_and_a_failed_first_stage_stops_the_run() {
             .unwrap_err()
             .starts_with("validate argv:")
     );
+}
+
+/// Preparation records its actual jobs and nice value. Historical
+/// preparations (1 at 19, the fixture's default) and current ones (the
+/// caller's parallelism at its priority) verify; values no preparation can
+/// record do not.
+#[test]
+fn preparation_jobs_and_nice_are_recorded_values() {
+    for (tag, jobs, nice) in [("parallel", 16, 0), ("negative", 2, -5), ("bounds", 1, -20)] {
+        let mut fixture = Fixture::new(tag);
+        fixture.prepared["cargo_jobs"] = json!(jobs);
+        fixture.prepared["nice"] = json!(nice);
+        fixture.check().unwrap();
+    }
+    for (tag, key, value, expected) in [
+        ("zero-jobs", "cargo_jobs", json!(0), "cargo_jobs"),
+        ("negative-jobs", "cargo_jobs", json!(-1), "cargo_jobs"),
+        ("fractional-jobs", "cargo_jobs", json!(1.5), "cargo_jobs"),
+        ("text-jobs", "cargo_jobs", json!("8"), "cargo_jobs"),
+        ("nice-high", "nice", json!(20), "nice"),
+        ("nice-low", "nice", json!(-21), "nice"),
+        ("text-nice", "nice", json!("19"), "nice"),
+        ("null-nice", "nice", Value::Null, "nice"),
+    ] {
+        refused(tag, |f| f.prepared[key] = value, expected);
+    }
 }

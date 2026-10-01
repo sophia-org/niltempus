@@ -39,14 +39,14 @@ called by the runner through `tools/lib/physical_inputs.sh`:
 | `SOPHIA_HAGIA_NIM_DEPS[_SHA256]`, `SOPHIA_NARTHEX_NIM_DEPS[_SHA256]` | the reviewed Nim dependency manifests and their independently supplied digests |
 | `SOPHIA_SESSION_TTY` | the target console, when not the controlling terminal |
 
-The helper runs at nice 19 with two jobs under a KILL deadline, stages every
-source as its exact signed tree, builds offline and `--locked` into private
-targets, proves the trees again, and writes a new read-only output. The runner
-then verifies that output against its manifest sha256, reads `inputs.env` with
-a strict parser (it is never sourced), binds this repository's signed commit,
-checks every checkout is still clean at its signed HEAD, runs the
-atomic-scanout preflight with the prepared binary, and verifies the inputs
-again before archiving. Sophia's session wrapper always receives
+The helper runs under a KILL deadline at the caller's priority and
+`CARGO_BUILD_JOBS` (every CPU when unset). It stages every source as its exact
+signed tree, builds offline and `--locked` into private targets, proves the
+trees again, and writes a new read-only output. The runner then verifies that
+output against its manifest sha256, reads `inputs.env` with a strict parser
+(it is never sourced), binds this repository's signed commit, checks every
+checkout is still clean at its signed HEAD, runs the atomic-scanout preflight
+with the prepared binary, and verifies the inputs again before archiving. Sophia's session wrapper always receives
 `SOPHIA_BUILD_SESSION=false`.
 
 `crates/xtask/tests/physical_runner_bounds.rs` refuses any script under

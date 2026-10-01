@@ -99,12 +99,16 @@ func prepareComponent(loc Locations, name string) (ComponentVersion, error) {
 		if err := ownedDirectory(target); err != nil {
 			return ComponentVersion{}, err
 		}
-		if err := logged(isolated(root, map[string]string{"CARGO_TARGET_DIR": target}, "timeout", "--kill-after=5s", "1800s", "cargo", "build", "--offline", "--locked", "--release", "--jobs", "2"), filepath.Join(work, "build.log")); err != nil {
+		if err := logged(isolated(root, map[string]string{"CARGO_TARGET_DIR": target}, "timeout", "--kill-after=5s", "1800s", "cargo", "build", "--offline", "--locked", "--release"), filepath.Join(work, "build.log")); err != nil {
 			return ComponentVersion{}, err
 		}
 		candidate = filepath.Join(target, "release", binary)
 	case "bemenu":
-		if err := logged(isolated(root, nil, "timeout", "--kill-after=5s", "900s", "env", "-u", "MAKEFLAGS", "-u", "MFLAGS", "-u", "MAKELEVEL", "-u", "CFLAGS", "-u", "CPPFLAGS", "-u", "LDFLAGS", "-u", "EXTRA_WARNINGS", "make", "-j2", "bemenu-sophia", "EXTRA_WARNINGS=-Werror", "GIT_SHA1="+source.Commit, "GIT_TAG="+source.Commit), filepath.Join(work, "build.log")); err != nil {
+		jobs, err := buildJobs()
+		if err != nil {
+			return ComponentVersion{}, err
+		}
+		if err := logged(isolated(root, nil, "timeout", "--kill-after=5s", "900s", "env", "-u", "MAKEFLAGS", "-u", "MFLAGS", "-u", "MAKELEVEL", "-u", "CFLAGS", "-u", "CPPFLAGS", "-u", "LDFLAGS", "-u", "EXTRA_WARNINGS", "make", "-j"+jobs, "bemenu-sophia", "EXTRA_WARNINGS=-Werror", "GIT_SHA1="+source.Commit, "GIT_TAG="+source.Commit), filepath.Join(work, "build.log")); err != nil {
 			return ComponentVersion{}, err
 		}
 		candidate = filepath.Join(root, binary)

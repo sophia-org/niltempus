@@ -49,3 +49,19 @@ fn unknown_product_ambiguous_revision_and_existing_destination_are_refused() {
             .contains("already exists")
     );
 }
+
+/// Builds default to every CPU and honor a caller's positive
+/// `CARGO_BUILD_JOBS`; anything else is refused rather than recorded in an
+/// argv that did not run.
+#[test]
+fn build_jobs_default_to_every_cpu_and_honor_a_positive_override() {
+    use std::ffi::OsStr;
+    use xtask::product_artifact::jobs;
+    assert_eq!(jobs(None, 12), Ok(12));
+    assert_eq!(jobs(None, 0), Ok(1));
+    assert_eq!(jobs(Some(OsStr::new("3")), 12), Ok(3));
+    assert_eq!(jobs(Some(OsStr::new("64")), 2), Ok(64));
+    for refused in ["0", "01", "-1", "+2", "", "two", "1.5", " 2"] {
+        assert!(jobs(Some(OsStr::new(refused)), 12).is_err(), "{refused:?}");
+    }
+}

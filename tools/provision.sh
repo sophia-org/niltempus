@@ -123,9 +123,6 @@ if [ -n "$source_repo" ]; then
 fi
 cargo_home=$(realpath -m -- "$cargo_home")
 
-: "${CARGO_BUILD_JOBS:=2}"
-export CARGO_BUILD_JOBS
-
 if [ -n "$source_repo" ]; then
     case $source_repo in
     /*) ;;
@@ -146,11 +143,11 @@ if [ -n "$source_repo" ]; then
             GIT_CONFIG_VALUE_0="$url" \
             GIT_CONFIG_KEY_1=uploadpack.allowReachableSHA1InWant \
             GIT_CONFIG_VALUE_1=true \
-            nice -n 19 cargo "$@"
+            cargo "$@"
     }
 else
     run_cargo() {
-        env CARGO_HOME="$cargo_home" CARGO_NET_GIT_FETCH_WITH_CLI=true nice -n 19 cargo "$@"
+        env CARGO_HOME="$cargo_home" CARGO_NET_GIT_FETCH_WITH_CLI=true cargo "$@"
     }
 fi
 
@@ -225,7 +222,7 @@ cat "$log"
 
 # Accept the provisioned home only when every pin agrees, offline.
 check() {
-    env CARGO_HOME="$cargo_home" nice -n 19 cargo run --offline --locked --package xtask -- "$@"
+    env CARGO_HOME="$cargo_home" cargo run --offline --locked --package xtask -- "$@"
 }
 check check-pins
 if [ -n "$source_repo" ]; then

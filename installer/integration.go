@@ -169,7 +169,7 @@ func packageDesktop(plan Plan, roots map[string]string, work, cache string) (str
 		return "", err
 	}
 	env := map[string]string{"CARGO_HOME": plan.Niltempus.CargoHome, "CARGO_TARGET_DIR": bootstrap}
-	if err := logged(isolated(root, env, "cargo", "build", "--offline", "--locked", "--jobs", "2", "-p", "xtask", "--bin", "xtask"), filepath.Join(work, "build-integration.log")); err != nil {
+	if err := logged(isolated(root, env, "cargo", "build", "--offline", "--locked", "-p", "xtask", "--bin", "xtask"), filepath.Join(work, "build-integration.log")); err != nil {
 		return "", err
 	}
 	tool := filepath.Join(env["CARGO_TARGET_DIR"], "debug/xtask")

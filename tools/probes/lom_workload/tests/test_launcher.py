@@ -154,7 +154,8 @@ if [[ "${1:-}" == verify ]]; then
     [[ "$(sha256sum "$out/inputs.env" | cut -d' ' -f1)" == "$expected" ]]
     exit
 fi
-[[ "$(ps -o ni= -p $$ | tr -d ' ')" == 19 && "$CARGO_BUILD_JOBS" == 2 ]]
+# The caller's priority and jobs reach the helper unchanged.
+[[ "$(ps -o ni= -p $$ | tr -d ' ')" == "$TEST_CALLER_NICE" && "$CARGO_BUILD_JOBS" == 3 ]]
 out=
 for arg in "$@"; do
     case "$arg" in --out=/*) out=${arg#--out=} ;; esac
@@ -273,7 +274,8 @@ exit "${TEST_SESSION_STATUS:-0}"''')
                     "SOPHIA_DESKTOP_PROFILE": str(self.wm_profile),
                     "SOPHIA_LOM_NATIVE_EVIDENCE_DIR": str(self.evidence),
                     "TEST_TRACE": str(self.base / "trace"), "TEST_HOST": str(self.base / "host.log"),
-                    "TEST_CLIENT": str(self.base / "client.log")}
+                    "TEST_CLIENT": str(self.base / "client.log"),
+                    "TEST_CALLER_NICE": str(os.nice(0)), "CARGO_BUILD_JOBS": "3"}
         self.use_artifact("lom", self.artifacts / "lom", self.lom)
         self.use_artifact("hagia", self.artifacts / "hagia", self.hagia)
         for name in ("SOPHIA_LOM_CORE_CONFIG", "DISPLAY", "WAYLAND_DISPLAY"):
