@@ -309,7 +309,7 @@ layouts and profile are unchanged; new preparation, performance and sealed
 inputs must bind this revision before another run. See Sophia investigation
 `0bc9j2k2` for the failure and validation limits.
 
-### Accepted t253 proof and t272 retirement candidate
+### Accepted t253 proof and t272 output socket retirement
 
 The four attended stages subsequently passed on Sophia `ddd27bd6d9`,
 integration `bec6db1`, Hagia `b36af295` and SDK 0.3.0. The retained
@@ -331,9 +331,24 @@ replacement, so its bootstrap includes the committed topology. A deterministic
 regression and a failing mutant cover that ordering. The Rust SDK import updates
 only the WM contract document and its provenance. The full Sophia repository
 gate passes, including strict Clippy and six retained direct-scanout archives.
-Fresh preparation, performance and attended evidence must bind this assembled
-candidate before t272 acceptance. The t253 evidence remains bound to its own
-source pair.
+
+Fresh evidence binds this assembled candidate with integration
+`20f98131e65ac5ba45b00aa325e53f5f80bcfe8f`:
+- preparation `t272-native-21bdf9f60-01`, prepared.json
+  `e2148fe443e14a29397c63d809bba80b21460d3c3bc9779592af7b82540b757e`;
+- performance `t272-perf-21bdf9f60-01`;
+- inputs manifest
+  `5533fa478ab7163ce6d7fd54fb1fd56f00934f008ff3f8b6f9d8830971ee6c1a`.
+
+The attended `t272-native-run-20f9813-01/run` manifest has digest
+`0c223cf726aa623596873904a8009b7f7644b1815dbc1f43912d10e4b2156922`. All four
+stages pass the typed verifier and exit zero with clean console recovery. Every
+stage's WM bootstrap accepted the strict 9P2000.L API. Peer death restored DP-1
+from 60 to 120 Hz, reached local RolledBack settlement and passed the typed
+proof verdict. That evidence accepts t272 within the same one-card, two-head,
+refresh-only scope. Sophia master promotes the accepted tree as signed merge
+`4c1012b890ef069ce8d4623a67c41d07f354a7b6`, whose tree equals the candidate's.
+The t253 evidence remains bound to its own source pair.
 
 Rollback must restore the entire previous pair: pre-retirement Sophia with
 Hagia `b36af295` and its older SDK. New Hagia refuses the old API, and old Hagia
