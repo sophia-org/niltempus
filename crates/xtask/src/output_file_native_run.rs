@@ -19,6 +19,24 @@ pub fn check_recovery(text: &str) -> Result<(), String> {
     process::check_recovery(text)
 }
 
+/// Compare the kernel's active VT with the plan, without opening a device.
+pub fn check_foreground_tty(tty: &str, active: &str) -> Result<(), String> {
+    let active = active.strip_suffix('\n').unwrap_or(active);
+    let number = active
+        .strip_prefix("tty")
+        .ok_or("invalid active console record")?;
+    let number = self::number(number)?;
+    if !(1..=63).contains(&number) || active != format!("tty{number}") {
+        return Err("invalid active console record".into());
+    }
+    if tty != format!("/dev/{active}") {
+        return Err(format!(
+            "Return to {tty}: the foreground console is /dev/{active}. Keep {tty} in the foreground until all four output stages finish."
+        ));
+    }
+    Ok(())
+}
+
 const PLAN: &str = "run-plan.json";
 const KEYS: &[&str] = &[
     "inputs",
@@ -333,7 +351,7 @@ fn stages(repo: &Path, plan: &Plan, bound: &Bound, output: &Path) -> Result<Vec<
             &serde_json::to_vec_pretty(argv).map_err(|e| e.to_string())?,
         )?;
         eprintln!(
-            "Output proof stage {name}: {} on {}. Emergency recovery: Ctrl-Alt-Backspace; keep another VT available. Logs: {}",
+            "Output proof stage {name}: {} on {}. Emergency recovery: Ctrl-Alt-Backspace. Do not switch VTs unless recovering. Logs: {}",
             plan.options["display"],
             plan.options["tty"],
             stage.display()
@@ -352,6 +370,11 @@ fn stages(repo: &Path, plan: &Plan, bound: &Bound, output: &Path) -> Result<Vec<
         // Refuse this stage before granting the next stage any device custody.
         proof::verify_stage_record(&record, &manifest.a, &manifest.b, &bound.paths, output)?;
         manifest.stages.push(record);
+        eprintln!(
+            "Output proof: {name} passed ({}/4). Keep {} in the foreground until the final PASS; input verification between stages may take a moment.",
+            manifest.stages.len(),
+            plan.options["tty"]
+        );
         if bind(repo, &plan.options, &bound.integration_commit)? != *bound
             || proof::integration_commit(repo)? != bound.integration_commit
         {

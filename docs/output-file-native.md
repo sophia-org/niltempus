@@ -82,6 +82,12 @@ does not manage services, and refuses a mismatched console or missing arm.
 The wrapper's exit must be zero and its TTY/keyboard restoration must be proved.
 Each stage's proof evidence must also pass before the next Session starts;
 a clean process exit alone cannot authorize a later apply stage.
+Keep the prepared console in the foreground through all four stages, including
+the verification gaps between them. The runner checks the kernel's active VT
+before launch, records it in `foreground-console.json`, and reports progress
+after each passed stage. A terminal fd can remain attached to tty4 while tty2
+is foreground; that does not grant tty4 input-device access. This check does
+not prevent a later operator VT switch while Session is starting or running.
 The existing wrapper/helper programs are from the sealed Sophia source tree;
 host programs such as Bash, Python and the kernel remain host dependencies.
 
@@ -132,6 +138,15 @@ layout and peer snapshot checks. Head disabling, routing changes and unselected
 object leaks remain outside this gate. Promotion and archiving are separate.
 
 ## Candidate preparation (2026-09-30)
+
+The `t253-native-run-5af9a03-01/` attempt passed validate, then stopped during
+reject startup with `MissingKeyboard`, before the peer submitted a candidate.
+Console and keyboard recovery passed for both stages. The retained elogind
+state places tty2's activation between stages; tty4 was inactive when reject
+started. The direct emergency guard found keyboards, but Session's seat-bound
+input did not. The runner now refuses an inactive planned console before
+launch and explains that the operator must remain there through all four stages.
+The failed attempt is retained; commit-restore and peer-death did not run.
 
 The first four-stage attempt (`t253-native-run-2808fcc-01/`) stopped after
 validate because the integration verifier counted startup's apply and commit

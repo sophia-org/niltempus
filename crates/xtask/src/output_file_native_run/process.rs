@@ -3,7 +3,7 @@
 //! process group where termios writes would receive SIGTTOU.
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -13,7 +13,7 @@ use rustix::process::{Pid, Signal, WaitId, WaitIdOptions, WaitIdStatus};
 
 const LOG_CAP: u64 = 64 << 20;
 
-pub(super) fn attended(tty: &str) -> Result<(), String> {
+pub(super) fn attended(tty: &str) -> Result<String, String> {
     if std::env::var("SOPHIA_FRAME_FED_OUTPUT_ARM").as_deref() != Ok("1") {
         return Err("physical execution requires SOPHIA_FRAME_FED_OUTPUT_ARM=1 and an authorized attended window".into());
     }
@@ -22,7 +22,16 @@ pub(super) fn attended(tty: &str) -> Result<(), String> {
     {
         return Err(format!("run from the prepared console {tty}"));
     }
-    Ok(())
+    foreground(tty)
+}
+
+fn foreground(tty: &str) -> Result<String, String> {
+    // An inherited tty4 fd remains tty4 after the operator switches to tty2.
+    // Check the kernel's foreground VT as well, before any wrapper takeover.
+    let active = fs::read_to_string("/sys/class/tty/tty0/active")
+        .map_err(|e| format!("cannot verify foreground console: {e}"))?;
+    super::check_foreground_tty(tty, &active)?;
+    Ok(active.trim_end_matches('\n').to_owned())
 }
 
 struct Wrapper {
@@ -107,7 +116,11 @@ pub(super) fn session(
     argv: &[String],
     stage: &Path,
 ) -> Result<(), String> {
-    attended(&values["tty"])?;
+    let active = attended(&values["tty"])?;
+    let record = serde_json::json!({"schema":1,"planned_tty":values["tty"],"active_tty":format!("/dev/{active}"),"status":"matched"});
+    new_log(&stage.join("foreground-console.json"))?
+        .write_all(&serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
     let wrapper = Path::new(&values["inputs"]).join("sophia-tree/tools/run_sophia_session.sh");
     let runtime = super::number(&values["runtime-ms"])?;
     let state = stage.join("state");

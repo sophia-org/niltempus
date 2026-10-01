@@ -1,7 +1,33 @@
 //! Run planning and restoration refusal checks. No Session or device is opened.
 use std::collections::BTreeMap;
 use xtask::output_file_native::Paths;
-use xtask::output_file_native_run::{arguments, check_recovery};
+use xtask::output_file_native_run::{arguments, check_foreground_tty, check_recovery};
+
+#[test]
+fn attached_console_must_also_be_the_foreground_console() {
+    check_foreground_tty("/dev/tty4", "tty4\n").unwrap();
+    assert!(
+        check_foreground_tty("/dev/tty4", "tty2\n")
+            .unwrap_err()
+            .contains("Return to /dev/tty4")
+    );
+    for active in [
+        "",
+        "tty0",
+        "tty64",
+        "tty04",
+        "tty+4",
+        "tty4 tty2",
+        "tty4\ntty2",
+        " tty4",
+        "tty4 ",
+    ] {
+        assert!(
+            check_foreground_tty("/dev/tty4", active).is_err(),
+            "{active:?}"
+        );
+    }
+}
 
 fn inputs() -> (BTreeMap<String, String>, Paths) {
     let values = [
