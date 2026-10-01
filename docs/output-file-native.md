@@ -182,7 +182,7 @@ fsck; identities still bind the exact walked bytes and modes. Regression checks
 cover special entries outside a repository. Rebuild the verifier and prepare
 new sealed inputs at the integration fix before using the acceptance runner.
 
-Signed Sophia `170d606b6b3a398e18db5f52a85e4263ecbde54f` is the T253 proof
+Signed Sophia `170d606b6b3a398e18db5f52a85e4263ecbde54f` was the first T253 proof
 candidate, with C SDK `7ccfece173b4b01e563a27b8fe5cc07d4369b55a` (0.3.0).
 The exact release build passed all 13 real-export peer tests and the protected
 Session fixture's four stages. Preparation is retained under the operator's
@@ -216,3 +216,32 @@ or qualifying a launcher-specific compatibility bridge is separate work;
 this output gate has no Bemenu dependency. The installed release and recovery
 baseline remain unchanged. T253 stays open until attended native acceptance,
 and T272 source retirement remains gated on it.
+
+### Installed-mode rollback correction
+
+The `t253-native-run-4106be4-01/` attended attempt passed validate and reject.
+Commit-restore failed before the first peer candidate reached KMS:
+`resource_preparation_rejected error=PublishedSnapshotMismatch kms_submits=0`.
+Startup had installed 120 Hz, while rollback preparation still read the card
+session's construction-time 60 Hz capability. Baseline and peer-exit readback
+matched; all three stages recorded the correct foreground console and clean
+recovery. Peer-death did not run. The verifier correctly refused this attempt.
+
+Sophia `d4b06de8165559ca9ea91e15806692a44bcd74db` replaces that candidate.
+Rollback timing now comes from the installed head selection, including the full
+modeline. Discovery ordering remains fixed because public mode IDs depend on it.
+This revision also includes the requested caller-priority and parallel build
+defaults. SDK 0.3.0, all eleven contracts and the declared layouts are unchanged.
+
+The replacement's `t253-native-d4b06de81-01/` preparation passed the thirteen
+real-export tests and protected Session fixture at nice 0 with 32 build jobs.
+Its `prepared.json` digest is
+`b4d82db37f4377e8fec94fe558f3b863dffd7b9ac80baf28a169a926f75793a9`.
+These supplied-owner tests still claim no KMS acceptance. A fresh sealed bundle
+and all four attended stages are required for the replacement candidate.
+
+The exact replacement also passed `t253-perf-d4b06de81-01/` at nice 0:
+small/maximum connection p99 30.682/30.929 ms, proposal p99 7.487/7.502 ms,
+and six idle intervals at 0.206–0.210% of one core. Counts, exactly-once
+delivery and cleanup passed the unchanged gate. No compiler ran during the
+measurement; the normal-priority build used 32 jobs.
