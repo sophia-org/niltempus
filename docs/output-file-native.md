@@ -40,6 +40,13 @@ replacement for the user's profile. Before sealing a run plan, bind explicit
 head/mode IDs from a reviewed topology inventory and choose a supported B
 timing. A different connected set or missing mode must refuse qualification.
 
+The proof profile starts a colored xterm running `/bin/sleep 600`, without a
+user shell. Session's native completion check requires exported application
+pixels; an empty desktop can apply the profile and restore the console yet
+fail that check. Session owns the client and stops it during cleanup. Xterm,
+sleep and their runtime dependencies are host prerequisites, like the wrapper's
+host helpers; this does not claim a reproducible application closure.
+
 ```sh
 cargo xtask output-file-native prepare-run \
   --inputs=/ABS/SEALED --inputs-manifest-sha256=SHA256 \
@@ -125,6 +132,23 @@ layout and peer snapshot checks. Head disabling, routing changes and unselected
 object leaks remain outside this gate. Promotion and archiving are separate.
 
 ## Candidate preparation (2026-09-30)
+
+The first attended inventory (`t253-inventory-a503c31-01/`) recorded the
+startup commit at topology epoch 2, DP-1 as head/output 1 with mode 260 at
+2560×1440/120 Hz, and DP-2 as head/output 2 with mode 513 at 1920×1080/60 Hz.
+DP-1 mode 257 supplies the same-size 60 Hz alternative. Complete KMS and owner
+baseline rows matched the peer-exit rows. Console and keyboard recovery passed,
+but Session exited 1: the empty desktop had zero nonzero application exports.
+This is inventory evidence, not native acceptance. The visible startup client
+above corrects the workload; the completion check remains unchanged. Later
+stages must recheck the exact baseline before submitting any change.
+
+An earlier preflight failed before hardware access: Git 2.55.0 crashed while
+hashing a tree containing `.gitattributes` outside a repository. Tree identity
+hashing now uses `git hash-object --literally` to avoid repository-dependent
+fsck; identities still bind the exact walked bytes and modes. Regression checks
+cover special entries outside a repository. Rebuild the verifier and prepare
+new sealed inputs at the integration fix before using the acceptance runner.
 
 Signed Sophia `170d606b6b3a398e18db5f52a85e4263ecbde54f` is the T253 proof
 candidate, with C SDK `7ccfece173b4b01e563a27b8fe5cc07d4369b55a` (0.3.0).

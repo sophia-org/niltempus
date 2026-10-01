@@ -1,7 +1,8 @@
-// Provenance: copied verbatim from Sophia
-// crates/xtask/src/git_tree.rs at 9fcaec782ce4fe9978568c0466ee17a78b3d4571.
-// Temporary duplicate; remove when Sophia or the C SDK publishes a shared
-// snapshot verifier this repository can depend on.
+// Provenance: copied from Sophia crates/xtask/src/git_tree.rs at
+// 9fcaec782ce4fe9978568c0466ee17a78b3d4571, then changed here only to hash
+// with `git hash-object --literally` (see git_hash). Temporary duplicate;
+// remove when Sophia or the C SDK publishes a shared snapshot verifier this
+// repository can depend on.
 //! Offline Git identities for immutable SDK source snapshots.
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -47,9 +48,15 @@ fn hex(value: &str, length: usize) -> bool {
 
 // Git's object identity is computed without writing objects or consulting an
 // external checkout. The recorded raw commit binds its revision to this tree.
+//
+// `--literally` only hashes. Without it Git fscks the object first, and a
+// tree with a `.gitattributes` or `.gitmodules` entry then needs the caller's
+// repository: Git 2.55 segfaults outside one and only warns inside one, so
+// whether hashing succeeded depended on the working directory. The bytes are
+// built here from a walked tree of regular files; the object ID is unchanged.
 fn git_hash(kind: &str, bytes: &[u8]) -> Result<String, String> {
     let mut child = Command::new("git")
-        .args(["hash-object", "--stdin", "-t", kind])
+        .args(["hash-object", "--literally", "--stdin", "-t", kind])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

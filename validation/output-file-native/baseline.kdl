@@ -10,7 +10,15 @@ policy {
 }
 shell { enabled #false; }
 shortcut { profile "output-file-native-proof"; }
-session { terminal "terminal"; }
+session {
+    // The native completion check requires exported application pixels.
+    // Keep a visible client alive without starting the user's shell.
+    application "output-proof-surface" {
+        exec "/usr/bin/xterm" "-bg" "#204060" "-fg" "white" "-e" "/bin/sleep" "600"
+    }
+    startup "output-proof-surface"
+    terminal "output-proof-surface"
+}
 input { inherit-sophia #true; }
 output {
     inherit-sophia #false
