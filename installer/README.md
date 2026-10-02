@@ -71,6 +71,40 @@ prepare a Plan-3 release explicitly, either with `niltempus build` using the
 explicit `inputs`, or with `niltempus prepare DIRECTORY` for an existing
 Plan-3 release. Until then, `prepared.json` is left exactly as it is.
 
+### Combined idle-wakeup and chording candidate
+
+Sophia `9d3a41904ac2994bf00980b3399bffb27c43eb04` combines t276's idle
+notifications with t277's generic chord lifecycle, modifier taps, holds and
+sequences. Pair it with Hagia `252ee7efb6951bc81e5bedd6f6d1c3263ac72b97`
+and C SDK `8f59a9cd3221776246aad70c3a178c5ba941fb0d` (0.6.0). The Sophia
+workspace passed 6,206 tests across 405 binaries with all features and targets,
+plus strict Clippy, layout, generation and both SDK checks. Evidence is in
+`t276-t277-integration-01`; live chording and CPU improvement still need
+attended acceptance. A profile-reload cancellation may await the next owner
+maintenance turn, whose requested wait is capped at 25 ms.
+
+Set the explicit source references, reviewed Nim manifests and
+`inputs.hagia_c_sdk_revision` to the matching SDK commit before `build`.
+Building verifies the new Sophia/Hagia pair and selects the release without
+changing the running session. Installation preserves an existing personal
+Hagia, so this SDK upgrade also needs:
+
+```sh
+niltempus install && niltempus prepare-hagia
+```
+
+Run the line as your normal user; `install` requests sudo itself. Complete both
+commands before the next login. `prepare-hagia` verifies against
+the installed release, so it must follow installation. It selects the matching
+personal WM without signalling the running one. Until logout, avoid a WM
+restart in the old session: a restart would use the newly selected Hagia.
+If preparation fails, finish repairing the pair before logging into the new
+release. Desktop rollback alone preserves the personal Hagia selection.
+
+Personal shortcut bindings remain user-owned. Hagia's shipped profile binds
+Alt+Tab and Alt+Shift+Tab, but an existing personal profile does not acquire
+those bindings from installation.
+
 ### Explicit helper inputs
 
 Plan schema 3 packages with the current helper CLI, so its configuration
@@ -155,7 +189,7 @@ Sealing sets release directories to mode 0755, including directories added by
 the Go assembler under a private umask. Verification checks these modes before
 installation, so root ownership cannot make the session profile inaccessible.
 Private cache and state parents retain their permissions.
-Build and profile-check commands run without network access at reduced CPU
+Build and profile-check commands run without network access at the caller's
 priority under Bubblewrap with DRM
 devices, display sockets, runtime sockets and inherited Sophia variables hidden.
 The repositories' own build dependencies must be available; Cargo builds are

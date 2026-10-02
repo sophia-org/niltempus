@@ -8,7 +8,7 @@
 # owner can write it, so none of this needs privileges.
 #
 # A running session can do this from a keybinding now -- session:restart-wm,
-# Ctrl+Alt+f5 in the shipped profile -- which does not rebuild anything. This
+# Super+Ctrl+f5 in the shipped profile -- which does not rebuild anything. This
 # script is the developer's version: build first, then restart.
 #
 # A reload that does not come back is rolled back to the binary it replaced,

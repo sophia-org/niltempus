@@ -12,7 +12,7 @@ use std::process::Command;
 use std::time::Duration;
 
 pub const SOPHIA_URL: &str = "https://github.com/sophia-org/sophia.git";
-pub const SOPHIA_REV: &str = "21bdf9f60ec1aca53e13f8d6f828be8ddebcb21d";
+pub const SOPHIA_REV: &str = "9d3a41904ac2994bf00980b3399bffb27c43eb04";
 /// The Sophia crates this repository names directly.
 pub const SOPHIA_CRATES: [&str; 8] = [
     "sophia-backend-live",
@@ -29,7 +29,7 @@ pub const FONT: &str = "assets/fonts/JetBrainsMonoNL-Regular.ttf";
 pub const FONT_SHA256: &str = "fb3b2575d7b0657359707993288f12a7360344d39387bb26050e276d61f6bd2a";
 pub const SDK_MANIFEST: &str = "pins/c-desktop-sdk/manifest.json";
 pub const SDK_MANIFEST_SHA256: &str =
-    "ab45a6460bef0606210c9dd3da168dafdd9f3f902a639a3cdfaf6bc3945bf5af";
+    "146abeeaced7b9f4fed528a5d597d1b9a8e908cbafd0a8059d07ee0d85337285";
 const SOPHIA_PIN: &str = "pins/sophia.toml";
 const CONTRACTS: &str = "pins/contracts.sha256";
 const MANIFESTS: [&str; 6] = [
