@@ -71,7 +71,44 @@ prepare a Plan-3 release explicitly, either with `niltempus build` using the
 explicit `inputs`, or with `niltempus prepare DIRECTORY` for an existing
 Plan-3 release. Until then, `prepared.json` is left exactly as it is.
 
-### Renderer and held-switcher candidate
+### Cross-head switcher recovery candidate
+
+Sophia `f650e68831f15a7e8b767dac88c598aebe515e51` repairs the renderer image
+custody failure exposed by multi-head Alt+Tab on `niltempus-d99119dbc46629083eea`.
+The earlier session exited when a preview referenced an image owned only by
+another output's renderer worker.
+
+Foreign previews now carry bounded immutable snapshots. Queued local reads
+keep their images alive, ordinary moved windows acquire a local copy, and
+preview updates do not change the source window's Present clock. Attributed
+preview failures withdraw the publication and recover unsubmitted frames;
+other renderer and device faults remain session-fatal, with typed diagnostics. Cross-device
+previews remain unsupported and are refused.
+
+The full Sophia gate, strict Clippy, architecture models, 35 named fault
+controls, and offscreen pixel/worker tests on both render nodes passed.
+Native owner-loop, physical KMS/input and attended multi-head Alt+Tab
+acceptance remain open. Evidence: `t279-alt-tab-session-exit-01` and
+`t284-release-01`. The repair retains the renderer performance, idle-wakeup
+and chording changes from the previous release.
+
+Hagia stays at `03be1d1f2b1c9e555773578ec1001dd7c098830a`, with C SDK
+`4608010f31848c153d5c0918b149b9f86a239048` (0.7.0). Keep the existing Hagia
+Nim manifest and `inputs.hagia_c_sdk_revision`. The approved personal profile
+and switcher bindings are unchanged. For an installation already using this
+personal Hagia, run the following from a TTY or after logout, then log into
+**Sophia niltempus Desktop**:
+
+```sh
+niltempus install
+```
+
+Run it as your normal user; the installer requests sudo itself. Installation
+preserves the matching personal Hagia, so this repair needs no
+`prepare-hagia`. An installation still using the older SDK 0.6.0 Hagia needs
+the paired preparation procedure below.
+
+### Earlier renderer and held-switcher candidate
 
 Sophia `9679b820dabf5ca1406eacb919003232de6b88c9` combines t278's renderer
 improvements with t279's held keyboard capture. Pair it with Hagia
@@ -91,7 +128,8 @@ equivalence on both render nodes pass. Evidence: `render-performance-01` and
 The held switcher now accepts Escape, Return/space, arrows, Home/End and scope
 keys. The existing session close operation targets the selected candidate.
 No global Alt+q shortcut is added. Same-application filtering, labels, urgency
-and debounce remain later work; live acceptance of this pair is still open.
+and debounce remain later work. Its first attended multi-head Alt+Tab ended
+the session; the recovery candidate above addresses that failure.
 
 Set the source references, reviewed Hagia dependency manifest and
 `inputs.hagia_c_sdk_revision` together before planning or building. Use the
