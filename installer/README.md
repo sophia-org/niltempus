@@ -71,7 +71,36 @@ prepare a Plan-3 release explicitly, either with `niltempus build` using the
 explicit `inputs`, or with `niltempus prepare DIRECTORY` for an existing
 Plan-3 release. Until then, `prepared.json` is left exactly as it is.
 
-### Combined idle-wakeup and chording candidate
+### Renderer and held-switcher candidate
+
+Sophia `9679b820dabf5ca1406eacb919003232de6b88c9` combines t278's renderer
+improvements with t279's held keyboard capture. Pair it with Hagia
+`03be1d1f2b1c9e555773578ec1001dd7c098830a` and C SDK
+`4608010f31848c153d5c0918b149b9f86a239048` (0.7.0). Both Sophia changes
+retain the existing idle-wakeup and generic chording work.
+
+Captures reuse bounded EGL execution resources while each exported image keeps
+fresh immutable storage. CPU raster reuse ignores GPU-only changes. Damage
+history follows preparation identities and repaints fully when it cannot prove
+a precise update. Three matched 60-fps capture benchmark pairs use 91.4–91.7%
+less process CPU per frame; this is a path measurement, not total live desktop
+CPU. The combined workspace gate, strict Clippy, architecture models and pixel
+equivalence on both render nodes pass. Evidence: `render-performance-01` and
+`t278-t279-release-01`.
+
+The held switcher now accepts Escape, Return/space, arrows, Home/End and scope
+keys. The existing session close operation targets the selected candidate.
+No global Alt+q shortcut is added. Same-application filtering, labels, urgency
+and debounce remain later work; live acceptance of this pair is still open.
+
+Set the source references, reviewed Hagia dependency manifest and
+`inputs.hagia_c_sdk_revision` together before planning or building. Use the
+paired `install` then `prepare-hagia` procedure below from outside the old
+graphical session. Installation alone preserves the existing personal WM.
+An explicitly approved personal profile, including any staged switcher
+bindings, is sealed by `build`; the installer does not invent those bindings.
+
+### Earlier idle-wakeup and chording candidate
 
 Sophia `9d3a41904ac2994bf00980b3399bffb27c43eb04` combines t276's idle
 notifications with t277's generic chord lifecycle, modifier taps, holds and
