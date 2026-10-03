@@ -411,6 +411,8 @@ fn the_release_layout_manifest_and_sums_are_exact() {
         "sophia",
         "sophia-integration-xtask",
         "active-session-preflight",
+        "sophia-factotum",
+        "sophia-factotum-pam",
         "hagia",
         "narthex",
     ] {

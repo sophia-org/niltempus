@@ -214,7 +214,12 @@ pub fn assembly(root: &Path) -> Assembly {
         &bins.join("sophia"),
         "# fixture sophia\n[[ \"$1 $2\" == \"config check\" ]]",
     );
-    for name in ["xtask", "active-session-preflight"] {
+    for name in [
+        "xtask",
+        "active-session-preflight",
+        "sophia-factotum",
+        "sophia-factotum-pam",
+    ] {
         script(&bins.join(name), &format!("# fixture {name}\nexit 0"));
     }
     let tree = root.join("sophia-tree");
@@ -234,6 +239,8 @@ pub fn assembly(root: &Path) -> Assembly {
             sophia: bins.join("sophia"),
             xtask: bins.join("xtask"),
             preflight: bins.join("active-session-preflight"),
+            factotum: bins.join("sophia-factotum"),
+            pam_helper: bins.join("sophia-factotum-pam"),
         },
         pair: verified_pair(&root.join("wm-pair"), &ids),
         out: root.join("release"),

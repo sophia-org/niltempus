@@ -239,6 +239,25 @@ fn prepare(options: &BTreeMap<String, String>, extra: &[String]) -> Result<Vec<S
         if !wm.is_empty() {
             args.push(format!("--wm-process-default={wm}"));
         }
+        // The session lock's authenticator. Without both, Sophia refuses to
+        // lock, since nothing could open the lock.
+        let agent = env("SOPHIA_FACTOTUM_AGENT", "")?;
+        let helper = env("SOPHIA_FACTOTUM_PAM_HELPER", "")?;
+        match (agent.is_empty(), helper.is_empty()) {
+            (true, true) => {}
+            (false, false) => {
+                existing_absolute(&agent, "SOPHIA_FACTOTUM_AGENT")?;
+                existing_absolute(&helper, "SOPHIA_FACTOTUM_PAM_HELPER")?;
+                args.push(format!("--factotum-agent={agent}"));
+                args.push(format!("--factotum-pam-helper={helper}"));
+            }
+            _ => {
+                return Err(
+                    "SOPHIA_FACTOTUM_AGENT and SOPHIA_FACTOTUM_PAM_HELPER are required together"
+                        .into(),
+                );
+            }
+        }
         if truecolor == "true" {
             args.push(format!(
                 "--session-app=palette={}",

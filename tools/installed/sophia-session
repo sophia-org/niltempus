@@ -65,6 +65,10 @@ else
 fi
 export SOPHIA_HAGIA_BIN
 export SOPHIA_HAGIA_SHELL_BIN="$RELEASE_DIR/target/release/narthex"
+# The session lock's authenticator: the agent and the PAM helper it executes.
+# The helper must sit under a root-owned path, which the release prefix is.
+export SOPHIA_FACTOTUM_AGENT="$RELEASE_DIR/target/release/sophia-factotum"
+export SOPHIA_FACTOTUM_PAM_HELPER="$RELEASE_DIR/target/release/sophia-factotum-pam"
 export SOPHIA_TTY_MODE_HELPER="$RELEASE_DIR/tools/sophia_tty_mode.py"
 
 manifest="$RELEASE_DIR/manifest"

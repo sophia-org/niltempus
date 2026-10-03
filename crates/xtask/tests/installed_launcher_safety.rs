@@ -32,6 +32,8 @@ fn installed_session_uses_only_versioned_release_artifacts() {
         "export SOPHIA_SESSION_PREFLIGHT=\"$RELEASE_DIR/target/release/active-session-preflight\"",
         "export SOPHIA_INTEGRATION_XTASK=\"$RELEASE_DIR/target/release/sophia-integration-xtask\"",
         "adapter=\"$RELEASE_DIR/tools/session/run_desktop_session.sh\"",
+        "export SOPHIA_FACTOTUM_AGENT=\"$RELEASE_DIR/target/release/sophia-factotum\"",
+        "export SOPHIA_FACTOTUM_PAM_HELPER=\"$RELEASE_DIR/target/release/sophia-factotum-pam\"",
     ] {
         assert!(INSTALLED_SESSION.contains(line), "{line}");
     }

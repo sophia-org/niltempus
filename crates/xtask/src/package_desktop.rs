@@ -329,6 +329,11 @@ pub struct Binaries {
     pub sophia: PathBuf,
     pub xtask: PathBuf,
     pub preflight: PathBuf,
+    /// The session lock's authentication agent and its PAM helper, from the
+    /// pinned Sophia tree. The release prefix is root's alone, which the
+    /// agent requires of the helper before it starts.
+    pub factotum: PathBuf,
+    pub pam_helper: PathBuf,
 }
 
 /// Everything `assemble` needs, already verified.
@@ -452,6 +457,10 @@ pub fn run_with(
             "sophia-cli",
             "--features",
             "sophia-cli/native-session",
+            "-p",
+            "sophia-factotum",
+            "-p",
+            "sophia-factotum-pam",
         ],
         &build_dir.join("sophia-build.log"),
         "build Sophia",
@@ -478,6 +487,8 @@ pub fn run_with(
             sophia: sophia_target.join("release/sophia"),
             xtask: integration_target.join("release/xtask"),
             preflight: integration_target.join("release/active-session-preflight"),
+            factotum: sophia_target.join("release/sophia-factotum"),
+            pam_helper: sophia_target.join("release/sophia-factotum-pam"),
         },
         pair,
         out,
@@ -774,6 +785,8 @@ fn lay_out(a: &Assembly) -> Result<(), String> {
         (&a.binaries.sophia, "sophia"),
         (&a.binaries.xtask, "sophia-integration-xtask"),
         (&a.binaries.preflight, "active-session-preflight"),
+        (&a.binaries.factotum, "sophia-factotum"),
+        (&a.binaries.pam_helper, "sophia-factotum-pam"),
         (&a.pair.hagia, "hagia"),
         (&a.pair.narthex, "narthex"),
     ] {
