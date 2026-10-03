@@ -1,7 +1,7 @@
 # Independent component updates
 
-The installer supports Hagia, Lom and Bemenu independently of the desktop
-release. After one login with a component-update-enabled release:
+The installer supports Hagia, Lom, Bemenu and the lock provider kleis
+independently of the desktop release. After one login with a component-update-enabled release:
 
 ```sh
 niltempus reload lom
@@ -53,6 +53,29 @@ A contract change needs a qualified desktop release. A new Hagia source revision
 also needs its correctly bound reviewed dependency manifest in configuration.
 Signing or compilation alone does not prove compatibility with arbitrary future
 protocol changes.
+
+## The lock provider (kleis)
+
+kleis, Sophia's lock provider, is a component only: no release builds or
+seeds it, and a profile without a `session { lock-provider { ... } }` block
+never needs it. `prepare-component kleis` builds it like Hagia, through the
+installed product builder with its reviewed Nim dependency manifest
+(`inputs.kleis_nim_deps` in configuration, with its independently supplied
+sha256). Like Hagia and Bemenu it must vendor the installed desktop's C SDK
+snapshot, so it waits for a desktop whose SDK carries the lock client.
+Validation runs the installed Sophia's session-profile preflight with the
+candidate as the profile's lock provider under the selected Hagia; a Sophia
+without the lock provider role refuses it there.
+
+At login the runtime profile points an existing `lock-provider` block's
+`executable` at `components/kleis/current`, keeping its `config` and `gpu`
+settings, and refuses a login profile that names a lock provider while no
+kleis is selected: Sophia starts its provider once per session, so a missing
+executable would leave the session without one. Sophia supervises the
+provider and starts it again whenever it exits. The updater therefore only
+selects: `prepare-component kleis` and `rollback-component kleis` change the
+selection, and Sophia runs it at the provider's next start; `reload` and
+`restart` refuse kleis.
 
 ## Restart ownership
 

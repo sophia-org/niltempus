@@ -175,7 +175,7 @@ func TestBuildRefusesMissingInputsBeforeStaging(t *testing.T) {
 		"plan schema 2": {Schema: 2, ReleaseID: "legacy", Sources: sources, Niltempus: binding, Inputs: inputs},
 		"no inputs":     {Schema: currentPlanSchema, ReleaseID: "no-inputs", Sources: sources, Niltempus: binding},
 		"bad SDK revision": {Schema: currentPlanSchema, ReleaseID: "bad-rev", Sources: sources, Niltempus: binding,
-			Inputs: &PlanInputs{inputs.HagiaNimDeps, inputs.NarthexNimDeps, "HEAD"}},
+			Inputs: &PlanInputs{HagiaNimDeps: inputs.HagiaNimDeps, NarthexNimDeps: inputs.NarthexNimDeps, HagiaCSDKRevision: "HEAD"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			loc := Locations{State: t.TempDir(), Cache: t.TempDir()}

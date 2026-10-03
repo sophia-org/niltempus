@@ -176,3 +176,80 @@ func TestUnsignedComponentRefusesBeforeAnyBuildOrSelection(t *testing.T) {
 		}
 	}
 }
+
+func TestComponentProfileSelectsKleisAsTheLockProvider(t *testing.T) {
+	base := `session {
+ window-manager "/sealed/hagia"
+ shell-component "bar" "bar" {
+  executable "/sealed/lom"
+ }
+ shell-component "menu" "application-launcher" {
+  executable "/sealed/bemenu"
+ }
+`
+	loc := Locations{State: "/state"}
+	out, err := renderComponentProfile(base+` lock-provider {
+  executable "/placeholder/kleis"
+  config "/home/user/.config/kleis/config.kdl"
+  gpu "denied"
+ }
+}
+`, loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{componentPath(loc, "kleis"), `config "/home/user/.config/kleis/config.kdl"`, `gpu denied`} {
+		if !strings.Contains(out, want) {
+			t.Fatal("lost", want, out)
+		}
+	}
+	if strings.Contains(out, "/placeholder/") {
+		t.Fatal("kept the placeholder executable", out)
+	}
+	// A profile without a lock provider gains none.
+	out, err = renderComponentProfile(base+"}\n", loc)
+	if err != nil || strings.Contains(out, "lock-provider") {
+		t.Fatal("added a lock provider", err, out)
+	}
+	if _, err := renderComponentProfile(base+` lock-provider { executable "/a"; }
+ lock-provider { executable "/b"; }
+}
+`, loc); err == nil {
+		t.Fatal("accepted two lock providers")
+	}
+}
+
+func TestLockProviderValidationProfile(t *testing.T) {
+	out, err := renderLockProviderProfile("session {\n window-manager \"/wm\"\n}\n", "/candidate/kleis")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `executable "/candidate/kleis"`) || !strings.Contains(out, `gpu denied`) {
+		t.Fatal("did not add the candidate as the lock provider", out)
+	}
+	out, err = renderLockProviderProfile("session {\n lock-provider {\n  executable \"/old\"\n  gpu \"direct\"\n }\n}\n", "/candidate/kleis")
+	if err != nil || !strings.Contains(out, `executable "/candidate/kleis"`) || !strings.Contains(out, `gpu direct`) || strings.Contains(out, "/old") {
+		t.Fatal("did not point the existing provider at the candidate", err, out)
+	}
+}
+
+func TestKleisIsACSDKComponent(t *testing.T) {
+	if b, err := componentBinary("kleis"); err != nil || b != "kleis" {
+		t.Fatal(b, err)
+	}
+	for name, want := range map[string]bool{"hagia": true, "bemenu": true, "kleis": true, "lom": false} {
+		if usesCSDK(name) != want {
+			t.Fatal(name)
+		}
+	}
+}
+
+func TestKleisIsNeverRestartedByTheUpdater(t *testing.T) {
+	loc := Locations{State: t.TempDir()}
+	for _, action := range []string{"reload", "restart"} {
+		err := componentCommand(action, "kleis", loc)
+		if err == nil || !strings.Contains(err.Error(), "started by Sophia") {
+			t.Fatal(action, err)
+		}
+	}
+}

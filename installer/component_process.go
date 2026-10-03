@@ -217,6 +217,12 @@ func componentCommand(action, name string, loc Locations) error {
 	if _, err := componentBinary(name); err != nil {
 		return err
 	}
+	// Sophia supervises the lock provider and starts it again whenever it
+	// exits; the selection is all the updater changes. The next start runs
+	// the new executable.
+	if name == "kleis" && (action == "reload" || action == "restart") {
+		return fmt.Errorf("kleis is started by Sophia as the lock provider: use prepare-component or rollback-component; Sophia runs the selected kleis at its next start")
+	}
 	_, m, err := installedDesktop()
 	if err != nil {
 		return err
@@ -230,7 +236,7 @@ func componentCommand(action, name string, loc Locations) error {
 	}
 	var old ShellProcess
 	fd := -1
-	if action != "prepare-component" && name != "hagia" {
+	if action != "prepare-component" && name != "hagia" && name != "kleis" {
 		old, err = findShell(componentPath(loc, name), m.Files["target/release/sophia"].SHA256)
 		if err != nil {
 			return err
@@ -260,6 +266,10 @@ func componentCommand(action, name string, loc Locations) error {
 	}
 	if action == "prepare-component" {
 		fmt.Println("Prepared", name, "without restarting it")
+		return nil
+	}
+	if name == "kleis" {
+		fmt.Println("Selected the previous kleis; Sophia runs it at the lock provider's next start")
 		return nil
 	}
 	if name == "hagia" {

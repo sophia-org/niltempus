@@ -48,17 +48,29 @@ func prepareComponent(loc Locations, name string) (ComponentVersion, error) {
 	if !m.Plan.ComponentUpdates {
 		return ComponentVersion{}, fmt.Errorf("install a component-update capable desktop once before preparing components")
 	}
-	if name == "hagia" {
+	// The Nim products build only from a reviewed dependency closure.
+	var nimDeps NimDepsInput
+	switch name {
+	case "hagia":
 		if cfg.Inputs == nil {
 			return ComponentVersion{}, fmt.Errorf("Hagia needs reviewed dependency inputs")
 		}
-		if err := validateNimDeps(name, cfg.Inputs.HagiaNimDeps, source.Commit); err != nil {
+		nimDeps = cfg.Inputs.HagiaNimDeps
+	case "kleis":
+		if cfg.Inputs == nil || cfg.Inputs.KleisNimDeps == nil {
+			return ComponentVersion{}, fmt.Errorf("kleis needs reviewed dependency inputs (inputs.kleis_nim_deps)")
+		}
+		nimDeps = *cfg.Inputs.KleisNimDeps
+	}
+	if name == "hagia" || name == "kleis" {
+		if err := validateNimDeps(name, nimDeps, source.Commit); err != nil {
 			return ComponentVersion{}, err
 		}
 	}
 	// Existing SDK contracts remain the compatibility boundary. A different C
-	// snapshot needs a desktop release and its cross-component qualification.
-	if name == "hagia" || name == "bemenu" {
+	// snapshot needs a desktop release and its cross-component qualification;
+	// kleis's lock client therefore waits for a desktop whose SDK has it.
+	if usesCSDK(name) {
 		sdk, err := committedFile(source, "vendor/sophia-desktop-sdk/manifest.json")
 		if err != nil {
 			return ComponentVersion{}, err
@@ -86,7 +98,7 @@ func prepareComponent(loc Locations, name string) (ComponentVersion, error) {
 	if err != nil {
 		return ComponentVersion{}, err
 	}
-	if name == "hagia" || name == "bemenu" {
+	if usesCSDK(name) {
 		tool := filepath.Join(release, "target/release/sophia-integration-xtask")
 		if err := logged(isolated(root, nil, "timeout", "--kill-after=5s", "60s", tool, "verify-c-sdk", filepath.Join(root, "vendor/sophia-desktop-sdk"), "--revision="+m.Plan.Inputs.HagiaCSDKRevision), filepath.Join(work, "verify-sdk.log")); err != nil {
 			return ComponentVersion{}, err
@@ -112,21 +124,21 @@ func prepareComponent(loc Locations, name string) (ComponentVersion, error) {
 			return ComponentVersion{}, err
 		}
 		candidate = filepath.Join(root, binary)
-	case "hagia":
+	case "hagia", "kleis":
 		build := filepath.Join(work, "build")
 		if err := os.Mkdir(build, 0700); err != nil {
 			return ComponentVersion{}, err
 		}
 		deps := filepath.Join(work, "nim-deps.manifest")
-		if err := copyFile(cfg.Inputs.HagiaNimDeps.Path, deps, 0444); err != nil {
+		if err := copyFile(nimDeps.Path, deps, 0444); err != nil {
 			return ComponentVersion{}, err
 		}
-		if hash, err := fileDigest(deps); err != nil || hash != cfg.Inputs.HagiaNimDeps.SHA256 {
+		if hash, err := fileDigest(deps); err != nil || hash != nimDeps.SHA256 {
 			return ComponentVersion{}, fmt.Errorf("reviewed deps changed while staging")
 		}
 		artifact := filepath.Join(work, "artifact")
 		tool := filepath.Join(release, "target/release/sophia-integration-xtask")
-		if err := logged(isolated(root, nil, "timeout", "--kill-after=5s", "1800s", tool, "prepare-product-artifact", "hagia", source.Path, source.Commit, artifact, "--build-dir="+build, "--nim-deps="+deps, "--nim-deps-sha256="+cfg.Inputs.HagiaNimDeps.SHA256), filepath.Join(work, "build.log")); err != nil {
+		if err := logged(isolated(root, nil, "timeout", "--kill-after=5s", "1800s", tool, "prepare-product-artifact", name, source.Path, source.Commit, artifact, "--build-dir="+build, "--nim-deps="+deps, "--nim-deps-sha256="+nimDeps.SHA256), filepath.Join(work, "build.log")); err != nil {
 			return ComponentVersion{}, err
 		}
 		candidate = filepath.Join(artifact, binary)
@@ -139,12 +151,20 @@ func prepareComponent(loc Locations, name string) (ComponentVersion, error) {
 	}
 	// Config validation is done with the installed Sophia. Product builds don't
 	// rewrite the user's shell configuration or change its role, GPU or limits.
-	if name == "hagia" {
+	// kleis is checked as the profile's lock provider, under the selected WM;
+	// a Sophia without the lock provider role refuses it here.
+	if name == "hagia" || name == "kleis" {
 		profile, err := os.ReadFile(filepath.Join(release, "share/sophia-niltempus-desktop/desktop.kdl"))
 		if err != nil {
 			return ComponentVersion{}, err
 		}
-		rendered, err := renderDevelopmentProfile(string(profile), candidate)
+		wm := candidate
+		render := renderDevelopmentProfile
+		if name == "kleis" {
+			wm = componentPath(loc, "hagia")
+			render = renderLockProviderProfile
+		}
+		rendered, err := render(string(profile), candidate)
 		if err != nil {
 			return ComponentVersion{}, err
 		}
@@ -152,7 +172,7 @@ func prepareComponent(loc Locations, name string) (ComponentVersion, error) {
 		if err := writeFile(path, []byte(rendered), 0600); err != nil {
 			return ComponentVersion{}, err
 		}
-		if err := preflightProfile(release, work, name, filepath.Join(release, "target/release/sophia"), candidate, path); err != nil {
+		if err := preflightProfile(release, work, name, filepath.Join(release, "target/release/sophia"), wm, path); err != nil {
 			return ComponentVersion{}, err
 		}
 	}
@@ -166,4 +186,9 @@ func prepareComponent(loc Locations, name string) (ComponentVersion, error) {
 		return ComponentVersion{}, err
 	}
 	return v, nil
+}
+
+// The components that vendor the C desktop SDK, held to the desktop's pin.
+func usesCSDK(name string) bool {
+	return name == "hagia" || name == "bemenu" || name == "kleis"
 }

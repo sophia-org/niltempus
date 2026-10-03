@@ -19,7 +19,7 @@ status            Inspect the selected installed release
 rollback          Select the previous desktop release (sudo)
 prepare-hagia     Build/preflight only Hagia into its user-owned executable path
 reload-hagia      Prepare Hagia, then restart it through Sophia control IPC
-prepare-component NAME Build/verify hagia, lom or bemenu without restarting
+prepare-component NAME Build/verify hagia, lom, bemenu or kleis without restarting
 reload NAME       Build/verify and restart only that component
 restart NAME      Restart the selected component without building
 rollback-component NAME Select the previous component and restart it
