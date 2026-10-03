@@ -71,7 +71,42 @@ prepare a Plan-3 release explicitly, either with `niltempus build` using the
 explicit `inputs`, or with `niltempus prepare DIRECTORY` for an existing
 Plan-3 release. Until then, `prepared.json` is left exactly as it is.
 
-### Cross-head switcher recovery candidate
+### Obsolete-control recovery candidate
+
+Sophia `b6ad18cff13f84ae05626bb060626cb01ab96699` repairs stale Session
+controls after a client unmaps or withdraws its admission. The incident on
+`niltempus-9de41ea905db10201b9e` ended with `control_rejected`; its archive
+did not retain the control kind or rejection reason.
+
+Obsolete controls now retire only their matching transaction and surface's
+obligations. Superseded focus claims leave newer focus authority intact.
+Invalid commands and genuine authority failures retain their fatal handling.
+Archives now retain the control kind, generation and scalar outcome.
+
+The Sophia full gate passed with 6,625 printed passing tests and zero failures,
+including real-writer lifecycle and Session settlement regressions. Five
+existing architecture models and their two negative controls passed their
+expected checks. These are isolated proofs; installed-session acceptance of
+this repair remains open. Evidence: `session-exit-9de41ea9-01/repair-01` and
+`t290-release-01`. The t289 CPU implementation is not included.
+
+Hagia remains `03be1d1f2b1c9e555773578ec1001dd7c098830a`, with C SDK
+`4608010f31848c153d5c0918b149b9f86a239048` (0.7.0). The WM contracts,
+SDK manifest, Nim dependency manifests and approved profile are unchanged.
+For an installation already using this personal Hagia, run as your normal
+user from a TTY or after logout, then log into **Sophia niltempus Desktop**:
+
+```sh
+niltempus install
+```
+
+The installer requests sudo itself and preserves the matching personal Hagia.
+No `prepare-hagia` is needed. Update the configured Sophia and niltempus
+references to the reviewed candidate before planning, and publish the matching
+qualified CLI before handing off installation. Installation itself uses the
+verified prepared release.
+
+### Earlier cross-head switcher recovery candidate
 
 Sophia `f650e68831f15a7e8b767dac88c598aebe515e51` repairs the renderer image
 custody failure exposed by multi-head Alt+Tab on `niltempus-d99119dbc46629083eea`.

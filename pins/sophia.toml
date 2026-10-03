@@ -2,4 +2,4 @@
 # pins/ and assets/ that came from Sophia was copied at this revision; the
 # digests below are re-derived from it by `cargo xtask check-pins <sophia-repo>`.
 url = "https://github.com/sophia-org/sophia.git"
-rev = "f650e68831f15a7e8b767dac88c598aebe515e51"
+rev = "b6ad18cff13f84ae05626bb060626cb01ab96699"
