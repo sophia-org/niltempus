@@ -71,7 +71,50 @@ prepare a Plan-3 release explicitly, either with `niltempus build` using the
 explicit `inputs`, or with `niltempus prepare DIRECTORY` for an existing
 Plan-3 release. Until then, `prepared.json` is left exactly as it is.
 
-### Obsolete-control recovery candidate
+### Lock-test candidate with Present timing repairs
+
+Sophia `53b2833708c3e4349b7c3b82cb4168fb28e424c6` includes the Engine lock
+cover, Session lock state and input routing, and the Session-owned factotum
+and PAM helper (t291-t293). The release packages both authenticator binaries;
+the installed launcher passes their paths to the Hagia session. The later
+lock-provider role (t294) and C SDK lock-role work (t295) are not included.
+
+This revision also carries t289's owner-service and Present timing work, with
+two release repairs. A visible head whose sequence ioctl is unsupported uses
+an Unclocked source instead of the hidden-window 1 Hz clock. Pixmaps retain
+their fence and buffer custody, Complete uses actual retirement UST with a
+plateau MSC, and NotifyMSC waits one mode field. New visible windows select
+their clock from Session placement before their first pixels have committed,
+including pending admissions and popup map/remap. Hidden surfaces stay on the
+background clock. The W1 admission cache remains separate and is not included.
+
+The isolated Sophia full gate passed (6,964 printed passing tests, zero
+failures), along with the release build and exact-freeze negative controls.
+The frozen binary completed 111/110 Presents per 10 seconds on two virtio
+windows, versus 106/106 before t289. The startup composition queue gap was
+77.307 ms, versus 719.983 ms before the first-frame repair and 54.745 ms at
+base. All recorded bindings were Unclocked, Complete and Idle matched sent,
+and completion USTs matched actual retirements. These are single guest
+correctness samples; they do not qualify CPU performance, physical vblank
+behavior, or live locking. Evidence: `t289-clockless-01/GATE-02.json` and
+`FIRST-FRAME-GUEST-COMPARISON.json`.
+
+Hagia stays at `03be1d1f2b1c9e555773578ec1001dd7c098830a`, with C SDK
+`4608010f31848c153d5c0918b149b9f86a239048` (0.7.0). The eleven paired
+contracts, C SDK manifest, fonts and Nim dependency manifests are unchanged.
+The vendored Rust SDK includes the queued-secret write fix from `9e59d78`.
+
+After qualification, plan review and the package audit, publish the matching
+CLI and update the configured Sophia and niltempus references. Then run
+`niltempus install` as the normal user from a TTY or after logout, and log in
+again. Installation preserves the matching personal Hagia; no `prepare-hagia`
+is needed. Lock testing additionally needs the operator's root-owned
+`/etc/pam.d/sophia-lock` stack (see Sophia's `examples/pam.d`) and a
+`session:lock` profile binding. The authenticator starts only when its PAM
+stack exists. Profile editing and attended lock/unlock acceptance are operator
+steps; this candidate does not change the personal profile.
+
+### Earlier obsolete-control recovery candidate
 
 Sophia `b6ad18cff13f84ae05626bb060626cb01ab96699` repairs stale Session
 controls after a client unmaps or withdraws its admission. The incident on

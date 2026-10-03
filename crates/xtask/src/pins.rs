@@ -12,7 +12,7 @@ use std::process::Command;
 use std::time::Duration;
 
 pub const SOPHIA_URL: &str = "https://github.com/sophia-org/sophia.git";
-pub const SOPHIA_REV: &str = "b6ad18cff13f84ae05626bb060626cb01ab96699";
+pub const SOPHIA_REV: &str = "53b2833708c3e4349b7c3b82cb4168fb28e424c6";
 /// The Sophia crates this repository names directly.
 pub const SOPHIA_CRATES: [&str; 8] = [
     "sophia-backend-live",
