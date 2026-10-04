@@ -71,7 +71,46 @@ prepare a Plan-3 release explicitly, either with `niltempus build` using the
 explicit `inputs`, or with `niltempus prepare DIRECTORY` for an existing
 Plan-3 release. Until then, `prepared.json` is left exactly as it is.
 
-### Lock-test candidate with Present timing repairs
+### CPU and kleis lock-provider candidate
+
+Sophia `e9757abfa3b4dc6bf714a21df0c63d29ca4d1a96` vendors the C desktop SDK
+v0.8.0 (`b2a254dcb792e5f9d66f78bdd73f645153504507`) and Rust SDK v0.3.0
+(`a111b5590d27fe2dc079220e821f0327f47baefb`) on master `fb4b81f92`. That master
+carries t289's qualified CPU harness, repaint attribution and capture
+configuration reuse, the lock provider role (t294) and the lock model (t296).
+The capture change measured 39-40% less capture-path process CPU in an
+offscreen benchmark; whole-desktop savings are not measured.
+
+Both SDK releases add an experimental lock provider role: the lock contract
+is still revision 1 (draft), and the C SDK declares `lock_files=false`. The
+fourteen paired contracts add the three lock files, and the C SDK manifest
+moves to v0.8.0.
+
+The products move to that SDK: Hagia `0a6b4a52d40d073d289fa01d30860bfe5ac0ed30`,
+Bemenu `8f8c766b8ac10e41ff3e30e97e75e61847a02832` and kleis
+`342a4a50b6c43806f7f32c0b9e45c3e08c1ebac1`. Hagia and kleis need reviewed Nim
+dependency manifests for those commits (`inputs.hagia_nim_deps`,
+`inputs.kleis_nim_deps`), and `inputs.hagia_c_sdk_revision` names v0.8.0.
+
+Installation does not replace the personal Hagia, and every component that
+vendors the C SDK must match the installed desktop's SDK. So the components
+are prepared after installation, and the lock provider is added last. Run
+these as your normal user from a TTY or after logout, in this order:
+
+```sh
+niltempus install
+niltempus prepare-component hagia
+niltempus prepare-component bemenu
+niltempus prepare-component kleis
+```
+
+Then add the `lock-provider` block and a `session:lock` binding to
+`~/.config/sophia/desktop.kdl`. Login refuses a profile that names a lock
+provider while no kleis is selected. Do not reload the profile in a session
+started before the installation: its Sophia refuses the `lock-provider` node.
+Log out and log into **Sophia niltempus Desktop**.
+
+### Earlier lock-test candidate with Present timing repairs
 
 Sophia `53b2833708c3e4349b7c3b82cb4168fb28e424c6` includes the Engine lock
 cover, Session lock state and input routing, and the Session-owned factotum
