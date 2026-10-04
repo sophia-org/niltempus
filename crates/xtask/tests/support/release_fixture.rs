@@ -245,5 +245,6 @@ pub fn assembly(root: &Path) -> Assembly {
         pair: verified_pair(&root.join("wm-pair"), &ids),
         out: root.join("release"),
         built_at_utc: "2026-09-27T00:00:00Z".into(),
+        verifier_interpreter: None,
     }
 }

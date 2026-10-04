@@ -351,6 +351,10 @@ pub struct Assembly {
     pub pair: VerifiedPair,
     pub out: PathBuf,
     pub built_at_utc: String,
+    /// Runs the packaged policy verifier through this interpreter instead
+    /// of its `#!/usr/bin/env bash` line, for builds (Nix) whose sandbox has
+    /// no /usr/bin/env. The shipped script is never rewritten.
+    pub verifier_interpreter: Option<PathBuf>,
 }
 
 pub fn run(repo: &Path, args: &[String]) -> Result<Vec<String>, String> {
@@ -493,6 +497,7 @@ pub fn run_with(
         pair,
         out,
         built_at_utc: utc_now()?,
+        verifier_interpreter: None,
     };
     assemble(&assembly)
 }
@@ -832,8 +837,17 @@ fn lay_out(a: &Assembly) -> Result<(), String> {
     set_mode(&out.join("manifest"), 0o644)?;
     verify_release_sdk(out, &a.pair)?;
 
+    let script = out.join("tools/verify_packaged_policy.sh");
+    let mut command = match &a.verifier_interpreter {
+        Some(interpreter) => {
+            let mut command = Command::new(interpreter);
+            command.arg(&script);
+            command
+        }
+        None => Command::new(&script),
+    };
     let verifier = bounded(
-        Command::new(out.join("tools/verify_packaged_policy.sh")).arg(out),
+        command.arg(out),
         Duration::from_secs(120),
         "packaged policy verification",
     );

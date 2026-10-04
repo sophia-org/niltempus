@@ -10,7 +10,11 @@
 //!   --repo=/ABS --integration-commit=SHA --sophia-tree=/ABS --sophia-rev=SHA \
 //!   --sophia=/ABS --factotum=/ABS --pam-helper=/ABS --xtask=/ABS --preflight=/ABS \
 //!   --hagia=/ABS --hagia-commit=SHA --narthex=/ABS --narthex-commit=SHA \
-//!   --profile=/ABS --c-sdk-manifest=/ABS --c-sdk-rev=SHA
+//!   --profile=/ABS --c-sdk-manifest=/ABS --c-sdk-rev=SHA [--verifier-interpreter=/ABS]
+//!
+//! --verifier-interpreter runs the release's packaged policy verifier through
+//! that shell, for a build sandbox without /usr/bin/env; the shipped script
+//! keeps its own interpreter line.
 
 use std::path::{Path, PathBuf};
 
@@ -22,9 +26,10 @@ use crate::{hex, read, sha256};
 const USAGE: &str = "usage: cargo xtask assemble-nix --out=/ABS --built-at-utc=YYYY-MM-DDTHH:MM:SSZ \
 --repo=/ABS --integration-commit=SHA --sophia-tree=/ABS --sophia-rev=SHA --sophia=/ABS \
 --factotum=/ABS --pam-helper=/ABS --xtask=/ABS --preflight=/ABS --hagia=/ABS --hagia-commit=SHA \
---narthex=/ABS --narthex-commit=SHA --profile=/ABS --c-sdk-manifest=/ABS --c-sdk-rev=SHA";
+--narthex=/ABS --narthex-commit=SHA --profile=/ABS --c-sdk-manifest=/ABS --c-sdk-rev=SHA \
+[--verifier-interpreter=/ABS]";
 
-const KEYS: [&str; 18] = [
+const KEYS: [&str; 19] = [
     "out",
     "built-at-utc",
     "repo",
@@ -43,6 +48,7 @@ const KEYS: [&str; 18] = [
     "profile",
     "c-sdk-manifest",
     "c-sdk-rev",
+    "verifier-interpreter",
 ];
 
 /// Records what the Nix closure replaces: Hagia and narthex were built
@@ -52,6 +58,19 @@ const NIX_CLOSURE: &str = "nix-flake-closure";
 
 pub fn run(args: &[String]) -> Result<Vec<String>, String> {
     let options = options(args, &KEYS, USAGE)?;
+    let verifier_interpreter = match options.get("verifier-interpreter") {
+        Some(value) => {
+            let path = absolute("verifier-interpreter", value)?;
+            if !std::fs::metadata(&path).is_ok_and(|m| m.is_file()) {
+                return Err(format!(
+                    "--verifier-interpreter is not a regular file: {}",
+                    path.display()
+                ));
+            }
+            Some(path)
+        }
+        None => None,
+    };
     let get = |key: &str| {
         options
             .get(key)
@@ -138,6 +157,7 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
         pair,
         out,
         built_at_utc: built_at_utc.to_owned(),
+        verifier_interpreter,
     };
     // `assemble` checks the C SDK manifest names --c-sdk-rev and runs the
     // packaged policy verifier, exactly as for package-desktop.

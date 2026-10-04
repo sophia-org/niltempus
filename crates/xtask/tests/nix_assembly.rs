@@ -83,7 +83,10 @@ fn a_nix_assembly_equals_the_package_desktop_assembly() {
     let dir = Dir::new("nix-equal");
     let mut assembly = assembly(&dir.0);
     let nix_out = dir.0.join("nix-release");
-    let lines = run(&arguments(&assembly, &nix_out)).unwrap();
+    // Through an explicit interpreter, as in the Nix build sandbox.
+    let mut args = arguments(&assembly, &nix_out);
+    args.push("--verifier-interpreter=/bin/bash".to_owned());
+    let lines = run(&args).unwrap();
     assert!(
         lines[0].starts_with("desktop_release status=packaged "),
         "{lines:?}"
@@ -136,6 +139,14 @@ fn malformed_inputs_are_refused_before_any_output() {
             "--built-at-utc must be",
         ),
         (valid[1..].to_vec(), "--out is required"),
+        (
+            valid
+                .iter()
+                .cloned()
+                .chain(["--verifier-interpreter=bash".to_owned()])
+                .collect(),
+            "--verifier-interpreter must be absolute",
+        ),
         (
             valid
                 .iter()
