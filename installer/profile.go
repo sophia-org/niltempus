@@ -27,6 +27,17 @@ func setExecutable(doc *kdl.Document, name, path string) error {
 	return nil
 }
 
+// Validate kleis under the selected personal WM, matching the checker and
+// --default-wm passed to preflightProfile. The sealed profile names the
+// packaged WM, which can differ from that selection.
+func renderLockProviderValidationProfile(source, binary, wm string) (string, error) {
+	profile, err := renderDevelopmentProfile(source, wm)
+	if err != nil {
+		return "", err
+	}
+	return renderLockProviderProfile(profile, binary)
+}
+
 // renderLockProviderProfile names binary as the profile's lock provider,
 // adding one with GPU access denied when the profile has none.
 func renderLockProviderProfile(source, binary string) (string, error) {

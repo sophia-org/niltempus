@@ -45,12 +45,19 @@ import (
 //	                                        private keys or agent sockets
 //	DESKTOP_INSTALLER_TEST_EVIDENCE         new absolute directory that keeps
 //	                                        the log, snapshots and profiles
+//	DESKTOP_INSTALLER_TEST_WORKDIR          new absolute directory on disk,
+//	                                        outside /tmp, for the fixture
+//
+// The installer's own build sandbox (isolated) mounts a fresh /tmp, so the
+// fixture lives at its real path outside /tmp: home, state, cache, keyring,
+// configuration, inputs and outputs stay visible to nested component builds.
+// A helper run through the production isolated() checks that visibility first.
 func TestKleisReleaseSequenceInPrivateMounts(t *testing.T) {
 	inputs := map[string]string{}
-	for _, name := range []string{"BINARY", "RELEASE", "OLD_RELEASE", "CONFIG", "COMPONENT_STATE", "STALE_KLEIS", "GNUPG_PUBLIC", "EVIDENCE"} {
+	for _, name := range []string{"BINARY", "RELEASE", "OLD_RELEASE", "CONFIG", "COMPONENT_STATE", "STALE_KLEIS", "GNUPG_PUBLIC", "EVIDENCE", "WORKDIR"} {
 		value := os.Getenv("DESKTOP_INSTALLER_TEST_" + name)
 		if value == "" {
-			t.Skip("requires the candidate, old release, reviewed config, component state, stale kleis, public keyring and evidence inputs")
+			t.Skip("requires the candidate, old release, reviewed config, component state, stale kleis, public keyring, evidence and workdir inputs")
 		}
 		inputs[name] = value
 	}
@@ -90,7 +97,26 @@ func TestKleisReleaseSequenceInPrivateMounts(t *testing.T) {
 	if err := os.Mkdir(evidence, 0700); err != nil {
 		t.Fatalf("evidence directory must be new: %v", err)
 	}
-	fixture := t.TempDir()
+	fixture := filepath.Clean(inputs["WORKDIR"])
+	if !filepath.IsAbs(fixture) || fixture == "/tmp" || strings.HasPrefix(fixture, "/tmp/") || strings.ContainsAny(fixture, " \t\n'\"$\\") {
+		t.Fatal("DESKTOP_INSTALLER_TEST_WORKDIR must be a plain absolute path outside /tmp")
+	}
+	if err := os.Mkdir(fixture, 0700); err != nil {
+		t.Fatalf("workdir must be new: %v", err)
+	}
+	t.Cleanup(func() {
+		// Builds leave read-only trees; make them removable first.
+		exec.Command("chmod", "-R", "u+w", fixture).Run()
+		os.RemoveAll(fixture)
+	})
+	runner, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, nim, err := nimToolchain(cfg.Inputs.HagiaNimDeps.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Signed-source checks run with a replaced HOME, so they get the public
 	// keyring and trust database only.
 	gnupg := filepath.Join(fixture, "gnupg")
@@ -125,7 +151,7 @@ state="$XDG_STATE_HOME/sophia-niltempus-desktop"
 conf="$HOME/.config/sophia-niltempus-desktop"
 out=/tmp/fixture/out
 mkdir -p "$out" "$conf" "$state"
-cp -a /tmp/component-state/components /tmp/component-state/development "$state/"
+cp -a /tmp/fixture/inputs/component-state/components /tmp/fixture/inputs/component-state/development "$state/"
 # Component state only: selections, versions, current executables and the
 # personal Hagia with its record. Symlinks are listed by target.
 snapshot() {
@@ -140,11 +166,16 @@ refused() { # name, expected message, command...
 }
 
 step 1 install the old desktop over the operator components
-"$1" install /tmp/old-release
+"$1" install /tmp/fixture/inputs/old-release
 test "$(readlink "$desktop/current")" = "releases/$2"
 snapshot old
 "$1" component-profile "$desktop/current" > "$out/old.profile"
 cp -a "$state/components" "$state/development" /tmp/fixture/backup/
+
+step 1b nested component builds see the fixture but not the outer /tmp
+touch /tmp/outer-tmp-probe
+cp /tmp/fixture/config.json "$conf/config.json"
+NILTEMPUS_TEST_SEQUENCE_ISOLATION=1 /tmp/fixture/inputs/test-runner -test.run='^TestKleisSequenceIsolationHelper$' -test.v
 
 step 2 an SDK-changed component is refused against the old desktop
 cp /tmp/fixture/config.json "$conf/config.json"
@@ -153,7 +184,7 @@ snapshot refused-on-old
 cmp "$out/old.state" "$out/refused-on-old.state"
 
 step 3 install the candidate without touching personal components
-"$1" prepare /tmp/candidate
+"$1" prepare /tmp/fixture/inputs/candidate
 "$1" install
 test "$(readlink "$desktop/current")" = "releases/$3"
 test "$(readlink "$desktop/previous")" = "releases/$2"
@@ -195,7 +226,11 @@ cmp "$out/old.state" "$out/restored.state"
 cmp "$out/old.profile" "$out/restored.profile"
 step done
 `
-	for _, dir := range []string{"out", "backup", "prepared", "home", "cache"} {
+	script = strings.ReplaceAll(script, "/tmp/fixture", fixture)
+	if err := writeFile(filepath.Join(fixture, "inputs/test-runner"), nil, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"out", "backup", "prepared", "home", "cache", "inputs/old-release", "inputs/candidate", "inputs/component-state"} {
 		if err := os.MkdirAll(filepath.Join(fixture, dir), 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -203,16 +238,23 @@ step done
 	args := []string{"--die-with-parent", "--unshare-pid", "--unshare-net",
 		"--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
 		"--tmpfs", "/tmp", "--tmpfs", "/run/user", "--tmpfs", "/opt", "--tmpfs", "/usr/share/wayland-sessions",
-		"--bind", fixture, "/tmp/fixture",
-		"--ro-bind", inputs["OLD_RELEASE"], "/tmp/old-release",
-		"--ro-bind", inputs["RELEASE"], "/tmp/candidate",
-		"--ro-bind", inputs["COMPONENT_STATE"], "/tmp/component-state",
-		"--chdir", "/tmp/fixture",
-		"--setenv", "HOME", "/tmp/fixture/home",
-		"--setenv", "XDG_STATE_HOME", "/tmp/fixture/home/.local/state",
-		"--setenv", "XDG_CACHE_HOME", "/tmp/fixture/cache",
-		"--setenv", "GNUPGHOME", "/tmp/fixture/gnupg",
-		"--setenv", "PATH", "/tmp/fixture/fakebin:/usr/bin",
+		"--bind", fixture, fixture,
+		"--ro-bind", inputs["OLD_RELEASE"], filepath.Join(fixture, "inputs/old-release"),
+		"--ro-bind", inputs["RELEASE"], filepath.Join(fixture, "inputs/candidate"),
+		"--ro-bind", inputs["COMPONENT_STATE"], filepath.Join(fixture, "inputs/component-state"),
+		"--ro-bind", runner, filepath.Join(fixture, "inputs/test-runner"),
+		"--chdir", fixture,
+		"--setenv", "HOME", filepath.Join(fixture, "home"),
+		// buildEnvironment sets XDG_CONFIG_HOME=/tmp/config for nested builds;
+		// the CLI itself must read the fixture's configuration.
+		"--setenv", "XDG_CONFIG_HOME", filepath.Join(fixture, "home/.config"),
+		"--setenv", "XDG_STATE_HOME", filepath.Join(fixture, "home/.local/state"),
+		"--setenv", "XDG_CACHE_HOME", filepath.Join(fixture, "cache"),
+		"--setenv", "GNUPGHOME", filepath.Join(fixture, "gnupg"),
+		"--setenv", "PATH", filepath.Join(fixture, "fakebin") + ":/usr/bin",
+		"--setenv", "KLEIS_SEQUENCE_FIXTURE", fixture,
+		"--setenv", "KLEIS_SEQUENCE_STORE", store,
+		"--setenv", "KLEIS_SEQUENCE_NIM", nim,
 		"--", "bash", "-c", script, "fixture", inputs["BINARY"], old.Plan.ReleaseID, candidate.Plan.ReleaseID, inputs["STALE_KLEIS"]}
 	// The whole sequence, including three product builds, is bounded; the
 	// context kills bwrap, and --die-with-parent takes everything under it.
@@ -229,6 +271,15 @@ step done
 	if cerr := exec.Command("cp", "-a", filepath.Join(fixture, "out"), filepath.Join(evidence, "out")).Run(); cerr != nil {
 		t.Error(cerr)
 	}
+	// Component builds keep their logs, never their regenerable trees, so a
+	// failed preparation stays diagnosable after the workdir is removed.
+	for _, dir := range []string{"cache", "home"} {
+		logs := exec.Command("rsync", "-a", "--prune-empty-dirs", "--include=*/", "--include=*.log", "--exclude=*",
+			filepath.Join(fixture, dir)+"/", filepath.Join(evidence, dir+"-logs")+"/")
+		if out, lerr := logs.CombinedOutput(); lerr != nil {
+			t.Errorf("keeping %s logs: %v %s", dir, lerr, out)
+		}
+	}
 	if ctx.Err() != nil {
 		t.Fatalf("release sequence exceeded its bound: %v", ctx.Err())
 	}
@@ -243,7 +294,7 @@ step done
 	// lom is untouched; each replaced selection keeps the operator's version
 	// as its rollback, and kleis starts without one.
 	state := filepath.Join(fixture, "prepared")
-	inner := "/tmp/fixture/home/.local/state/sophia-niltempus-desktop"
+	inner := filepath.Join(fixture, "home/.local/state/sophia-niltempus-desktop")
 	paths := map[string]string{}
 	for _, name := range []string{"hagia", "lom", "bemenu", "kleis"} {
 		var s ComponentSelection
@@ -415,4 +466,84 @@ func checkProfileSubstitution(sealed, rendered string, paths map[string]string) 
 		}
 	}
 	return nil
+}
+
+// nimToolchain reads the package store and Nim compiler a reviewed dependency
+// manifest records; component builds use those absolute paths.
+func nimToolchain(manifest string) (store, nim string, err error) {
+	data, err := os.ReadFile(manifest)
+	if err != nil {
+		return "", "", err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		words := strings.Fields(line)
+		if len(words) == 0 {
+			continue
+		}
+		fields := map[string]string{}
+		for _, word := range words[1:] {
+			if key, value, ok := strings.Cut(word, "="); ok {
+				fields[key] = value
+			}
+		}
+		switch {
+		case words[0] == "for":
+			store = fields["store"]
+		case words[0] == "tool" && fields["role"] == "nim":
+			nim = fields["path"]
+		}
+	}
+	if !filepath.IsAbs(store) || !filepath.IsAbs(nim) {
+		return "", "", fmt.Errorf("%s records no absolute store and nim path", manifest)
+	}
+	return store, nim, nil
+}
+
+// Runs inside the sequence's private mounts and checks, through the
+// production isolated(), what a nested component build can see: the fixture's
+// home, state, cache, keyring and configuration, the private desktop, the
+// reviewed Nim store and compiler, and not the outer /tmp.
+func TestKleisSequenceIsolationHelper(t *testing.T) {
+	if os.Getenv("NILTEMPUS_TEST_SEQUENCE_ISOLATION") != "1" {
+		t.Skip("private sequence subprocess")
+	}
+	fixture := os.Getenv("KLEIS_SEQUENCE_FIXTURE")
+	// The CLI's own locations, resolved from this process's environment as
+	// the CLI resolves them, are the fixture's.
+	loc, err := locations("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Locations{
+		filepath.Join(fixture, "home/.config/sophia-niltempus-desktop/config.json"),
+		filepath.Join(fixture, "home/.local/state/sophia-niltempus-desktop"),
+		filepath.Join(fixture, "cache/sophia-niltempus-desktop"),
+	}
+	if loc != want {
+		t.Fatalf("CLI locations are %+v, not the fixture's %+v", loc, want)
+	}
+	if _, err := os.Stat(loc.Config); err != nil {
+		t.Fatalf("CLI configuration: %v", err)
+	}
+	checks := `set -eu
+# One test per line: set -e ignores a failure on the left of &&.
+test -d "$HOME"
+test -w "$XDG_STATE_HOME/sophia-niltempus-desktop/components"
+test -w "$XDG_CACHE_HOME"
+test -r "$GNUPGHOME/pubring.kbx"
+test -r "$GNUPGHOME/trustdb.gpg"
+test -r "$HOME/.config/sophia-niltempus-desktop/config.json"
+test -x /opt/sophia-niltempus-desktop/current/target/release/sophia
+test -d "$KLEIS_SEQUENCE_STORE"
+test -x "$KLEIS_SEQUENCE_NIM"
+test ! -e /tmp/outer-tmp-probe
+test -z "$(ls -A /tmp | grep -vx -e config -e runtime)"
+echo "isolation visibility ok"
+`
+	cmd := isolated(fixture, nil, "sh", "-c", checks)
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "isolation visibility ok") {
+		t.Fatalf("a nested component build cannot see the fixture: %v\n%s", err, out)
+	}
+	fmt.Println("nested isolated(): fixture, desktop and Nim toolchain visible; outer /tmp hidden")
 }

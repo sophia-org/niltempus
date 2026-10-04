@@ -162,7 +162,9 @@ func prepareComponent(loc Locations, name string) (ComponentVersion, error) {
 		render := renderDevelopmentProfile
 		if name == "kleis" {
 			wm = componentPath(loc, "hagia")
-			render = renderLockProviderProfile
+			render = func(source, binary string) (string, error) {
+				return renderLockProviderValidationProfile(source, binary, wm)
+			}
 		}
 		rendered, err := render(string(profile), candidate)
 		if err != nil {
