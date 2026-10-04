@@ -88,8 +88,12 @@ pub const SOPHIA_RETAINED: [(&str, u32); 5] = [
 ];
 
 /// Operator commands: (bin name, this repository's source).
-pub const COMMANDS: [(&str, &str); 45] = [
+pub const COMMANDS: [(&str, &str); 46] = [
     ("sophia-session", "tools/installed/sophia-session"),
+    (
+        "sophia-niltempus-desktop-session",
+        "tools/installed/sophia-niltempus-desktop-session",
+    ),
     (
         "sophia-hagia-session",
         "tools/installed/sophia-hagia-session",
@@ -276,7 +280,13 @@ pub const TOOLS: [(&str, u32); 18] = [
 ];
 
 /// Login-menu entries: (file stem, Name, Comment, command).
-pub const SESSIONS: [(&str, &str, &str, &str); 7] = [
+pub const SESSIONS: [(&str, &str, &str, &str); 8] = [
+    (
+        "sophia-niltempus-desktop",
+        "Sophia niltempus Desktop",
+        "Hagia, Lom and Bemenu over 9P2000.L",
+        "sophia-niltempus-desktop-session",
+    ),
     (
         "sophia-hagia",
         "Sophia Hagia (Native Policy)",
@@ -355,6 +365,11 @@ pub struct Assembly {
     /// of its `#!/usr/bin/env bash` line, for builds (Nix) whose sandbox has
     /// no /usr/bin/env. The shipped script is never rewritten.
     pub verifier_interpreter: Option<PathBuf>,
+    /// Further release files (source, release-relative destination), laid
+    /// out before the release is checked and sealed: the components and the
+    /// rendered profile a Nix build adds. Executable sources are installed
+    /// 0755, others 0644.
+    pub extra_files: Vec<(PathBuf, PathBuf)>,
 }
 
 pub fn run(repo: &Path, args: &[String]) -> Result<Vec<String>, String> {
@@ -498,6 +513,7 @@ pub fn run_with(
         out,
         built_at_utc: utc_now()?,
         verifier_interpreter: None,
+        extra_files: Vec::new(),
     };
     assemble(&assembly)
 }
@@ -831,6 +847,28 @@ fn lay_out(a: &Assembly) -> Result<(), String> {
             .join(format!("{stem}.desktop"));
         std::fs::write(&path, entry).map_err(|e| e.to_string())?;
         set_mode(&path, 0o644)?;
+    }
+    for (source, dest) in &a.extra_files {
+        if dest.is_absolute()
+            || dest
+                .components()
+                .any(|c| !matches!(c, std::path::Component::Normal(_)))
+        {
+            return Err(format!(
+                "release file path must be relative: {}",
+                dest.display()
+            ));
+        }
+        let target = out.join(dest);
+        if target.symlink_metadata().is_ok() {
+            return Err(format!("release file already laid out: {}", dest.display()));
+        }
+        let executable = std::fs::metadata(source)
+            .map_err(|e| format!("{}: {e}", source.display()))?
+            .mode()
+            & 0o111
+            != 0;
+        install(source, &target, if executable { 0o755 } else { 0o644 })?;
     }
     let manifest = manifest(a);
     std::fs::write(out.join("manifest"), manifest).map_err(|e| e.to_string())?;

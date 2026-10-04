@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# The niltempus desktop's login entry: Hagia over the 9P2000.L WM wire, with
+# Lom and Bemenu over files. The release carries every component and the
+# rendered profile (share/sophia-niltempus-desktop/desktop.kdl), so the
+# session takes nothing from the user's state.
+set -euo pipefail
+
+script=$(readlink -f "${BASH_SOURCE[0]}")
+release=$(cd "$(dirname "$script")/.." && pwd)
+unset SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE SOPHIA_HAGIA_PROFILE_MODE SOPHIA_DESKTOP_PROFILE_MODE
+export SOPHIA_INSTALL_PREFIX=/opt/sophia-niltempus-desktop
+
+wm="$release/target/release/hagia"
+expected='hagia_environment_contract schema=1 wm_policy=sophia-wm-policy-v1 names=SOPHIA_WM_POLICY_CHECKPOINT,SOPHIA_WM_POLICY_CANDIDATE,SOPHIA_WM_POLICY_PROFILE_ACTIVATION legacy=HAGIA_POLICY_CHECKPOINT,HAGIA_POLICY_CANDIDATE,HAGIA_POLICY_PROFILE_ACTIVATION precedence=presence'
+contract=$(timeout --kill-after=2s 10s "$wm" config check-environment-contract) || {
+    echo "Hagia lacks the required WM environment contract." >&2
+    exit 1
+}
+if [[ "$contract" != "$expected" ]]; then
+    echo "Hagia reports an incompatible WM environment contract." >&2
+    exit 1
+fi
+
+export SOPHIA_DESKTOP_PROFILE="$release/share/sophia-niltempus-desktop/desktop.kdl"
+export SOPHIA_HAGIA_BIN="$wm"
+export SOPHIA_WM_BIN="$wm"
+export SOPHIA_INSTALLED_ATTEMPT_MODE=hagia
+export PATH="$release/bin:$release/target/release:$PATH"
+exec "$release/bin/sophia-hagia-session" "--wm-process=$wm" "--wm-transport=9p2000.L" "$@"

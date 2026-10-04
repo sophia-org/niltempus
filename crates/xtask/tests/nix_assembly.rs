@@ -180,3 +180,44 @@ fn a_c_sdk_revision_the_manifest_does_not_name_leaves_no_release() {
     assert!(run(&args).is_err());
     assert!(!out.exists());
 }
+
+#[test]
+fn extra_files_are_laid_out_and_sealed_and_bad_paths_are_refused() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = Dir::new("nix-extra");
+    let assembly = assembly(&dir.0);
+    let tool = dir.0.join("lom");
+    let profile = dir.0.join("desktop.kdl");
+    fs::write(&tool, "#!/bin/sh\nexit 0\n").unwrap();
+    fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(&profile, "schema 1\n").unwrap();
+    let out = dir.0.join("nix-release");
+    let mut args = arguments(&assembly, &out);
+    args.push("--verifier-interpreter=/bin/bash".to_owned());
+    args.push(format!("--file=target/release/lom={}", tool.display()));
+    args.push(format!(
+        "--file=share/sophia-niltempus-desktop/desktop.kdl={}",
+        profile.display()
+    ));
+    run(&args).unwrap();
+    let files = contents(&out);
+    assert_eq!(files["target/release/lom"].1, 0o755);
+    assert_eq!(files["share/sophia-niltempus-desktop/desktop.kdl"].1, 0o644);
+    let sums = String::from_utf8(files["SHA256SUMS"].0.clone()).unwrap();
+    assert!(sums.contains("  target/release/lom\n"));
+    assert!(sums.contains("  share/sophia-niltempus-desktop/desktop.kdl\n"));
+
+    for (dest, expected) in [
+        ("/etc/evil", "must be relative"),
+        ("../evil", "must be relative"),
+        ("target/release/sophia", "already laid out"),
+    ] {
+        let out = dir.0.join(format!("bad-{}", dest.replace('/', "_")));
+        let mut args = arguments(&assembly, &out);
+        args.push("--verifier-interpreter=/bin/bash".to_owned());
+        args.push(format!("--file={dest}={}", tool.display()));
+        let error = run(&args).unwrap_err();
+        assert!(error.contains(expected), "{dest}: {error}");
+        assert!(!out.exists(), "partial release left for {dest}");
+    }
+}

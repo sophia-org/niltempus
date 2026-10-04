@@ -1,0 +1,340 @@
+// Hagia daily login: Lom bar + Bemenu launcher, no dock or test startup.
+schema 1
+policy {
+    // Triad: workspaces.default-layout "scroller"
+    layout scroller
+    // Pointer motion also activates an empty monitor.
+    focus-follows-mouse #true
+    // Triad's cycle, now that Hagia implements all six.
+    layout-cycle scroller split-tree notion spiral dwindle center-tile
+    // Triad: workspaces.default-count 3
+    view-count 3
+    // Stable global numbers; monitor affinity is an explicit WM policy key.
+    workspace 1 output-key=1
+    workspace 2 output-key=1
+    workspace 3 output-key=1
+    workspace 4 output-key=2
+    workspace 5 output-key=2
+    workspace 6 output-key=2
+    // Niri spacing: one gap around and between panes; no reserved edge previews.
+    gaps 8
+    // Tile master area, at Triad's defaults. Both adjust at runtime.
+    master-count 1
+    // Triad: layout.master.split-ratio 0.55
+    master-ratio 55
+    // Triad: layout.default-column-width { proportion 0.5 }. A scroller sizes
+    // a column from this rather than from how many columns there are, so the
+    // row runs past the edge and scrolls instead of thinning.
+    default-column-width {
+        proportion 0.5
+    }
+    // Triad: layout.center-focused-column "on-overflow". The camera holds
+    // still when the focused column already fits, and centres only when the
+    // column and its neighbour cannot share the screen.
+    center-focused-column on-overflow
+    // A lone window centres instead of sitting against the left edge with the
+    // rest of the screen empty. niri offers this and defaults it off; on a
+    // wide display the other way round reads better.
+    always-center-single-column #true
+    // Triad: scratchpad.width-ratio 0.8 / height-ratio 0.9
+    scratchpad-size 80 90
+    // Triad: floating.width-ratio 0.5 / height-ratio 0.5
+    floating-size 50 50
+    // Triad: adjust-gaps -2 / 2. Hagia's gap keys carry no argument, so the
+    // step lives here and the binding only says which way.
+    gap-step 2
+}
+shell {
+    enabled #true
+    content #true
+    content-input #true
+    panel 24
+    gpu denied
+}
+shortcut {
+    bind Super+Space session:application-launcher label="Open applications" group=Session
+    // Sophia owns the physical match; Hagia advertises only opaque action IDs
+    // and these semantic names are resolved transactionally at startup.
+    profile triad-daily-driver
+    bind Super+? session:shortcut-help label="Show keyboard shortcuts" group=Session
+    bind Ctrl+Alt+Delete session:logout
+    bind Super+Escape session:lock label="Lock the screen" group=Session
+    // Triad: Ctrl+Alt+r "triad-reload". Re-reads this file and puts it into
+    // effect. The policy client is replaced to read it and its checkpoint
+    // carries the windows across, so the configuration changes rather than
+    // the desktop restarting. A profile that does not validate is refused
+    // with everything still running.
+    bind Ctrl+Alt+r session:reload-profile
+    // Replace the policy client without re-reading the profile. Ctrl+Alt+F1
+    // through F12 belong to virtual-terminal switching, so use a letter chord.
+    bind Ctrl+Alt+Shift+r session:restart-wm
+    bind Super+Return session:spawn-terminal
+    bind Super+b session:spawn-browser
+    bind Super+p session:window-switcher
+    bind Super+q session:close-window
+    // Triad: focus-left/down/right/up. Hagia names the axis it moves along —
+    // columns are the left/right axis, the focused column the up/down one.
+    bind Super+h policy:focus-column-prev
+    bind Super+j policy:focus-window-below
+    bind Super+k policy:focus-window-above
+    bind Super+l policy:focus-column-next
+    // Triad generated these from mirror-hjkl-arrows; Hagia wants every chord
+    // written out, so the arrows are spelled here beside the letters they
+    // mirror.
+    bind Super+Left policy:focus-column-prev
+    bind Super+Down policy:focus-window-below
+    bind Super+Up policy:focus-window-above
+    bind Super+Right policy:focus-column-next
+    bind Ctrl+Alt+Escape policy:focus-last
+    // Recent windows, as in Triad: hold the modifier and tap Tab, release to
+    // switch; a quick tap switches without the strip. Triad's grave
+    // (same-application) variants have no Hagia equivalent.
+    bind Alt+Tab policy:recent-window-next label="Recent windows" group=Workspaces
+    bind Alt+Shift+Tab policy:recent-window-prev
+    bind Super+Tab policy:recent-window-next
+    bind Super+Shift+Tab policy:recent-window-prev
+    bind Super+u policy:focus-occupied-workspace-next
+    bind Super+Shift+u policy:focus-view-next
+    // Select another monitor even when its workspace has no windows.
+    bind Super+Ctrl+Alt+Left policy:focus-output-prev
+    bind Super+Ctrl+Alt+Right policy:focus-output-next
+    bind Super+1 "policy:focus-workspace 1"
+    bind Super+2 "policy:focus-workspace 2"
+    bind Super+3 "policy:focus-workspace 3"
+    bind Super+4 "policy:focus-workspace 4"
+    bind Super+5 "policy:focus-workspace 5"
+    bind Super+6 "policy:focus-workspace 6"
+    bind Super+7 "policy:focus-workspace 7"
+    bind Super+8 "policy:focus-workspace 8"
+    bind Super+9 "policy:focus-workspace 9"
+    bind Super+Shift+n policy:new-workspace
+    bind Super+Ctrl+1 "policy:move-to-workspace 1"
+    bind Super+Ctrl+2 "policy:move-to-workspace 2"
+    bind Super+Ctrl+3 "policy:move-to-workspace 3"
+    bind Super+Ctrl+4 "policy:move-to-workspace 4"
+    bind Super+Ctrl+5 "policy:move-to-workspace 5"
+    bind Super+Ctrl+6 "policy:move-to-workspace 6"
+    bind Super+Ctrl+7 "policy:move-to-workspace 7"
+    bind Super+Ctrl+8 "policy:move-to-workspace 8"
+    bind Super+Ctrl+9 "policy:move-to-workspace 9"
+    bind Super+f policy:toggle-maximized
+    bind Super+Shift+f policy:toggle-fullscreen
+    // Triad: maximize-column. Distinct from Super+f, which maximizes a window.
+    bind Super+m policy:maximize-column
+    bind Super+t policy:toggle-floating
+    bind Super+Shift+t policy:toggle-floating
+    bind Super+Shift+b policy:minimize
+    bind Super+s policy:move-to-scratchpad
+    bind Super+Alt+s policy:toggle-scratchpad
+    bind Super+Shift+s policy:restore-scratchpad
+    // Triad names its scratchpads; Hagia numbers four bounded slots.
+    // Slot 1 is Triad's "terminal", slot 2 its "audio".
+    bind Super+Ctrl+e "policy:toggle-named-scratchpad 1"
+    bind Super+Ctrl+Shift+e "policy:move-to-named-scratchpad 1"
+    bind Super+a "policy:toggle-named-scratchpad 2"
+    bind Super+Shift+a "policy:move-to-named-scratchpad 2"
+    bind Super+n policy:switch-layout
+    // Direct layout selection, for the Triad keys whose target has a native
+    // Hagia equivalent. Triad's notion/dwindle/center-tile/spiral/i3 keys are
+    // not bound: those substrates are queued, not silently remapped.
+    bind Super+Alt+1 policy:layout-scroller
+    bind Super+Alt+4 policy:layout-grid
+    bind Super+d policy:layout-tile
+    bind Super+g policy:layout-grid
+    bind Super+Ctrl+x policy:layout-monocle
+    bind Super+Shift+z policy:consume-window
+    bind Super+Ctrl+z policy:expel-window
+    // Triad: move-window-left/down/up/right. Same axes as the focus keys —
+    // sideways crosses columns, up and down stay inside one. A window pushed
+    // past the last column opens a column there instead of wrapping.
+    bind Super+Ctrl+h policy:move-window-column-prev
+    bind Super+Ctrl+j policy:move-window-below
+    bind Super+Ctrl+k policy:move-window-above
+    bind Super+Ctrl+l policy:move-window-column-next
+    bind Super+Ctrl+Left policy:move-window-column-prev
+    bind Super+Ctrl+Down policy:move-window-below
+    bind Super+Ctrl+Up policy:move-window-above
+    bind Super+Ctrl+Right policy:move-window-column-next
+    // Triad: move-column-left/right and move-column-to-first/to-last.
+    // Columns clamp at the ends rather than wrapping.
+    bind Super+Alt+h policy:move-column-prev
+    bind Super+Alt+l policy:move-column-next
+    bind Super+Alt+Left policy:move-column-prev
+    bind Super+Alt+Right policy:move-column-next
+    bind Super+Alt+Home policy:move-column-first
+    bind Super+Alt+End policy:move-column-last
+    // Triad: zoom. Hagia's master is whichever column sits first, so this
+    // moves a column rather than swapping two windows between fixed roles.
+    bind Super+z policy:promote-column
+    // Triad: move-to-tag-right/left.
+    bind Super+Ctrl+u policy:move-to-view-next
+    bind Super+Ctrl+i policy:move-to-view-prev
+    // Triad: move-workspace-to-output left/down/up/right. Hagia steps through
+    // output order rather than screen geometry, so the four compass keys land
+    // on two neighbour actions.
+    bind Super+Shift+h policy:move-view-to-output-prev
+    bind Super+Shift+j policy:move-view-to-output-next
+    bind Super+Shift+k policy:move-view-to-output-prev
+    bind Super+Shift+l policy:move-view-to-output-next
+    bind Super+Shift+Left policy:move-view-to-output-prev
+    bind Super+Shift+Down policy:move-view-to-output-next
+    bind Super+Shift+Up policy:move-view-to-output-prev
+    bind Super+Shift+Right policy:move-view-to-output-next
+    // Triad: swap-to-tag. Trades the windows of the active view with a slot,
+    // leaving the user where they are.
+    bind Super+Shift+1 "policy:swap-with-view 1"
+    bind Super+Shift+2 "policy:swap-with-view 2"
+    bind Super+Shift+3 "policy:swap-with-view 3"
+    bind Super+Shift+4 "policy:swap-with-view 4"
+    bind Super+Shift+5 "policy:swap-with-view 5"
+    bind Super+Shift+6 "policy:swap-with-view 6"
+    bind Super+Shift+7 "policy:swap-with-view 7"
+    bind Super+Shift+8 "policy:swap-with-view 8"
+    bind Super+Shift+9 "policy:swap-with-view 9"
+    // Triad binds these only inside its overview; Hagia has them globally.
+    // niri's camera keys. The first two move the view without moving focus,
+    // which nothing else here does; the third grows a column into whatever
+    // space its neighbours are not using.
+    bind Super+Alt+c policy:center-column
+    bind Super+Alt+g policy:center-visible-columns
+    bind Super+Alt+e policy:expand-column-to-available-width
+    bind Super+Home policy:focus-column-first
+    bind Super+End policy:focus-column-last
+    // Triad: adjust-master-ratio and adjust-master-count. These shape the
+    // tile family; the spiral reads the master ratio for its largest pane.
+    bind Super+, policy:decrease-master-ratio
+    bind Super+. policy:increase-master-ratio
+    bind "Super+[" policy:decrease-master-count
+    bind "Super+]" policy:increase-master-count
+    // Triad: toggle-gaps and adjust-gaps. Toggling hides the gaps configured
+    // above without discarding them.
+    bind Super+0 policy:toggle-gaps
+    bind Super+Shift+- policy:decrease-gaps
+    bind "Super+Shift+=" policy:increase-gaps
+    // Triad: notion, dwindle, i3 — the tree family, now native.
+    bind Super+Alt+2 policy:layout-notion
+    bind Super+Alt+3 policy:layout-dwindle
+    bind Super+Alt+7 policy:layout-i3
+    // Triad: center-tile, right-tile, vertical-grid, deck, spiral.
+    bind Super+Alt+5 policy:layout-center-tile
+    bind Super+Ctrl+c policy:layout-center-tile
+    bind Super+Shift+c policy:layout-right-tile
+    bind Super+Shift+g policy:layout-vertical-grid
+    bind Super+Ctrl+v policy:layout-deck
+    bind Super+Alt+6 policy:layout-spiral
+    // Triad: group-windows, ungroup-window, focus-next-in-group. A group is
+    // the set one key steps through; it changes no window's placement.
+    bind Super+y policy:group-windows
+    bind Super+Shift+y policy:ungroup-window
+    bind Super+Ctrl+y policy:focus-next-in-group
+    // Tree-family commands, from Triad's layout-scoped i3/notion blocks. The
+    // actions are global; in a non-tree layout they simply do nothing.
+    bind Super+Alt+v policy:split-down
+    bind Super+e policy:split-tree-layout-toggle-split
+    bind Super+w policy:split-tree-layout-tabbed
+    bind Super+Shift+w policy:split-tree-layout-cycle-all
+    bind Super+Alt+x policy:frame-unsplit
+    bind Super+Page_Up policy:frame-tab-prev
+    bind Super+Page_Down policy:frame-tab-next
+    bind Super+Alt+Page_Up policy:split-tree-focus-parent
+    bind Super+Alt+Page_Down policy:split-tree-focus-child
+    // One directional split for every tree layout, where Triad needed three
+    // names and a layout block to tell them apart: frame tree, Notion and i3
+    // open the new cell now, dwindle aims where the next window lands and
+    // cancels if the same direction is pressed twice. Triad put these on
+    // Super+Alt+h/j/k/l inside its layout blocks; those chords are global
+    // column moves here, and a global chord means one thing.
+    bind Super+Alt+Shift+h policy:split-left
+    bind Super+Alt+Shift+j policy:split-down
+    bind Super+Alt+Shift+k policy:split-up
+    bind Super+Alt+Shift+l policy:split-right
+    bind Super+Alt+Shift+Left policy:split-left
+    bind Super+Alt+Shift+Down policy:split-down
+    bind Super+Alt+Shift+Up policy:split-up
+    bind Super+Alt+Shift+Right policy:split-right
+    bind Super+- "policy:resize-width -0.1"
+    bind "Super+=" "policy:resize-width 0.1"
+    bind Super+o policy:toggle-overview
+    pointer-bind Super+left policy:move
+    pointer-bind Super+right policy:resize
+}
+session {
+    window-manager "@hagia@"
+    // Admits host scripting for WM reloads.
+    control "host-admin"
+    application "terminal" { exec "/usr/bin/kitty"; }
+    terminal "terminal"
+    browser "brave-origin"
+    shell-component "panel" "bar" {
+        executable "@lom@"
+        transport "9p2000.L"
+        config "/home/niltempus/.config/lom/config.kdl"
+        gpu "direct"
+        reservation "top" 24
+    }
+    shell-component "menu" "application-launcher" {
+        executable "@bemenu@"
+        transport "9p2000.L"
+        gpu "denied"
+    }
+    application-catalog "installed"
+    lock-provider {
+        executable "@kleis@"
+        config "/home/niltempus/.config/kleis/config.kdl"
+        gpu "denied"
+    }
+    startup
+}
+input {
+    keyboard {
+        repeat-rate 40
+        repeat-delay 300
+        numlock #true
+        capslock #false
+        xkb {
+            rules evdev
+            model pc105
+            layout us
+            variant ""
+            options ""
+        }
+    }
+    pointer {
+        natural-scroll #false
+        // Restored 2026-09-05. This ended every login until Sophia learned
+        // that libinput's Unsupported means a device lacks the knob, not that
+        // the value is bad: the composite HID on this seat has no accel
+        // profile, and refusing it failed the whole seat. Unsupported is now
+        // counted and skipped, and the count reads beside the input pipeline
+        // as settings_unsupported.
+        accel-profile flat
+        accel-speed 0.0
+        left-handed #false
+        middle-emulation #false
+        scroll-factor 1.0
+    }
+    inherit-sophia #true
+}
+output {
+    named DP-1 {
+        policy-key 1
+        mode "2560x1440@120"
+        scale auto
+        position 0 0
+        enabled #true
+        focus-at-startup #true
+        vrr 1
+    }
+    named DP-2 {
+        policy-key 2
+        mode "1920x1080@60"
+        scale auto
+        position 2560 0
+        enabled #true
+        vrr 0
+    }
+    inherit-sophia #true
+}
+broker {
+    enabled #false
+}

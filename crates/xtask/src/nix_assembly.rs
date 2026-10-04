@@ -27,7 +27,7 @@ const USAGE: &str = "usage: cargo xtask assemble-nix --out=/ABS --built-at-utc=Y
 --repo=/ABS --integration-commit=SHA --sophia-tree=/ABS --sophia-rev=SHA --sophia=/ABS \
 --factotum=/ABS --pam-helper=/ABS --xtask=/ABS --preflight=/ABS --hagia=/ABS --hagia-commit=SHA \
 --narthex=/ABS --narthex-commit=SHA --profile=/ABS --c-sdk-manifest=/ABS --c-sdk-rev=SHA \
-[--verifier-interpreter=/ABS]";
+[--verifier-interpreter=/ABS] [--file=DEST=/ABS ...]";
 
 const KEYS: [&str; 19] = [
     "out",
@@ -57,6 +57,28 @@ const KEYS: [&str; 19] = [
 const NIX_CLOSURE: &str = "nix-flake-closure";
 
 pub fn run(args: &[String]) -> Result<Vec<String>, String> {
+    // --file=DEST=SRC may repeat: each adds one release file before sealing.
+    let mut extra_files = Vec::new();
+    let mut rest = Vec::new();
+    for arg in args {
+        match arg.strip_prefix("--file=") {
+            Some(value) => {
+                let (dest, source) = value
+                    .split_once('=')
+                    .ok_or_else(|| format!("--file takes DEST=SRC: {value:?}"))?;
+                let source = absolute("file", source)?;
+                if !std::fs::metadata(&source).is_ok_and(|m| m.is_file()) {
+                    return Err(format!(
+                        "--file source is not a regular file: {}",
+                        source.display()
+                    ));
+                }
+                extra_files.push((source, PathBuf::from(dest)));
+            }
+            None => rest.push(arg.clone()),
+        }
+    }
+    let args = &rest;
     let options = options(args, &KEYS, USAGE)?;
     let verifier_interpreter = match options.get("verifier-interpreter") {
         Some(value) => {
@@ -158,6 +180,7 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
         out,
         built_at_utc: built_at_utc.to_owned(),
         verifier_interpreter,
+        extra_files,
     };
     // `assemble` checks the C SDK manifest names --c-sdk-rev and runs the
     // packaged policy verifier, exactly as for package-desktop.
