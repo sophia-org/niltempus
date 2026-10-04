@@ -34,7 +34,7 @@ The sealed desktop remains the base for Sophia, launch policy, configuration,
 GPU permissions and transport. Its packaged executables provide initial
 component versions. Installation initializes absent component selections and
 preserves existing ones. At login, the plan-bound installer renders a private
-runtime profile that substitutes only the three executable paths. Roles, 9P
+runtime profile that substitutes the selected executable paths. Roles, 9P
 transports, configuration paths and resource policies remain unchanged.
 
 Shell selections live under the installer's user state in
@@ -63,6 +63,9 @@ installed product builder with its reviewed Nim dependency manifest
 (`inputs.kleis_nim_deps` in configuration, with its independently supplied
 sha256). Like Hagia and Bemenu it must vendor the installed desktop's C SDK
 snapshot, so it waits for a desktop whose SDK carries the lock client.
+Its optional repository entry is not a packaged desktop source. Initial
+preparation requires the selection, current executable and pending publication
+record all to be absent; incomplete existing state requires recovery.
 Validation runs the installed Sophia's session-profile preflight with the
 candidate as the profile's lock provider under the selected Hagia; a Sophia
 without the lock provider role refuses it there.

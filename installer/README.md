@@ -94,7 +94,8 @@ dependency manifests for those commits (`inputs.hagia_nim_deps`,
 
 Installation does not replace the personal Hagia, and every component that
 vendors the C SDK must match the installed desktop's SDK. So the components
-are prepared after installation, and the lock provider is added last. Run
+are prepared after installation. The candidate's sealed profile already names
+the lock provider; login is refused until kleis has been prepared. Run
 these as your normal user from a TTY or after logout, in this order:
 
 ```sh
@@ -104,11 +105,22 @@ niltempus prepare-component bemenu
 niltempus prepare-component kleis
 ```
 
-Then add the `lock-provider` block and a `session:lock` binding to
-`~/.config/sophia/desktop.kdl`. Login refuses a profile that names a lock
-provider while no kleis is selected. Do not reload the profile in a session
-started before the installation: its Sophia refuses the `lock-provider` node.
-Log out and log into **Sophia niltempus Desktop**.
+Keep `~/.config/sophia/desktop.kdl` consistent with that reviewed profile for
+future builds. Login renders the installed release's sealed profile, not this
+source file. Do not reload the profile in a session started before the
+installation: its Sophia refuses the `lock-provider` node. Log into
+**Sophia niltempus Desktop** only after all three preparations succeed.
+
+The optional `repositories.kleis` is used only by component preparation; it
+does not add a packaged release source. First-time kleis preparation is allowed
+without a selection, executable or pending publication. Damaged or interrupted
+selections are refused rather than replaced as a new installation.
+
+Before upgrading, retain the previous release identity, source profile and
+component state, including personal Hagia and its metadata. Desktop rollback
+preserves component selections. Recovery to the previous combination therefore
+requires restoring its component state as well, while logged out. The private
+sequence test checks both parts before a release is handed to the operator.
 
 ### Earlier lock-test candidate with Present timing repairs
 

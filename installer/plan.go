@@ -3,9 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strings"
 )
 
@@ -94,8 +96,19 @@ func installerRevision(info *debug.BuildInfo, expected string) error {
 }
 
 func createSourcePlan(config Config) (Plan, error) {
-	if len(config.Repositories) != len(components) {
-		return Plan{}, fmt.Errorf("configure exactly sophia, hagia, narthex, lom and bemenu")
+	// kleis is prepared independently against the installed desktop. Accept
+	// its configuration without adding it to the release's packaged sources.
+	allowed := map[string]bool{"kleis": true}
+	for _, name := range components {
+		allowed[name] = true
+		if _, ok := config.Repositories[name]; !ok {
+			return Plan{}, fmt.Errorf("missing required repository %s", name)
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(config.Repositories)) {
+		if !allowed[name] {
+			return Plan{}, fmt.Errorf("unknown repository %q; configure sophia, hagia, narthex, lom, bemenu and optionally kleis", name)
+		}
 	}
 	profile, err := homePath(config.Profile)
 	if err != nil {
