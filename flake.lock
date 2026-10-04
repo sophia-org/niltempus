@@ -11,16 +11,16 @@
       "locked": {
         "lastModified": 1791082078,
         "narHash": "sha256-4/9+GTSdWRbOVC7BclHbaFvfwf31zOjnZ8xCr4AaPUY=",
-        "ref": "nix/devshell",
+        "owner": "sophia-org",
+        "repo": "bemenu",
         "rev": "75b70971046dd5e717a8456e915527ac66294c73",
-        "revCount": 653,
-        "type": "git",
-        "url": "file:///home/niltempus/src/bemenu"
+        "type": "github"
       },
       "original": {
-        "ref": "nix/devshell",
-        "type": "git",
-        "url": "file:///home/niltempus/src/bemenu"
+        "owner": "sophia-org",
+        "ref": "master",
+        "repo": "bemenu",
+        "type": "github"
       }
     },
     "crane": {
@@ -95,16 +95,16 @@
       "locked": {
         "lastModified": 1791080586,
         "narHash": "sha256-r39ltnrWKD4SVylo2jspYpz6jgydkzmVZy3AEF9s5nE=",
-        "ref": "nix/devshell",
+        "owner": "sophia-org",
+        "repo": "hagia",
         "rev": "155daab6c0b035dd3328fd114e70af65456ff336",
-        "revCount": 259,
-        "type": "git",
-        "url": "file:///home/niltempus/dev/hagia"
+        "type": "github"
       },
       "original": {
-        "ref": "nix/devshell",
-        "type": "git",
-        "url": "file:///home/niltempus/dev/hagia"
+        "owner": "sophia-org",
+        "ref": "master",
+        "repo": "hagia",
+        "type": "github"
       }
     },
     "kleis": {
@@ -116,16 +116,16 @@
       "locked": {
         "lastModified": 1791078778,
         "narHash": "sha256-AUFa02KydZ3ETuBCdPsY92iQoWu6s0QGjLwNozjq2WQ=",
-        "ref": "nix/devshell",
+        "owner": "sophia-org",
+        "repo": "kleis",
         "rev": "d84303852a4d24f65a5c8d3f2a74d0a93ddc6018",
-        "revCount": 78,
-        "type": "git",
-        "url": "file:///home/niltempus/dev/kleis"
+        "type": "github"
       },
       "original": {
-        "ref": "nix/devshell",
-        "type": "git",
-        "url": "file:///home/niltempus/dev/kleis"
+        "owner": "sophia-org",
+        "ref": "main",
+        "repo": "kleis",
+        "type": "github"
       }
     },
     "lom": {
@@ -139,16 +139,16 @@
       "locked": {
         "lastModified": 1791119594,
         "narHash": "sha256-z4dy5T/8rdqqr6dn2pmKbwZae7ZO+jkCR/KhYwRE5UQ=",
-        "ref": "nix/devshell",
+        "owner": "sophia-org",
+        "repo": "lom",
         "rev": "3542ead1ea1651ace5b8f9dbc3b565f87dc8b3f3",
-        "revCount": 43,
-        "type": "git",
-        "url": "file:///home/niltempus/dev/lom"
+        "type": "github"
       },
       "original": {
-        "ref": "nix/devshell",
-        "type": "git",
-        "url": "file:///home/niltempus/dev/lom"
+        "owner": "sophia-org",
+        "ref": "master",
+        "repo": "lom",
+        "type": "github"
       }
     },
     "narthex": {
@@ -160,16 +160,16 @@
       "locked": {
         "lastModified": 1791081628,
         "narHash": "sha256-Q+zEPRGwTSLdKBRaOQdtgZ5O9tkFEon/e2/FDVDip8c=",
-        "ref": "nix/devshell",
+        "owner": "sophia-org",
+        "repo": "narthex",
         "rev": "56d513faede5c5127c7d3cd1241f44661568d806",
-        "revCount": 14,
-        "type": "git",
-        "url": "file:///home/niltempus/dev/narthex"
+        "type": "github"
       },
       "original": {
-        "ref": "nix/devshell",
-        "type": "git",
-        "url": "file:///home/niltempus/dev/narthex"
+        "owner": "sophia-org",
+        "ref": "master",
+        "repo": "narthex",
+        "type": "github"
       }
     },
     "nixpkgs": {
@@ -214,8 +214,7 @@
         "narthex": "narthex",
         "nixpkgs": "nixpkgs",
         "rust-overlay": "rust-overlay_2",
-        "sophia": "sophia",
-        "sophia-crates": "sophia-crates"
+        "sophia": "sophia"
       }
     },
     "rust-overlay": {
@@ -291,33 +290,16 @@
       "locked": {
         "lastModified": 1791120029,
         "narHash": "sha256-2Y1B28zpZgH/34+yFrlal/kqNicQeMW/3YmcApTmn/8=",
-        "ref": "master",
+        "owner": "sophia-org",
+        "repo": "sophia",
         "rev": "1f35fb52711cc49e4f4d2e1114169d169cd2a4dd",
-        "revCount": 4243,
-        "type": "git",
-        "url": "file:///home/niltempus/dev/sophia"
+        "type": "github"
       },
       "original": {
+        "owner": "sophia-org",
         "ref": "master",
-        "type": "git",
-        "url": "file:///home/niltempus/dev/sophia"
-      }
-    },
-    "sophia-crates": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1791081962,
-        "narHash": "sha256-nLWOVx/kysjK1zwk5eKK7ruWvf1jzeNvjtoFcs9Rubg=",
-        "ref": "refs/heads/master",
-        "rev": "316d969507cdeb6ef061ea2d9645758113c53db6",
-        "revCount": 4234,
-        "type": "git",
-        "url": "file:///home/niltempus/dev/sophia"
-      },
-      "original": {
-        "rev": "316d969507cdeb6ef061ea2d9645758113c53db6",
-        "type": "git",
-        "url": "file:///home/niltempus/dev/sophia"
+        "repo": "sophia",
+        "type": "github"
       }
     },
     "systems": {

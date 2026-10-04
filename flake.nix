@@ -4,9 +4,6 @@
   # Each component is a flake input that follows its main branch; `nix flake
   # update` moves them and flake.lock records what was built. Build work in
   # progress with `--override-input NAME git+file:///path?ref=BRANCH`.
-  #
-  # Until the components publish their flakes, the inputs name the local
-  # repositories.
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/c59305bab2065cfecc4944690d9eedbb56f3a9fa";
     crane.url = "github:ipetkov/crane";
@@ -15,39 +12,32 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     sophia = {
-      url = "git+file:///home/niltempus/dev/sophia?ref=master";
+      url = "github:sophia-org/sophia/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     hagia = {
-      url = "git+file:///home/niltempus/dev/hagia?ref=nix/devshell";
+      url = "github:sophia-org/hagia/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     narthex = {
-      url = "git+file:///home/niltempus/dev/narthex?ref=nix/devshell";
+      url = "github:sophia-org/narthex/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     lom = {
-      url = "git+file:///home/niltempus/dev/lom?ref=nix/devshell";
+      url = "github:sophia-org/lom/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     bemenu = {
-      url = "git+file:///home/niltempus/src/bemenu?ref=nix/devshell";
+      url = "github:sophia-org/bemenu/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     kleis = {
-      url = "git+file:///home/niltempus/dev/kleis?ref=nix/devshell";
+      url = "github:sophia-org/kleis/main";
       inputs.nixpkgs.follows = "nixpkgs";
-    };
-    # The Sophia revision Cargo.lock names for the xtask's Sophia crates. It
-    # is not yet published, so the GitHub URL in Cargo.lock cannot be
-    # fetched. Drop this input once it is.
-    sophia-crates = {
-      url = "git+file:///home/niltempus/dev/sophia?rev=316d969507cdeb6ef061ea2d9645758113c53db6";
-      flake = false;
     };
   };
 
-  outputs = { self, nixpkgs, crane, rust-overlay, sophia, hagia, narthex, lom, bemenu, kleis, sophia-crates }:
+  outputs = { self, nixpkgs, crane, rust-overlay, sophia, hagia, narthex, lom, bemenu, kleis }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs {
@@ -58,25 +48,10 @@
       toolchain = pkgs.rust-bin.stable."1.96.1".minimal;
       craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
 
-      # Vendor Sophia's crates from the sophia-crates input, which must be
-      # exactly the revision Cargo.lock names; every other git dependency is
-      # fetched as Cargo.lock says.
+      # Every git dependency, Sophia's crates included, is fetched as
+      # Cargo.lock names it.
       xtaskSrc = craneLib.cleanCargoSource self;
-      cargoVendorDir = craneLib.vendorCargoDeps {
-        src = xtaskSrc;
-        overrideVendorGitCheckout = packages: checkout:
-          let
-            sophiaPackages = builtins.filter
-              (p: lib.hasPrefix "git+https://github.com/sophia-org/sophia.git" p.source)
-              packages;
-            locked = lib.last (lib.splitString "#" (builtins.head sophiaPackages).source);
-          in
-          if sophiaPackages == [ ] then checkout
-          else
-            assert lib.assertMsg (locked == sophia-crates.rev)
-              "Cargo.lock names Sophia ${locked}, but sophia-crates is ${sophia-crates.rev}";
-            checkout.overrideAttrs (_: { src = sophia-crates; });
-      };
+      cargoVendorDir = craneLib.vendorCargoDeps { src = xtaskSrc; };
 
       # The session recipe tool (xtask) and the host checker the session runs.
       xtaskArgs = {
