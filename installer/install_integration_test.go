@@ -58,7 +58,7 @@ func TestInstallAndRollbackInPrivateMounts(t *testing.T) {
 test ! -e /dev/dri
 test ! -e /opt/sophia
 "$1" prepare "$2"
-"$1" install
+"$1" install "$2"
 test "$(readlink /opt/sophia-niltempus-desktop/current)" = "releases/$3"
 test -z "$(find /opt/sophia-niltempus-desktop/releases/"$3" -type d ! -perm 0755 -print)"
 wm="$XDG_STATE_HOME/sophia-niltempus-desktop/development/hagia"
@@ -91,7 +91,7 @@ cp -p "$wm" /tmp/fixture/personal-wm
 cp -p "$(dirname "$wm")/hagia.json" /tmp/fixture/personal-wm.json
 wm_identity=$(stat -c '%i:%a:%Y' "$wm")
 grep -q 'control host-admin' /opt/sophia-niltempus-desktop/current/share/sophia-niltempus-desktop/desktop.kdl
-"$1" install
+"$1" install "$2"
 "$1" install /tmp/fixture/second
 test "$(readlink /opt/sophia-niltempus-desktop/current)" = "releases/$4"
 test "$(readlink /opt/sophia-niltempus-desktop/previous)" = "releases/$3"

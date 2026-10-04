@@ -19,15 +19,11 @@ import (
 // is private, the operator's component state and configuration are copies,
 // and every source repository is visible read-only.
 //
-// The sequence: install the old desktop over a copy of the operator's
-// selected components; an SDK-changed component is refused against it; the
-// candidate installs without touching personal components; its sealed profile
-// names a lock provider, so component-profile refuses while kleis is
-// unselected; a kleis whose sources do not match the reviewed inputs is
-// refused without changing state; hagia, bemenu and kleis are prepared from
-// the reviewed configuration and selected exactly; repeating that changes
-// nothing; finally the old desktop is restored by rollback plus the operator's
-// backup of component state, and renders the same profile as before.
+// The sequence starts from the operator's old release and personal selections.
+// Stale plans and unreviewed kleis inputs fail before activation. One plain
+// install prepares and selects the required components; repeat install is
+// idempotent, preserves personal Lom, and renders the sealed lock profile.
+// Rollback plus the saved component state restores the old desktop exactly.
 //
 // Inputs (all required; the test is skipped without them):
 //
@@ -183,33 +179,47 @@ refused bemenu-on-old "C SDK differs from the installed desktop" "$1" prepare-co
 snapshot refused-on-old
 cmp "$out/old.state" "$out/refused-on-old.state"
 
-step 3 install the candidate without touching personal components
+step 3 the candidate profile requires kleis before selection
 "$1" prepare /tmp/fixture/inputs/candidate
+refused profile-without-kleis "kleis:" "$1" component-profile /tmp/fixture/inputs/candidate
+
+# Only mutable state is compared across failed preparation: successfully built
+# immutable versions may be retained for recovery and are never selected.
+mutable_snapshot() {
+ (cd "$state" && find components development -type f ! -path '*/versions/*' -print0 | sort -z | xargs -0 sha256sum) > "$out/$1.mutable"
+}
+mutable_snapshot before-refusal
+step 4 a stale packaged reference is refused before sudo or selection
+cp /tmp/fixture/config.json "$conf/config.json"
+python3 - "$conf/config.json" <<'PYCODE'
+import json,sys
+p=sys.argv[1];c=json.load(open(p));c['repositories']['lom']['reference'] += '^{commit}'
+open(p,'w').write(json.dumps(c))
+PYCODE
+refused stale-prepared "does not match the configuration" "$1" install
+mutable_snapshot after-stale-plan
+cmp "$out/before-refusal.mutable" "$out/after-stale-plan.mutable"
+test "$(readlink "$desktop/current")" = "releases/$2"
+
+step 5 an unreviewed kleis aborts one-shot installation before activation
+cp /tmp/fixture/config.stale-kleis.json "$conf/config.json"
+refused stale-kleis "dependency manifest was not reviewed for kleis at $4" "$1" install
+cp /tmp/fixture/config.json "$conf/config.json"
+mutable_snapshot refused-stale
+cmp "$out/before-refusal.mutable" "$out/refused-stale.mutable"
+test "$(readlink "$desktop/current")" = "releases/$2"
+test ! -e "$state/components/kleis/selection.json"
+
+step 6 one command installs and selects every required component
 "$1" install
 test "$(readlink "$desktop/current")" = "releases/$3"
 test "$(readlink "$desktop/previous")" = "releases/$2"
-snapshot installed
-cmp "$out/old.state" "$out/installed.state"
-
-step 4 the sealed lock provider needs a selected kleis
-refused profile-without-kleis "kleis:" "$1" component-profile "$desktop/current"
-
-step 5 kleis outside the reviewed inputs is refused without changes
-cp /tmp/fixture/config.stale-kleis.json "$conf/config.json"
-refused stale-kleis "dependency manifest was not reviewed for kleis at $4" "$1" prepare-component kleis
-cp /tmp/fixture/config.json "$conf/config.json"
-snapshot refused-stale
-cmp "$out/old.state" "$out/refused-stale.state"
-test ! -e "$state/components/kleis/selection.json"
-
-step 6 prepare hagia, bemenu and kleis from the reviewed configuration
-for component in hagia bemenu kleis; do "$1" prepare-component "$component"; done
 snapshot prepared
 "$1" component-profile "$desktop/current" > "$out/new.profile"
 cp -a "$state/components" "$state/development" /tmp/fixture/prepared/
 
-step 7 repeating the preparation changes nothing
-for component in hagia bemenu kleis; do "$1" prepare-component "$component"; done
+step 7 repeating the one-command installation changes no selection
+"$1" install
 snapshot prepared-again
 cmp "$out/prepared.state" "$out/prepared-again.state"
 "$1" component-profile "$desktop/current" > "$out/new-again.profile"

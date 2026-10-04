@@ -1,5 +1,40 @@
 # Independent component updates
 
+## Installing a desktop with its components
+
+`niltempus install` prepares the configured components against the audited
+release, installs it, and selects those components in one command. kleis is
+validated under the newly prepared Hagia. Independent personal component
+updates are retained when their packaged source has not changed; C-SDK clients
+must also match the new desktop's SDK. kleis follows its configured source.
+Use `prepare-component NAME` to explicitly select a configured source. The
+complete profile is preflighted using the prepared executables before activation.
+
+Preparation failures leave the installed desktop and component selections
+unchanged. Before activation, the installer saves the original executables,
+selection records and Hagia metadata under `install-recovery/` in its state
+directory. If installation or selection fails, it restores that exact component
+state, including a partially published failing component. The desktop may
+already be activated; the error reports this, and `niltempus rollback` selects
+the previous desktop. Recovery copies remain on disk on failure and are removed after success.
+An interrupted publication
+is refused before preparation instead of being treated as a first selection.
+The login profile is checked again after all selections; running processes are not
+restarted. Log out and log back in after success.
+
+After an interrupted publication, stop all installer commands and keep the
+reported `install-recovery/components-*/` directory. Its `files.json` lists each
+original destination, backup file and mode; an empty `copy` means originally
+absent. Restore the executable and Hagia metadata first, then selection.json,
+and remove pending.json last, as listed per component. Do not delete retained
+versions. If the new desktop activated but component selection failed, the
+error names the previous release and directs `niltempus rollback` before login.
+A first installation has no previous desktop and must be repaired before login.
+
+A prepared release that the current configuration would not build is refused
+rather than installed: run `niltempus build`, or prepare the release built for
+this configuration. `install DIRECTORY` and `rollback` install a release only.
+
 The installer supports Hagia, Lom, Bemenu and the lock provider kleis
 independently of the desktop release. After one login with a component-update-enabled release:
 

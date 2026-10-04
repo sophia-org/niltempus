@@ -30,6 +30,14 @@ func componentInputs(loc Locations, name string) (Config, Source, error) {
 // Only this component's source and dependencies are built. The installed
 // desktop provides the compatibility baseline and the already built Nim helper.
 func prepareComponent(loc Locations, name string) (ComponentVersion, error) {
+	return prepareComponentFor(loc, name, installedDesktop, "")
+}
+
+// prepareComponentFor builds and validates one component against the desktop
+// release baseline resolves, which need not be installed yet, and stores it
+// unselected. kleis is validated as the lock provider under wm, or under the
+// selected Hagia when wm is empty.
+func prepareComponentFor(loc Locations, name string, baseline func() (string, Manifest, error), wm string) (ComponentVersion, error) {
 	binary, err := componentBinary(name)
 	if err != nil {
 		return ComponentVersion{}, err
@@ -41,7 +49,7 @@ func prepareComponent(loc Locations, name string) (ComponentVersion, error) {
 	if source.Signature != "G" {
 		return ComponentVersion{}, fmt.Errorf("component source needs a trusted signed commit")
 	}
-	release, m, err := installedDesktop()
+	release, m, err := baseline()
 	if err != nil {
 		return ComponentVersion{}, err
 	}
@@ -158,12 +166,15 @@ func prepareComponent(loc Locations, name string) (ComponentVersion, error) {
 		if err != nil {
 			return ComponentVersion{}, err
 		}
-		wm := candidate
+		validationWM := candidate
 		render := renderDevelopmentProfile
 		if name == "kleis" {
-			wm = componentPath(loc, "hagia")
+			validationWM = wm
+			if validationWM == "" {
+				validationWM = componentPath(loc, "hagia")
+			}
 			render = func(source, binary string) (string, error) {
-				return renderLockProviderValidationProfile(source, binary, wm)
+				return renderLockProviderValidationProfile(source, binary, validationWM)
 			}
 		}
 		rendered, err := render(string(profile), candidate)
@@ -174,7 +185,7 @@ func prepareComponent(loc Locations, name string) (ComponentVersion, error) {
 		if err := writeFile(path, []byte(rendered), 0600); err != nil {
 			return ComponentVersion{}, err
 		}
-		if err := preflightProfile(release, work, name, filepath.Join(release, "target/release/sophia"), wm, path); err != nil {
+		if err := preflightProfile(release, work, name, filepath.Join(release, "target/release/sophia"), validationWM, path); err != nil {
 			return ComponentVersion{}, err
 		}
 	}
