@@ -101,11 +101,12 @@
       sdkRevision = (builtins.fromJSON (builtins.readFile "${sdk}/manifest.json")).revision;
       revision = input: input.rev or (throw "${input} has uncommitted changes; commit them to build the desktop");
 
-      # The release is named by every locked input, so the same lock and tree
-      # always name the same release, and any change names a new one. The
+      # The release is named by every locked input's content and commit,
+      # which the manifest records: one name is always one release, and any
+      # change, even a new commit of the same tree, names a new one. The
       # profile names the components by their installed paths under it.
       releaseId = "niltempus-" + builtins.substring 0 20 (builtins.hashString "sha256"
-        (lib.concatMapStringsSep "\n" (input: input.narHash)
+        (lib.concatMapStringsSep "\n" (input: "${input.narHash} ${revision input}")
           [ self sophia hagia narthex lom bemenu kleis ]));
       installed = "/opt/sophia-niltempus-desktop/releases/${releaseId}/target/release";
       profile = pkgs.replaceVars ./profiles/desktop.kdl {
