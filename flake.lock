@@ -123,7 +123,7 @@
       },
       "original": {
         "owner": "sophia-org",
-        "ref": "main",
+        "ref": "master",
         "repo": "kleis",
         "type": "github"
       }

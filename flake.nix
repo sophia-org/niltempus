@@ -32,7 +32,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     kleis = {
-      url = "github:sophia-org/kleis/main";
+      url = "github:sophia-org/kleis/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
