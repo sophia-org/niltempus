@@ -289,11 +289,11 @@
         "rust-overlay": "rust-overlay_3"
       },
       "locked": {
-        "lastModified": 1791119693,
-        "narHash": "sha256-yaeTAH26hP7ILbDPYmHVL0pTIP378zPBAD3uVGugnvA=",
+        "lastModified": 1791120029,
+        "narHash": "sha256-2Y1B28zpZgH/34+yFrlal/kqNicQeMW/3YmcApTmn/8=",
         "ref": "master",
-        "rev": "bdc8425621e59a4b3968dd4ba1a5384971b40a49",
-        "revCount": 4240,
+        "rev": "1f35fb52711cc49e4f4d2e1114169d169cd2a4dd",
+        "revCount": 4243,
         "type": "git",
         "url": "file:///home/niltempus/dev/sophia"
       },
