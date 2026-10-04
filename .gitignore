@@ -6,3 +6,6 @@ __pycache__/
 # zk index
 /.zk/notebook.db*
 /.zk/*.log
+/.todo/report.txt
+/todo.md.bak
+/done.md.bak
