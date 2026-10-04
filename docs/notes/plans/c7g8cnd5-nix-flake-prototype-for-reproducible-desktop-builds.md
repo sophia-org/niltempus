@@ -76,6 +76,8 @@ by a decision, with evidence, on whether stage 2 is admitted.
 
 ## Connections
 
+- [Stage 1 results](../investigations/ipfkmey8-kleis-under-a-pinned-nix-development-shell-stage-1-results.md):
+  the recorded n002 stage 1 outcome and its findings.
 - [Reproducibility investigation (n001)](../investigations/rm8sjc2m-desktop-product-builds-are-not-byte-reproducible-across-build-directories.md):
   the build-path evidence this plan measures for kleis.
 - Proposal record:
