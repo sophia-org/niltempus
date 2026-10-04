@@ -13,13 +13,14 @@ plan              Inspect local source refs/signatures (default; no git pull)
 build             Build, validate and prepare a full release for installation
 prepare DIRECTORY Verify and select an existing release for installation
 verify DIRECTORY  Verify a built release's files and hashes
-install           Install the prepared release, or build if none exists (sudo)
+install           Install the prepared release (or build if none exists) with the
+                  configured components, prepared before anything changes (sudo)
 install DIRECTORY Install/activate a specific release for next login (sudo)
 status            Inspect the selected installed release
 rollback          Select the previous desktop release (sudo)
 prepare-hagia     Build/preflight only Hagia into its user-owned executable path
 reload-hagia      Prepare Hagia, then restart it through Sophia control IPC
-prepare-component NAME Build/verify hagia, lom or bemenu without restarting
+prepare-component NAME Build/verify hagia, lom, bemenu or kleis without restarting
 reload NAME       Build/verify and restart only that component
 restart NAME      Restart the selected component without building
 rollback-component NAME Select the previous component and restart it
@@ -71,7 +72,10 @@ func run(args []string) error {
 			if args[0] == "install" {
 				path, err := preparedRelease(loc)
 				if err == nil {
-					return installRelease(path, loc)
+					if err := preparedMatchesConfiguration(path, loc); err != nil {
+						return err
+					}
+					return installWithComponents(path, loc)
 				}
 				// Only an absent selection allows a first build. A selected but
 				// missing or damaged release must fail before invoking sudo.
@@ -95,7 +99,7 @@ func run(args []string) error {
 			}
 			fmt.Printf("Built and verified: %s\n", path)
 			if args[0] == "install" {
-				return installRelease(path, loc)
+				return installWithComponents(path, loc)
 			}
 			return nil
 		case "rollback":

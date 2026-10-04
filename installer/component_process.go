@@ -217,12 +217,17 @@ func componentCommand(action, name string, loc Locations) error {
 	if _, err := componentBinary(name); err != nil {
 		return err
 	}
+	// Sophia supervises the lock provider and starts it again whenever it
+	// exits; the selection is all the updater changes. The next start runs
+	// the new executable.
+	if name == "kleis" && (action == "reload" || action == "restart") {
+		return fmt.Errorf("kleis is started by Sophia as the lock provider: use prepare-component or rollback-component; Sophia runs the selected kleis at its next start")
+	}
 	_, m, err := installedDesktop()
 	if err != nil {
 		return err
 	}
-	_, err = componentSelection(loc, name)
-	if err != nil {
+	if err := componentCommandSelection(loc, name, action == "prepare-component"); err != nil {
 		return fmt.Errorf("component updates are not initialized: %w", err)
 	}
 	if action != "prepare-component" && name == "hagia" && !filepath.IsAbs(os.Getenv("SOPHIA_CONTROL_SOCKET")) {
@@ -230,7 +235,7 @@ func componentCommand(action, name string, loc Locations) error {
 	}
 	var old ShellProcess
 	fd := -1
-	if action != "prepare-component" && name != "hagia" {
+	if action != "prepare-component" && name != "hagia" && name != "kleis" {
 		old, err = findShell(componentPath(loc, name), m.Files["target/release/sophia"].SHA256)
 		if err != nil {
 			return err
@@ -262,8 +267,40 @@ func componentCommand(action, name string, loc Locations) error {
 		fmt.Println("Prepared", name, "without restarting it")
 		return nil
 	}
+	if name == "kleis" {
+		fmt.Println("Selected the previous kleis; Sophia runs it at the lock provider's next start")
+		return nil
+	}
 	if name == "hagia" {
 		return reloadHagia(personalHagia(loc), filepath.Join(prefix, "current/target/release/sophia"), os.Getenv("SOPHIA_CONTROL_SOCKET"))
 	}
 	return restartShell(loc, name, old, fd, m.Files["target/release/sophia"].SHA256)
+}
+
+func componentCommandSelection(loc Locations, name string, prepare bool) error {
+	if prepare && name == "kleis" {
+		// Installation never seeds this optional component. Only a genuinely
+		// absent selection can be initialized; missing pieces of an existing
+		// selection or an interrupted publication must not become a fresh start.
+		absent := true
+		for _, path := range []string{
+			filepath.Join(componentDir(loc, name), "pending.json"),
+			filepath.Join(componentDir(loc, name), "selection.json"),
+			componentPath(loc, name),
+		} {
+			if _, err := os.Lstat(path); err == nil {
+				if filepath.Base(path) == "pending.json" {
+					return fmt.Errorf("kleis has an interrupted publication; recover its selection first")
+				}
+				absent = false
+			} else if !os.IsNotExist(err) {
+				return err
+			}
+		}
+		if absent {
+			return nil
+		}
+	}
+	_, err := componentSelection(loc, name)
+	return err
 }

@@ -71,7 +71,62 @@ prepare a Plan-3 release explicitly, either with `niltempus build` using the
 explicit `inputs`, or with `niltempus prepare DIRECTORY` for an existing
 Plan-3 release. Until then, `prepared.json` is left exactly as it is.
 
-### Lock-test candidate with Present timing repairs
+### Keyboard recovery after unlocking
+
+Sophia `316d969507cdeb6ef061ea2d9645758113c53db6` fixes stale keyboard state
+after Super+Escape locking. Lock and unlock clear the desktop shortcut and
+launcher held-key state without importing private lock-screen input. Caps/Num
+Lock and the selected desktop layout are preserved. The SDKs, products and
+profile stay as in the CPU and kleis release below. The slow Matrix animation
+is a separate upload-throughput limitation and is not fixed by this revision.
+
+Run `niltempus install` from a TTY or after logout, then log in again. The
+installer prepares, validates and selects components automatically. Attended
+acceptance must check Super+Escape, unlock, plain typing and launcher text.
+
+### CPU and kleis lock-provider release
+
+Sophia `e9757abfa3b4dc6bf714a21df0c63d29ca4d1a96` vendors the C desktop SDK
+v0.8.0 (`b2a254dcb792e5f9d66f78bdd73f645153504507`) and Rust SDK v0.3.0
+(`a111b5590d27fe2dc079220e821f0327f47baefb`) on master `fb4b81f92`. That master
+carries t289's qualified CPU harness, repaint attribution and capture
+configuration reuse, the lock provider role (t294) and the lock model (t296).
+The capture change measured 39-40% less capture-path process CPU in an
+offscreen benchmark; whole-desktop savings are not measured.
+
+Both SDK releases add an experimental lock provider role: the lock contract
+is still revision 1 (draft), and the C SDK declares `lock_files=false`. The
+fourteen paired contracts add the three lock files, and the C SDK manifest
+moves to v0.8.0.
+
+The products move to that SDK: Hagia `0a6b4a52d40d073d289fa01d30860bfe5ac0ed30`,
+Bemenu `8f8c766b8ac10e41ff3e30e97e75e61847a02832` and kleis
+`342a4a50b6c43806f7f32c0b9e45c3e08c1ebac1`. Hagia and kleis need reviewed Nim
+dependency manifests for those commits (`inputs.hagia_nim_deps`,
+`inputs.kleis_nim_deps`), and `inputs.hagia_c_sdk_revision` names v0.8.0.
+
+Plain `niltempus install` prepares compatible components against the audited
+artifact and validates the combined profile before activation. It keeps
+personal component updates when the packaged source is unchanged and the SDK
+still matches. It then installs the desktop and selects the prepared components;
+no separate `prepare-component` commands are needed.
+
+Keep `~/.config/sophia/desktop.kdl` consistent with the reviewed source profile
+for future builds. Login renders the installed release's sealed profile. Log
+out before installation and log into **Sophia niltempus Desktop** afterwards.
+
+The optional `repositories.kleis` is used only by component preparation; it
+does not add a packaged release source. First-time kleis preparation is allowed
+without a selection, executable or pending publication. Damaged or interrupted
+selections are refused rather than replaced as a new installation.
+
+Before upgrading, retain the previous release identity, source profile and
+component state, including personal Hagia and its metadata. Desktop rollback
+preserves component selections. Recovery to the previous combination therefore
+requires restoring its component state as well, while logged out. The private
+sequence test checks both parts before a release is handed to the operator.
+
+### Earlier lock-test candidate with Present timing repairs
 
 Sophia `53b2833708c3e4349b7c3b82cb4168fb28e424c6` includes the Engine lock
 cover, Session lock state and input routing, and the Session-owned factotum

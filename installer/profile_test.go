@@ -36,6 +36,33 @@ func TestDevelopmentProfileOverridesOnlyWM(t *testing.T) {
 	}
 }
 
+func TestKleisValidationSelectsPersonalWMAndPreservesSettings(t *testing.T) {
+	const lock = `lock-provider { executable "/sealed/kleis"; config "/personal/kleis.kdl"; gpu denied; }`
+	input := strings.Replace(fixtureProfile, "    startup", "    "+lock+"\n    startup", 1)
+	result, err := renderLockProviderValidationProfile(input, "/candidate/kleis", "/personal/hagia")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.ReplaceAll(input, "/old/hagia", "/personal/hagia")
+	want = strings.ReplaceAll(want, "/sealed/kleis", "/candidate/kleis")
+	doc, err := kdl.ParseString(want, kdl.WithVersion(kdl.Version2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := kdl.EmitToString(doc, kdl.WithVersion(kdl.Version2), kdl.WithIndent("    "))
+	if err != nil || result != canonical {
+		t.Fatalf("kleis validation must select the personal WM and preserve all other settings: %v\n%s", err, result)
+	}
+	for _, invalid := range []string{
+		strings.Replace(input, `window-manager "/old/hagia"`, "", 1),
+		strings.Replace(input, `window-manager "/old/hagia"`, `window-manager "/old/hagia"; window-manager "/other/hagia"`, 1),
+	} {
+		if _, err := renderLockProviderValidationProfile(invalid, "/candidate/kleis", "/personal/hagia"); err == nil {
+			t.Fatal("accepted an absent or ambiguous WM")
+		}
+	}
+}
+
 func TestProfilePreservesPolicyAndPinsCompleteStack(t *testing.T) {
 	binaries := `/release/a path "with quotes"/target/release`
 	result, err := renderProfile(fixtureProfile, binaries)

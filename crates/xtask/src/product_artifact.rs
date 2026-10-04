@@ -42,7 +42,7 @@ use crate::nim_deps::{Reviewed, Toolchain, load_reviewed};
 use crate::records::encode_value;
 use crate::{read, sha256};
 
-const USAGE: &str = "usage: cargo xtask prepare-product-artifact <lom|provlita|hagia> \
+const USAGE: &str = "usage: cargo xtask prepare-product-artifact <lom|provlita|hagia|kleis> \
                      <source-repo> <signed-commit> <new-output-dir> --build-dir=/ABS \
                      [--nim-deps=/ABS --nim-deps-sha256=<64 hex>] (Nim products only, required)";
 pub const MANIFEST: &str = "product-artifact.manifest";
@@ -70,7 +70,7 @@ enum Kind {
     Nim { main: &'static str },
 }
 
-pub const PRODUCTS: [Product; 4] = [
+pub const PRODUCTS: [Product; 5] = [
     Product {
         name: "lom",
         binary: "lom",
@@ -99,6 +99,16 @@ pub const PRODUCTS: [Product; 4] = [
         config: None,
         kind: Kind::Nim {
             main: "src/narthex.nim",
+        },
+    },
+    // Sophia's lock provider, a component only; its configuration is the
+    // operator's, named by the profile's lock-provider block.
+    Product {
+        name: "kleis",
+        binary: "kleis",
+        config: None,
+        kind: Kind::Nim {
+            main: "src/kleis.nim",
         },
     },
 ];

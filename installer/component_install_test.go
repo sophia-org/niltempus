@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	kdl "github.com/calico32/kdl-go"
 )
 
 // Upgrade only a private fixture; neither the installed desktop nor the
@@ -42,6 +44,13 @@ func TestComponentInstallationInPrivateMounts(t *testing.T) {
 		if err := os.WriteFile(p, []byte(strings.ReplaceAll(string(data), oldID, m.Plan.ReleaseID)), 0644); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// This test covers the generic three-component stack. A release whose
+	// sealed profile names a lock provider needs a selected kleis for
+	// component-profile; that path is proved by the kleis release sequence. Here
+	// the test-only copy drops the lock provider and keeps everything else.
+	if err := withoutLockProvider(filepath.Join(candidate, "share/sophia-niltempus-desktop/desktop.kdl")); err != nil {
+		t.Fatal(err)
 	}
 	if err := copyFile(binary, filepath.Join(candidate, "target/release/niltempus"), 0755); err != nil {
 		t.Fatal(err)
@@ -85,4 +94,30 @@ if "$1" component-profile /opt/sophia-niltempus-desktop/current; then exit 91; f
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("component install failed: %v\n%s", err, out)
 	}
+}
+
+// withoutLockProvider removes a session lock-provider node, if any, leaving the
+// rest of the profile as parsed.
+func withoutLockProvider(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	doc, err := kdl.ParseString(string(data), kdl.WithVersion(kdl.Version2), kdl.WithDuplicateProperties(kdl.DupError))
+	if err != nil {
+		return err
+	}
+	session, err := uniqueNode(doc, "session")
+	if err != nil {
+		return err
+	}
+	if len(session.Children().GetNodes("lock-provider")) == 0 {
+		return nil
+	}
+	session.Children().RemoveNodes("lock-provider")
+	text, err := kdl.EmitToString(doc, kdl.WithVersion(kdl.Version2), kdl.WithIndent("    "))
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(text), 0644)
 }

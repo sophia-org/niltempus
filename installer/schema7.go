@@ -41,6 +41,9 @@ type PlanInputs struct {
 	HagiaNimDeps      NimDepsInput `json:"hagia_nim_deps"`
 	NarthexNimDeps    NimDepsInput `json:"narthex_nim_deps"`
 	HagiaCSDKRevision string       `json:"hagia_c_sdk_revision"`
+	// The lock provider is a component only, never part of a release plan:
+	// omitted, it leaves every plan's bytes unchanged.
+	KleisNimDeps *NimDepsInput `json:"kleis_nim_deps,omitempty"`
 }
 
 func lowerHex(value string, length int) bool {

@@ -5,9 +5,14 @@ import (
 	kdl "github.com/calico32/kdl-go"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 func renderComponentProfile(source string, loc Locations) (string, error) {
+	return renderComponentProfileWith(source, func(name string) string { return componentPath(loc, name) })
+}
+
+func renderComponentProfileWith(source string, executable func(string) string) (string, error) {
 	doc, err := kdl.ParseString(source, kdl.WithVersion(kdl.Version2), kdl.WithDuplicateProperties(kdl.DupError))
 	if err != nil {
 		return "", err
@@ -16,7 +21,7 @@ func renderComponentProfile(source string, loc Locations) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := setExecutable(session.Children(), "window-manager", componentPath(loc, "hagia")); err != nil {
+	if err := setExecutable(session.Children(), "window-manager", executable("hagia")); err != nil {
 		return "", err
 	}
 	seen := map[string]bool{}
@@ -29,12 +34,16 @@ func renderComponentProfile(source string, loc Locations) (string, error) {
 			return "", fmt.Errorf("unsupported or duplicate shell component")
 		}
 		seen[name] = true
-		if err := setExecutable(node.Children(), "executable", componentPath(loc, name)); err != nil {
+		if err := setExecutable(node.Children(), "executable", executable(name)); err != nil {
 			return "", err
 		}
 	}
 	if len(seen) != 2 {
 		return "", fmt.Errorf("expected bar and application launcher")
+	}
+	// The lock provider is optional; when the profile names one, it is kleis.
+	if err := setLockProvider(session, executable("kleis"), false); err != nil {
+		return "", err
 	}
 	return kdl.EmitToString(doc, kdl.WithVersion(kdl.Version2), kdl.WithIndent("    "))
 }
@@ -51,5 +60,16 @@ func componentProfile(release string, loc Locations) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return renderComponentProfile(string(data), loc)
+	rendered, err := renderComponentProfile(string(data), loc)
+	if err != nil {
+		return "", err
+	}
+	// A profile that names a lock provider needs a selected kleis: a missing
+	// executable would leave the session's provider unstarted for good.
+	if strings.Contains(rendered, componentPath(loc, "kleis")) {
+		if _, err := componentSelection(loc, "kleis"); err != nil {
+			return "", fmt.Errorf("kleis: %w", err)
+		}
+	}
+	return rendered, nil
 }

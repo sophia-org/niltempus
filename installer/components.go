@@ -23,12 +23,12 @@ type ComponentSelection struct {
 
 func componentBinary(name string) (string, error) {
 	switch name {
-	case "hagia", "lom":
+	case "hagia", "lom", "kleis":
 		return name, nil
 	case "bemenu":
 		return "bemenu-sophia", nil
 	}
-	return "", fmt.Errorf("unknown component %q; expected hagia, lom or bemenu", name)
+	return "", fmt.Errorf("unknown component %q; expected hagia, lom, bemenu or kleis", name)
 }
 func componentPath(loc Locations, name string) string {
 	if name == "hagia" {

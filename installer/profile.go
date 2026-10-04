@@ -27,6 +27,66 @@ func setExecutable(doc *kdl.Document, name, path string) error {
 	return nil
 }
 
+// The sealed profile names its future /opt release. Before activation its
+// packaged shell executables must instead come from the verified artifact.
+// Then substitute the component being checked and its exact validating WM.
+func renderComponentBuildProfile(source, release, name, binary, wm string) (string, error) {
+	profile, err := renderProfile(source, filepath.Join(release, "target/release"))
+	if err != nil {
+		return "", err
+	}
+	if name == "kleis" {
+		return renderLockProviderValidationProfile(profile, binary, wm)
+	}
+	return renderDevelopmentProfile(profile, binary)
+}
+
+// Validate kleis under the selected personal WM, matching the checker and
+// --default-wm passed to preflightProfile. The sealed profile names the
+// packaged WM, which can differ from that selection.
+func renderLockProviderValidationProfile(source, binary, wm string) (string, error) {
+	profile, err := renderDevelopmentProfile(source, wm)
+	if err != nil {
+		return "", err
+	}
+	return renderLockProviderProfile(profile, binary)
+}
+
+// renderLockProviderProfile names binary as the profile's lock provider,
+// adding one with GPU access denied when the profile has none.
+func renderLockProviderProfile(source, binary string) (string, error) {
+	doc, err := kdl.ParseString(source, kdl.WithVersion(kdl.Version2), kdl.WithDuplicateProperties(kdl.DupError))
+	if err != nil {
+		return "", err
+	}
+	session, err := uniqueNode(doc, "session")
+	if err != nil {
+		return "", err
+	}
+	if err := setLockProvider(session, binary, true); err != nil {
+		return "", err
+	}
+	return kdl.EmitToString(doc, kdl.WithVersion(kdl.Version2), kdl.WithIndent("    "))
+}
+
+// setLockProvider points the session's lock provider at binary. Without one,
+// it adds one only when add is set; more than one is refused.
+func setLockProvider(session *kdl.Node, binary string, add bool) error {
+	providers := session.Children().GetNodes("lock-provider")
+	switch {
+	case len(providers) > 1:
+		return fmt.Errorf("duplicate lock provider")
+	case len(providers) == 1:
+		return setExecutable(providers[0].Children(), "executable", binary)
+	case add:
+		provider := kdl.NewNode("lock-provider")
+		provider.AddChild(kdl.NewNode("executable", kdl.NewString(binary)))
+		provider.AddChild(kdl.NewNode("gpu", kdl.NewString("denied")))
+		session.AddChild(provider)
+	}
+	return nil
+}
+
 func renderDevelopmentProfile(source, binary string) (string, error) {
 	doc, err := kdl.ParseString(source, kdl.WithVersion(kdl.Version2), kdl.WithDuplicateProperties(kdl.DupError))
 	if err != nil {

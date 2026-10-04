@@ -1,7 +1,42 @@
 # Independent component updates
 
-The installer supports Hagia, Lom and Bemenu independently of the desktop
-release. After one login with a component-update-enabled release:
+## Installing a desktop with its components
+
+`niltempus install` prepares the configured components against the audited
+release, installs it, and selects those components in one command. kleis is
+validated under the newly prepared Hagia. Independent personal component
+updates are retained when their packaged source has not changed; C-SDK clients
+must also match the new desktop's SDK. kleis follows its configured source.
+Use `prepare-component NAME` to explicitly select a configured source. The
+complete profile is preflighted using the prepared executables before activation.
+
+Preparation failures leave the installed desktop and component selections
+unchanged. Before activation, the installer saves the original executables,
+selection records and Hagia metadata under `install-recovery/` in its state
+directory. If installation or selection fails, it restores that exact component
+state, including a partially published failing component. The desktop may
+already be activated; the error reports this, and `niltempus rollback` selects
+the previous desktop. Recovery copies remain on disk on failure and are removed after success.
+An interrupted publication
+is refused before preparation instead of being treated as a first selection.
+The login profile is checked again after all selections; running processes are not
+restarted. Log out and log back in after success.
+
+After an interrupted publication, stop all installer commands and keep the
+reported `install-recovery/components-*/` directory. Its `files.json` lists each
+original destination, backup file and mode; an empty `copy` means originally
+absent. Restore the executable and Hagia metadata first, then selection.json,
+and remove pending.json last, as listed per component. Do not delete retained
+versions. If the new desktop activated but component selection failed, the
+error names the previous release and directs `niltempus rollback` before login.
+A first installation has no previous desktop and must be repaired before login.
+
+A prepared release that the current configuration would not build is refused
+rather than installed: run `niltempus build`, or prepare the release built for
+this configuration. `install DIRECTORY` and `rollback` install a release only.
+
+The installer supports Hagia, Lom, Bemenu and the lock provider kleis
+independently of the desktop release. After one login with a component-update-enabled release:
 
 ```sh
 niltempus reload lom
@@ -34,7 +69,7 @@ The sealed desktop remains the base for Sophia, launch policy, configuration,
 GPU permissions and transport. Its packaged executables provide initial
 component versions. Installation initializes absent component selections and
 preserves existing ones. At login, the plan-bound installer renders a private
-runtime profile that substitutes only the three executable paths. Roles, 9P
+runtime profile that substitutes the selected executable paths. Roles, 9P
 transports, configuration paths and resource policies remain unchanged.
 
 Shell selections live under the installer's user state in
@@ -53,6 +88,32 @@ A contract change needs a qualified desktop release. A new Hagia source revision
 also needs its correctly bound reviewed dependency manifest in configuration.
 Signing or compilation alone does not prove compatibility with arbitrary future
 protocol changes.
+
+## The lock provider (kleis)
+
+kleis, Sophia's lock provider, is a component only: no release builds or
+seeds it, and a profile without a `session { lock-provider { ... } }` block
+never needs it. `prepare-component kleis` builds it like Hagia, through the
+installed product builder with its reviewed Nim dependency manifest
+(`inputs.kleis_nim_deps` in configuration, with its independently supplied
+sha256). Like Hagia and Bemenu it must vendor the installed desktop's C SDK
+snapshot, so it waits for a desktop whose SDK carries the lock client.
+Its optional repository entry is not a packaged desktop source. Initial
+preparation requires the selection, current executable and pending publication
+record all to be absent; incomplete existing state requires recovery.
+Validation runs the installed Sophia's session-profile preflight with the
+candidate as the profile's lock provider under the selected Hagia; a Sophia
+without the lock provider role refuses it there.
+
+At login the runtime profile points an existing `lock-provider` block's
+`executable` at `components/kleis/current`, keeping its `config` and `gpu`
+settings, and refuses a login profile that names a lock provider while no
+kleis is selected: Sophia starts its provider once per session, so a missing
+executable would leave the session without one. Sophia supervises the
+provider and starts it again whenever it exits. The updater therefore only
+selects: `prepare-component kleis` and `rollback-component kleis` change the
+selection, and Sophia runs it at the provider's next start; `reload` and
+`restart` refuse kleis.
 
 ## Restart ownership
 
