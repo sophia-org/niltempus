@@ -6,24 +6,24 @@
 //! or the C SDK's source tree.
 pub mod bemenu_artifact;
 pub mod c_sdk_pin;
+pub mod checkout;
 pub mod direct_scanout_gate;
 pub mod dock;
 pub mod git_tree;
 pub mod nim_deps;
 pub mod nim_install;
+pub mod nix_assembly;
 pub mod output_file_native;
 pub mod output_file_native_run;
-pub mod package_desktop;
 pub mod panel;
 pub mod physical_inputs;
 pub mod pins;
 pub mod product_artifact;
 pub mod records;
-pub mod release_verify;
+pub mod release;
 pub mod session;
 pub mod session_preflight;
 pub mod verify_archives;
-pub mod wm_pair;
 
 pub(crate) fn hex(value: &str, length: usize) -> bool {
     value.len() == length

@@ -10,12 +10,15 @@ fn args(values: &[&str]) -> Vec<String> {
 #[test]
 fn every_product_has_one_recipe() {
     let names = PRODUCTS.iter().map(|p| p.name).collect::<Vec<_>>();
-    assert_eq!(names, ["lom", "provlita", "hagia", "narthex"]);
+    assert_eq!(names, ["lom", "provlita", "hagia", "narthex", "kleis"]);
     assert_eq!(
         product("lom").unwrap().config,
         Some("examples/minimal/live-shell.kdl")
     );
     assert_eq!(product("hagia").unwrap().config, None);
+    // The lock provider's configuration is the operator's, named by the
+    // profile's lock-provider block, never shipped with the binary.
+    assert_eq!(product("kleis").unwrap().config, None);
     assert!(
         product("bemenu").is_err(),
         "Bemenu has its own SDK-pinned preparer"
@@ -30,7 +33,7 @@ fn unknown_product_ambiguous_revision_and_existing_destination_are_refused() {
     assert!(
         run(&args(&["narthex", &root, &"0".repeat(40), "unused"]))
             .unwrap_err()
-            .contains("prepare-wm-pair")
+            .contains("ships only with Hagia")
     );
     let zero = "0".repeat(40);
     assert!(

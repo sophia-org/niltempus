@@ -386,7 +386,7 @@ fn sophia_session_wrapper_never_builds() {
 #[test]
 fn only_the_bounded_builders_spawn_a_build() {
     const BUILDERS: [&str; 3] = [
-        "crates/xtask/src/package_desktop.rs",
+        "crates/xtask/src/checkout.rs",
         "crates/xtask/src/product_artifact.rs",
         "crates/xtask/src/bemenu_artifact.rs",
     ];

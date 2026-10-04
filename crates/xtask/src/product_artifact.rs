@@ -1,7 +1,6 @@
 //! Prepare an immutable product artifact (Lom, Provlita, Hagia) from one
 //! signed revision, for the attended tty4 gates. `build` here is the one
-//! corrected builder that `prepare-wm-pair` and `prepare-physical-inputs`
-//! use too.
+//! corrected builder that `prepare-physical-inputs` uses too.
 //!
 //! The same custody rules as `prepare-bemenu-artifact`: SOURCE AUTHORIZATION
 //! (`git verify-commit`, status G) happens only here, the build input is
@@ -42,7 +41,7 @@ use crate::nim_deps::{Reviewed, Toolchain, load_reviewed};
 use crate::records::encode_value;
 use crate::{read, sha256};
 
-const USAGE: &str = "usage: cargo xtask prepare-product-artifact <lom|provlita|hagia> \
+const USAGE: &str = "usage: cargo xtask prepare-product-artifact <lom|provlita|hagia|kleis> \
                      <source-repo> <signed-commit> <new-output-dir> --build-dir=/ABS \
                      [--nim-deps=/ABS --nim-deps-sha256=<64 hex>] (Nim products only, required)";
 pub const MANIFEST: &str = "product-artifact.manifest";
@@ -70,7 +69,7 @@ enum Kind {
     Nim { main: &'static str },
 }
 
-pub const PRODUCTS: [Product; 4] = [
+pub const PRODUCTS: [Product; 5] = [
     Product {
         name: "lom",
         binary: "lom",
@@ -91,14 +90,24 @@ pub const PRODUCTS: [Product; 4] = [
             main: "src/hagia.nim",
         },
     },
-    // Hagia's shell partner; packaged with it as the WM pair
-    // (`prepare-wm-pair`), never selectable for the tty4 gates on its own.
+    // Hagia's shell partner; it ships only with Hagia, in the desktop
+    // release (`nix build .#desktop`), never on its own for the tty4 gates.
     Product {
         name: "narthex",
         binary: "narthex",
         config: None,
         kind: Kind::Nim {
             main: "src/narthex.nim",
+        },
+    },
+    // Sophia's lock provider, a component only; its configuration is the
+    // operator's, named by the profile's lock-provider block.
+    Product {
+        name: "kleis",
+        binary: "kleis",
+        config: None,
+        kind: Kind::Nim {
+            main: "src/kleis.nim",
         },
     },
 ];
@@ -138,7 +147,7 @@ pub(crate) fn build_dir(value: Option<&&str>) -> Result<PathBuf, String> {
     if !dir.starts_with('/') {
         return Err(format!("--build-dir must be absolute: {dir}"));
     }
-    crate::package_desktop::private_dir(Path::new(dir))?;
+    crate::checkout::private_dir(Path::new(dir))?;
     Ok(PathBuf::from(dir))
 }
 
@@ -178,7 +187,7 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
     };
     let product = product(name)?;
     if product.name == "narthex" {
-        return Err("narthex is packaged with Hagia: use prepare-wm-pair".into());
+        return Err("narthex ships only with Hagia, in the desktop release".into());
     }
     let (source, output) = inputs(source, commit, output)?;
     let options = options(rest, &["build-dir", "nim-deps", "nim-deps-sha256"], USAGE)?;

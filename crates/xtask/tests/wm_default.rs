@@ -1,16 +1,13 @@
-//! Packaging and installing a WM pair never switches or overwrites the user's
-//! default window manager: $XDG_STATE_HOME/sophia/bin/hagia (the user-owned
-//! policy client that the reload workflow replaces) stays byte-identical,
-//! with the same mode and mtime, and nothing in the release or the install
-//! links to it. The installed session may legitimately reference that path:
-//! it prefers the user's client when one is present and falls back to the
-//! packaged pair otherwise, reading it and never writing it.
+//! The installed session never writes the user's default window manager,
+//! $XDG_STATE_HOME/sophia/bin/hagia (the user-owned policy client that the
+//! reload workflow replaces). It may legitimately reference that path: it
+//! prefers the user's client when one is present and falls back to the
+//! packaged Hagia otherwise, reading it and never writing it.
 use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use xtask::package_desktop::assemble;
 
 #[path = "support/release_fixture.rs"]
 mod fixture;
@@ -57,76 +54,6 @@ fn user_state(root: &Path) -> (PathBuf, PathBuf) {
     .unwrap();
     fs::set_permissions(&wm, fs::Permissions::from_mode(0o700)).unwrap();
     (state, wm)
-}
-
-/// Every symlink below `dir` whose target resolves inside `forbidden`.
-fn links_into(dir: &Path, forbidden: &Path) -> Vec<PathBuf> {
-    let mut found = Vec::new();
-    let mut stack = vec![dir.to_path_buf()];
-    while let Some(path) = stack.pop() {
-        let Ok(meta) = fs::symlink_metadata(&path) else {
-            continue;
-        };
-        if meta.is_symlink() {
-            if fs::canonicalize(&path).is_ok_and(|t| t.starts_with(forbidden)) {
-                found.push(path);
-            }
-        } else if meta.is_dir() {
-            for entry in fs::read_dir(&path).unwrap() {
-                stack.push(entry.unwrap().path());
-            }
-        }
-    }
-    found
-}
-
-#[test]
-fn packaging_and_installing_leave_the_users_default_wm_untouched() {
-    let dir = Dir::new("wm-default");
-    let (state, user_wm) = user_state(&dir.0);
-    let before = snapshot(&state);
-
-    let assembly = fixture::assembly(&dir.0);
-    assemble(&assembly).unwrap();
-    let prefix = dir.0.join("prefix");
-    let output = Command::new(repo().join("tools/install_live_session.sh"))
-        .arg(&assembly.out)
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .env("HOME", dir.0.join("home"))
-        .env("XDG_STATE_HOME", &state)
-        .env("SOPHIA_INSTALL_PREFIX", &prefix)
-        .env("SOPHIA_SESSION_DIR", dir.0.join("sessions"))
-        .env("SOPHIA_COMMAND_DIR", dir.0.join("commands"))
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "{output:?}");
-
-    assert_eq!(
-        snapshot(&state),
-        before,
-        "packaging or installing changed user WM state"
-    );
-    let state_real = fs::canonicalize(state).unwrap();
-    for root in [
-        &assembly.out,
-        &prefix,
-        &dir.0.join("commands"),
-        &dir.0.join("sessions"),
-    ] {
-        assert!(
-            links_into(root, &state_real).is_empty(),
-            "{} links into the user's state",
-            root.display()
-        );
-    }
-    // The packaged pair is the release's own copy, not the user's client.
-    let packaged = prefix.join("current/target/release/hagia");
-    assert_eq!(
-        sha256(&fs::read(&packaged).unwrap()),
-        assembly.pair.hagia_sha256
-    );
-    assert_ne!(fs::read(packaged).unwrap(), fs::read(user_wm).unwrap());
 }
 
 /// A minimal release around the real installed launcher whose Sophia stub

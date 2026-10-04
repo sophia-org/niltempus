@@ -6,15 +6,14 @@
 // alias); the recipe half it checked now lives in this repository's adapter;
 // the installed session must hand Sophia the adapter, the host checker and
 // the recipe tool as absolute release paths.
-//! Static safety properties of the installed launchers and installer.
+//! Static safety properties of the installed launchers and tools/desktop.
 const ADAPTER: &str = include_str!("../../../tools/session/run_desktop_session.sh");
 const INSTALLED_SESSION: &str = include_str!("../../../tools/installed/sophia-session");
 const INSTALLED_HAGIA: &str = include_str!("../../../tools/installed/sophia-hagia-session");
 const INSTALLED_HAGIA_PROMOTION: &str =
     include_str!("../../../tools/installed/sophia-hagia-promotion-session");
 const INSTALLED_RECOVERY: &str = include_str!("../../../tools/installed/sophia-recovery-proof");
-const INSTALLER: &str = include_str!("../../../tools/install_live_session.sh");
-const ACTIVATOR: &str = include_str!("../../../tools/activate_live_session_release.sh");
+const DESKTOP: &str = include_str!("../../../tools/desktop");
 
 #[test]
 fn installed_session_uses_only_versioned_release_artifacts() {
@@ -63,66 +62,23 @@ fn installed_watchdog_is_fixed_and_opt_in() {
 }
 
 #[test]
-fn installer_preserves_a_rollback_pointer_before_activation() {
-    let verify = ACTIVATOR.find("sha256sum -c SHA256SUMS").unwrap();
-    let preserve = ACTIVATOR
-        .find("mv -Tf \"$previous_temp\" \"$PREFIX/previous\"")
-        .unwrap();
-    let activate = ACTIVATOR
-        .find("mv -Tf \"$current_temp\" \"$PREFIX/current\"")
-        .unwrap();
-    assert!(verify < preserve);
-    assert!(preserve < activate);
-    // A never-activated release must also pass this repository's current
-    // verifier before any link changes, and the activation is recorded only
-    // after the switch.
-    let current = ACTIVATOR
-        .find("\"$ROOT_DIR/tools/verify_packaged_policy.sh\" \"$release\"")
-        .unwrap();
-    // Activation history is read (and a recorded ID's contents checked)
-    // before the bundled verifier runs, and recorded only after the switch.
-    let history = ACTIVATOR
-        .find("activation_ledger_status \"$release_id\" \"$release\"")
-        .unwrap();
-    let ledger = ACTIVATOR.find("activation_ledger_record").unwrap();
-    assert!(ACTIVATOR.find("activation_ledger_bootstrap").unwrap() < history);
-    assert!(history < verify);
-    assert!(verify < current && current < preserve);
-    assert!(activate < ledger);
-    // Rollback reaches a target only through a recorded, unchanged entry.
-    let rollback = include_str!("../../../tools/rollback_live_session.sh");
-    let recorded = rollback
-        .find("activation_ledger_status \"$target_id\" \"$target\"")
-        .unwrap();
-    assert!(recorded < rollback.find("sha256sum -c SHA256SUMS").unwrap());
-    let installer_current = INSTALLER
-        .find("\"$ROOT_DIR/tools/verify_packaged_policy.sh\" \"$staging\"")
-        .unwrap();
-    assert!(installer_current < INSTALLER.find("mv \"$staging\" \"$target\"").unwrap());
-    assert!(INSTALLER.contains("sha256sum -c SHA256SUMS"));
-    assert!(INSTALLER.contains("activate_live_session_release.sh"));
-}
-
-#[test]
-fn installer_verifies_root_owned_staging_before_immutable_promotion() {
-    let copy = INSTALLER.find("cp -a \"$artifact\" \"$staging\"").unwrap();
-    let ownership = INSTALLER.find("chown -R 0:0 -- \"$staging\"").unwrap();
-    let staged_ledger = ownership
-        + INSTALLER[ownership..]
-            .find("sha256sum -c SHA256SUMS")
-            .unwrap();
-    let verify = INSTALLER
-        .find("\"$staging/tools/verify_packaged_policy.sh\" \"$staging\"")
-        .unwrap();
-    let promote = INSTALLER.find("mv \"$staging\" \"$target\"").unwrap();
-
-    assert!(copy < ownership);
-    assert!(ownership < staged_ledger);
-    assert!(staged_ledger < verify);
-    assert!(verify < promote);
-    assert!(!INSTALLER.contains("\"$artifact/tools/verify_packaged_policy.sh\""));
-    // The artifact is always explicit; nothing is packaged from a checkout.
-    assert!(!INSTALLER.contains("install_current_live_session"));
+fn desktop_install_checks_the_root_owned_copy_before_switching() {
+    let at = |needle: &str| {
+        DESKTOP
+            .find(needle)
+            .unwrap_or_else(|| panic!("tools/desktop lacks {needle:?}"))
+    };
+    let copy = at("as_root cp -r \"$out\" \"$stage\"");
+    let ownership = at("as_root chown -R 0:0 \"$stage\"");
+    let compare = at("diff -r --no-dereference \"$out\" \"$stage\"");
+    let modes = at("diff <(executables \"$out\") <(executables \"$stage\")");
+    let promote = at("as_root mv -T \"$stage\" \"$prefix/releases/$id\"");
+    let previous = at("switch previous \"$current\"");
+    let current = at("switch current \"$id\"");
+    assert!(copy < ownership && ownership < compare && compare < modes);
+    assert!(modes < promote && promote < previous && previous < current);
+    // A link is replaced only by renaming a complete new link over it.
+    assert!(DESKTOP.contains("ln -sfn \"releases/$2\" \"$prefix/.$1.new\" && as_root mv -T"));
 }
 
 /// The policy client is owner-only, and the release remains the fallback.

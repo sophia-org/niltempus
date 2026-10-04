@@ -67,7 +67,6 @@ self_test!(check_firefox_m10_rendering_page);
 self_test!(check_firefox_m10_selection_kitty_probe);
 self_test!(check_firefox_m10_selection_page);
 self_test!(check_installed_fallback_verifier);
-self_test!(check_installed_hagia_ledger);
 self_test!(check_installed_login_cycle_verifier);
 self_test!(check_installed_native_chrome_verifier);
 self_test!(check_installed_native_verifiers);

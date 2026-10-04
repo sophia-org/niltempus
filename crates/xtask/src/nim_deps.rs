@@ -1,4 +1,4 @@
-//! Bound Nim dependency closures for the Hagia and Narthex builds.
+//! Bound Nim dependency closures for the Hagia, Narthex and kleis builds.
 //!
 //! A product's Nim dependencies are named by a REVIEWED dependency manifest
 //! whose sha256 the operator or root supplies independently. The manifest
@@ -45,7 +45,7 @@ pub const NOTE: &str =
     "host toolchain identity is recorded and re-checked; it is not a fully reproducible closure";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(60);
 const USAGE: &str = "usage: cargo xtask nim-deps draft --store=/ABS --source=/ABS/REPO \
-                     --commit=<40 hex> --product=hagia|narthex --nim=/ABS --nim-lib=/ABS \
+                     --commit=<40 hex> --product=hagia|narthex|kleis --nim=/ABS --nim-lib=/ABS \
                      --gcc=/ABS --bwrap=/ABS --build-dir=/ABS --pin=NAME=VERSION ... --out=/ABS/NEW-FILE";
 
 // ---------------------------------------------------------------- versions
@@ -1032,8 +1032,10 @@ fn draft(args: &[String]) -> Result<Vec<String>, String> {
             .ok_or_else(|| format!("--{key} is required (no default); {USAGE}"))
     };
     let product = get("product")?;
-    if product != "hagia" && product != "narthex" {
-        return Err(format!("--product must be hagia or narthex: {product:?}"));
+    if !["hagia", "narthex", "kleis"].contains(&product) {
+        return Err(format!(
+            "--product must be hagia, narthex or kleis: {product:?}"
+        ));
     }
     let commit = get("commit")?;
     if !hex(commit, 40) {
@@ -1058,7 +1060,7 @@ fn draft(args: &[String]) -> Result<Vec<String>, String> {
         return Err(format!("--out already exists: {}", out.display()));
     }
     let build_dir = PathBuf::from(get("build-dir")?);
-    crate::package_desktop::private_dir(&build_dir)?;
+    crate::checkout::private_dir(&build_dir)?;
     let store = std::fs::canonicalize(get("store")?).map_err(|e| format!("--store: {e}"))?;
     let toolchain = probe_toolchain(
         Path::new(get("nim")?),
