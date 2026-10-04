@@ -71,7 +71,20 @@ prepare a Plan-3 release explicitly, either with `niltempus build` using the
 explicit `inputs`, or with `niltempus prepare DIRECTORY` for an existing
 Plan-3 release. Until then, `prepared.json` is left exactly as it is.
 
-### CPU and kleis lock-provider candidate
+### Keyboard recovery after unlocking
+
+Sophia `316d969507cdeb6ef061ea2d9645758113c53db6` fixes stale keyboard state
+after Super+Escape locking. Lock and unlock clear the desktop shortcut and
+launcher held-key state without importing private lock-screen input. Caps/Num
+Lock and the selected desktop layout are preserved. The SDKs, products and
+profile stay as in the CPU and kleis release below. The slow Matrix animation
+is a separate upload-throughput limitation and is not fixed by this revision.
+
+Run `niltempus install` from a TTY or after logout, then log in again. The
+installer prepares, validates and selects components automatically. Attended
+acceptance must check Super+Escape, unlock, plain typing and launcher text.
+
+### CPU and kleis lock-provider release
 
 Sophia `e9757abfa3b4dc6bf714a21df0c63d29ca4d1a96` vendors the C desktop SDK
 v0.8.0 (`b2a254dcb792e5f9d66f78bdd73f645153504507`) and Rust SDK v0.3.0
@@ -92,24 +105,15 @@ Bemenu `8f8c766b8ac10e41ff3e30e97e75e61847a02832` and kleis
 dependency manifests for those commits (`inputs.hagia_nim_deps`,
 `inputs.kleis_nim_deps`), and `inputs.hagia_c_sdk_revision` names v0.8.0.
 
-Installation does not replace the personal Hagia, and every component that
-vendors the C SDK must match the installed desktop's SDK. So the components
-are prepared after installation. The candidate's sealed profile already names
-the lock provider; login is refused until kleis has been prepared. Run
-these as your normal user from a TTY or after logout, in this order:
+Plain `niltempus install` prepares compatible components against the audited
+artifact and validates the combined profile before activation. It keeps
+personal component updates when the packaged source is unchanged and the SDK
+still matches. It then installs the desktop and selects the prepared components;
+no separate `prepare-component` commands are needed.
 
-```sh
-niltempus install
-niltempus prepare-component hagia
-niltempus prepare-component bemenu
-niltempus prepare-component kleis
-```
-
-Keep `~/.config/sophia/desktop.kdl` consistent with that reviewed profile for
-future builds. Login renders the installed release's sealed profile, not this
-source file. Do not reload the profile in a session started before the
-installation: its Sophia refuses the `lock-provider` node. Log into
-**Sophia niltempus Desktop** only after all three preparations succeed.
+Keep `~/.config/sophia/desktop.kdl` consistent with the reviewed source profile
+for future builds. Login renders the installed release's sealed profile. Log
+out before installation and log into **Sophia niltempus Desktop** afterwards.
 
 The optional `repositories.kleis` is used only by component preparation; it
 does not add a packaged release source. First-time kleis preparation is allowed
