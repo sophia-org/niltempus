@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -119,6 +120,33 @@ func TestRetainedCComponentsRequireTheNewSDK(t *testing.T) {
 		}
 		if !retainedComponentCompatible(name, Source{}, []byte("old sdk"), read) {
 			t.Fatal("discarded compatible personal", name)
+		}
+	}
+}
+
+func TestComponentBuildProfileWorksBeforeArtifactActivation(t *testing.T) {
+	staged := t.TempDir()
+	sealed, err := renderProfile(fixtureProfile, "/opt/future-release/target/release")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"hagia", "kleis"} {
+		candidate := "/prepared/" + name
+		wm := "/prepared/hagia"
+		rendered, err := renderComponentBuildProfile(sealed, staged, name, candidate, wm)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(rendered, "/opt/future-release") {
+			t.Fatal("preflight requires future activation", rendered)
+		}
+		for _, executable := range []string{filepath.Join(staged, "target/release/lom"), filepath.Join(staged, "target/release/bemenu-sophia"), candidate, wm} {
+			if !strings.Contains(rendered, executable) {
+				t.Fatalf("missing executable %s in %s", executable, rendered)
+			}
+		}
+		if name == "kleis" && !strings.Contains(rendered, "lock-provider") {
+			t.Fatal("lost lock provider")
 		}
 	}
 }

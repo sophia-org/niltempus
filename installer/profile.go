@@ -27,6 +27,20 @@ func setExecutable(doc *kdl.Document, name, path string) error {
 	return nil
 }
 
+// The sealed profile names its future /opt release. Before activation its
+// packaged shell executables must instead come from the verified artifact.
+// Then substitute the component being checked and its exact validating WM.
+func renderComponentBuildProfile(source, release, name, binary, wm string) (string, error) {
+	profile, err := renderProfile(source, filepath.Join(release, "target/release"))
+	if err != nil {
+		return "", err
+	}
+	if name == "kleis" {
+		return renderLockProviderValidationProfile(profile, binary, wm)
+	}
+	return renderDevelopmentProfile(profile, binary)
+}
+
 // Validate kleis under the selected personal WM, matching the checker and
 // --default-wm passed to preflightProfile. The sealed profile names the
 // packaged WM, which can differ from that selection.

@@ -157,7 +157,7 @@ func prepareComponentFor(loc Locations, name string, baseline func() (string, Ma
 	if _, err := git(root, "diff", "--exit-code", "HEAD", "--"); err != nil {
 		return ComponentVersion{}, err
 	}
-	// Config validation is done with the installed Sophia. Product builds don't
+	// Config validation uses the selected baseline Sophia. Product builds don't
 	// rewrite the user's shell configuration or change its role, GPU or limits.
 	// kleis is checked as the profile's lock provider, under the selected WM;
 	// a Sophia without the lock provider role refuses it here.
@@ -167,17 +167,13 @@ func prepareComponentFor(loc Locations, name string, baseline func() (string, Ma
 			return ComponentVersion{}, err
 		}
 		validationWM := candidate
-		render := renderDevelopmentProfile
 		if name == "kleis" {
 			validationWM = wm
 			if validationWM == "" {
 				validationWM = componentPath(loc, "hagia")
 			}
-			render = func(source, binary string) (string, error) {
-				return renderLockProviderValidationProfile(source, binary, validationWM)
-			}
 		}
-		rendered, err := render(string(profile), candidate)
+		rendered, err := renderComponentBuildProfile(string(profile), release, name, candidate, validationWM)
 		if err != nil {
 			return ComponentVersion{}, err
 		}
