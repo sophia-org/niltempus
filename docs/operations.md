@@ -1,8 +1,9 @@
-<!-- Provenance: moved from Sophia docs/operations.md at de776c68afdf9a133818f86917893c3362dc9fb7 (the pin) (Sophia rule 13). The installed desktop stack is packaged here now; installation starts from an explicit cargo xtask package-desktop release. S5 completes the doc set. -->
+<!-- Provenance: moved from Sophia docs/operations.md at de776c68afdf9a133818f86917893c3362dc9fb7 (the pin) (Sophia rule 13). The installed desktop stack is packaged here now; releases are built by the flake and installed by tools/desktop. -->
 # Installed Sophia Operations
 
-This is the operator runbook for an immutable Sophia release installed below
-`/opt/sophia`. The ordinary desktop is the native Hagia WM plus Narthex shell.
+This is the operator runbook for an immutable desktop release installed below
+`/opt/sophia-niltempus-desktop`. The ordinary desktop is the native Hagia WM
+with the Lom bar and the Bemenu launcher over 9P2000.L.
 Sophia does not package or run an unmodified legacy X11 WM as policy.
 
 ## Support Boundary
@@ -28,44 +29,20 @@ environment and does not expose root-window WM authority.
 
 ## Installation And Session Entries
 
-Package an explicit release from this repository (clean, signed HEAD), the
-pinned Sophia checkout and a prepared Hagia/Narthex pair, then install it:
+`nix build .#desktop` builds a release and `tools/desktop install` installs it
+as a new immutable directory below `/opt/sophia-niltempus-desktop/releases`,
+then makes it `current` and keeps the former release as `previous`; see
+[Building and installing](install.md). The login entry `Sophia niltempus
+Desktop` runs `current/bin/sophia-niltempus-desktop-session`, which checks
+Hagia's WM environment contract and starts the session with the release's own
+profile and Hagia.
 
-```sh
-cargo xtask prepare-wm-pair --hagia /ABS/hagia <commit> --narthex /ABS/narthex <commit> /ABS/wm-pair \
-    --build-dir=/ABS/private-build \
-    --hagia-nim-deps=/ABS/hagia.nim-deps --hagia-nim-deps-sha256=<reviewed sha256> \
-    --narthex-nim-deps=/ABS/narthex.nim-deps --narthex-nim-deps-sha256=<reviewed sha256> \
-    --hagia-c-sdk-rev=<the C SDK revision Hagia vendors>
-cargo xtask package-desktop --sophia-root=/ABS/sophia --sophia-rev=<pinned rev> \
-    --wm-pair=/ABS/wm-pair --wm-pair-commits=<hagia>,<narthex> \
-    --wm-pair-sha256=<hagia>,<narthex> --wm-pair-profile-sha256=<default.kdl> \
-    --wm-pair-c-sdk-rev=<the same C SDK revision> \
-    --build-dir=/ABS/private-build --out=/ABS/release
-tools/install_live_session.sh /ABS/release
-```
-
-Hagia and Narthex build only from REVIEWED Nim dependency manifests (below);
-the pair records both manifests and their digests, plus Hagia's vendored C SDK
-revision and manifest (pair schema 3).
-
-Packaging never switches or overwrites your own default window manager
-(`$XDG_STATE_HOME/sophia/bin/hagia` and its reload workflow); an installed
-session still prefers that user-owned client and falls back to the packaged
-pair. The installer verifies every artifact digest,
-installs a new immutable directory below `/opt/sophia/releases`, and atomically
-updates `current` while retaining the former release as `previous`. Activation
-and rollback validate the complete target surface before changing command links
-or greetd entries.
-
-A native-only schema-7 artifact records the Sophia commit and whether Hagia is
-included. A Hagia artifact additionally records its signed source commit, the
-canonical default-profile digest, Hagia and Narthex executable digests, and
-Hagia's vendored C SDK revision and manifest digest. The SDK manifest itself is
-sealed at `share/sophia-policy/hagia/c-sdk.manifest.json`. A schema-6 artifact
-is not accepted as a candidate.
-Installation rejects missing, non-executable, or mismatched artifacts. Legacy
-WM executables, compatibility configuration, and bridge fields are forbidden.
+The release's schema-7 manifest records the Sophia commit, Hagia's and
+narthex's source commits and executable digests, the canonical
+default-profile digest, and Hagia's vendored C SDK revision and manifest
+digest. The SDK manifest itself is sealed at
+`share/sophia-policy/hagia/c-sdk.manifest.json`. Legacy WM executables,
+compatibility configuration and bridge fields are not part of a release.
 
 ### Bound Nim dependencies
 
@@ -208,12 +185,9 @@ entries, but preserves unrelated files or links at the same paths.
 From the session or an independent text VT:
 
 ```sh
-sophia-status
+tools/desktop status       # current and previous releases, with their commits
+sophia session list        # retained launches and storage totals
 ```
-
-Status verifies the current release checksums and reports current/previous
-targets, relevant processes, lifecycle outcomes, runtime identity, and the
-newest native proof attempts.
 
 Durable user evidence lives below
 `${XDG_STATE_HOME:-$HOME/.local/state}/sophia/`:
@@ -240,9 +214,10 @@ typed text, clipboard data, window titles, or application content.
 
 ## Mark and investigate a problem
 
-Installation exposes `sophia` in `/usr/local/bin`; it follows the selected
-release through activation and rollback. On older installations that lack this
-command, use `/opt/sophia/current/target/release/sophia` with the same arguments.
+The current release's `sophia` is
+`/opt/sophia-niltempus-desktop/current/target/release/sophia`; it follows the
+release through installation and rollback. Put that directory on `PATH`, or
+use the full path, for the commands below.
 
 In an ordinary installed session, use a terminal or switch to another TTY and run:
 
@@ -265,7 +240,7 @@ inspect that marker. `inspect ID --marker=MARKER_ID` shows events within sixty
 seconds of either side of the marker, as far as retained evidence permits. A
 marker written after the session ended is a report time, not an inferred crash
 time; inspection shows the final retained minute. `sophia session list` lists
-retained launches and storage totals. `sophia-status` includes that listing.
+retained launches and storage totals.
 
 Each launch gets its own record before graphics takeover. Its manifest binds
 Sophia's executable digest and installed release identity. The identity journal
@@ -479,7 +454,7 @@ After greetd returns:
 1. Select `Sophia Kitty (Baseline)` to isolate the core display/input path.
 2. Exit Kitty normally.
 3. Run `sophia-verify-fallback` from a text VT.
-4. Inspect `sophia-status` before retrying Hagia.
+4. Inspect `tools/desktop status` and `sophia session list` before retrying Hagia.
 
 `Sophia Recovery Proof` exercises the process-external watchdog. Verify its
 latest archive with `sophia-verify-watchdog`. An independent emergency chord
@@ -491,9 +466,7 @@ from a Hagia session is archived separately and verified with
 From an independent text VT after the current session has ended:
 
 ```sh
-sophia-status
-sudo sophia-rollback
-sophia-status
+tools/desktop rollback
 ```
 
 Rollback swaps `current` and `previous`; it does not edit either immutable

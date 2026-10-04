@@ -26,6 +26,8 @@ release_of() { local t; t=$(readlink "$prefix/$1" 2>/dev/null) && echo "${t#rele
 cmd_install() {
     local out=${1:-} id stage
     [ -n "$out" ] || out=$(nix build --no-link --print-out-paths "$repo#desktop")
+    out=$(readlink -f "$out")
+    [[ $out == /nix/store/* ]] || die "$out is not a Nix store path"
     id=$(sed -n 's/^release_id=//p' "$out/manifest")
     [[ $id =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "no release_id in $out/manifest"
     mkdir -p "$gcroots"

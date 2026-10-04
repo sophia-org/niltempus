@@ -61,9 +61,8 @@ development comparison source, never a runtime or build dependency.
 Live acceptance is one normal installed session: startup once, toggle, page,
 dismiss, open the switcher, and verify unchanged terminal focus and camera and
 emergency recovery. It does not reopen the same-hardware comparison matrix.
-Sophia and Narthex are installed together as one release (the WM pair from
-`cargo xtask prepare-wm-pair`, packaged by `cargo xtask package-desktop`;
-see [operations](operations.md)); rebuild Hagia for the compiled binding and
-parser support. Reloading only Hagia cannot install Engine or protocol
+Sophia and Narthex are installed together as one release (`nix build
+.#desktop`; see [install](install.md)); rebuild Hagia for the compiled binding
+and parser support. Reloading only Hagia cannot install Engine or protocol
 changes.
 

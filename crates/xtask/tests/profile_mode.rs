@@ -235,7 +235,6 @@ fn compatibility_lines() -> Vec<(&'static str, String)> {
     vec![
         ("tools/installed/sophia-niltempus-desktop-session", ["expected='hagia_environment_contract schema=1 wm_policy=sophia-wm-policy-v1 names=SOPHIA_WM_POLICY_CHECKPOINT,SOPHIA_WM_POLICY_CANDIDATE,SOPHIA_WM_POLICY_PROFILE_ACTIVATION legacy=", "HAGIA_POLICY", "_CHECKPOINT,", "HAGIA_POLICY", "_CANDIDATE,", "HAGIA_POLICY", "_PROFILE_ACTIVATION precedence=presence'"].concat()),
         ("tools/installed/sophia-niltempus-desktop-session", ["unset SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE ", "SOPHIA_HAGIA", "_PROFILE_MODE SOPHIA_DESKTOP_PROFILE_MODE"].concat()),
-        ("docs/release-recovery.md", ["env -u SOPHIA_DESKTOP_PROFILE_MODE -u ", "SOPHIA_HAGIA", "_PROFILE_MODE \\"].concat()),
     ]
 }
 

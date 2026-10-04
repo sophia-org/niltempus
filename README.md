@@ -1,41 +1,34 @@
 # niltempus
 
-My desktop assembled from Sophia, Hagia, Lom and Bemenu. This repository owns
-the Go installer, pinned build recipes and tests for that particular choice of
-components. It also provides an example for contributors assembling their own
-desktop. Sophia stays shell and WM agnostic; the C and Rust desktop SDKs remain
-separate repositories.
+My desktop assembled from Sophia, Hagia, Lom, Bemenu and kleis. This
+repository holds the flake that builds it, the desktop profile, the session
+launchers and the tests and physical gates for this choice of components. It
+is also an example for anyone assembling their own desktop. Sophia stays shell
+and WM agnostic, and the C and Rust desktop SDKs are separate repositories.
 
-The entrypoint is `niltempus install`. It verifies the explicitly prepared
-release, or builds from the configured inputs when none is selected. See the
-[installer guide](installer/README.md) for initial setup, reviewed dependencies,
-the Plan-3 migration and rollback. A changed or invalid selection is refused.
+## Building and installing
 
-The former `sophia-desktop-integration` work is consolidated here. Historical
-manifest fields and installed paths retain their names for compatibility.
+```sh
+nix build .#desktop        # the whole release, as one store path
+tools/desktop install      # copy it into /opt and make it current; log in again
+tools/desktop rollback     # back to the previous release
+```
+
+Each component is a flake input, and `flake.lock` records exactly what a build
+contains; `nix flake update` moves the inputs to their branch heads. The
+profile is `profiles/desktop.kdl`. [Building and installing](docs/install.md)
+covers the release, the profile, rollback, pruning and building with work in
+progress.
+
 Conformance tests for Sophia's generic contracts stay in Sophia; tests of this
-desktop's components and combinations live here.
-
-Session recipes select shell components from the desktop profile. They no
-longer pass the legacy `--shell-process-default` fallback; setting
-`SOPHIA_HAGIA_SHELL_BIN` does not add a shell to the session.
-
-New packages do not build or seal the retired `sophia-wm-demo` IPC client.
-Historical runtime-identity records may still name it as `unavailable`, and
-archive verifiers continue to accept their bound older binaries. The old
-mixed-output physical recipe requires a Sophia pin that still contains that
-demo; it is not a 9P WM/output proof. Replacing that recipe belongs to the
-separate output-role migration, before moving its pin to a demo-free Sophia.
+desktop's components and their combinations live here. Session recipes select
+shell components from the desktop profile.
 
 ## Documentation
 
-- [Qualified 9P candidate](docs/final-9p-candidate.md): exact binaries, gates
-  and the approved preparation for installation.
-
-- [Operations](docs/operations.md): the installed runbook, bound Nim
-  dependencies and prepared physical inputs.
-- [Installed candidate](docs/installed.md): package, install and verify a
-  release.
+- [Building and installing](docs/install.md).
+- [Operations](docs/operations.md): the installed session's runbook, logs and
+  recovery, bound Nim dependencies and prepared physical inputs.
 - [Physical runners](docs/physical-runners.md): every attended hardware gate
   and what it requires.
 - [Hagia gates](docs/hagia-gates.md) and [Hagia workspaces](docs/hagia-workspaces.md).
@@ -46,10 +39,7 @@ separate output-role migration, before moving its pin to a demo-free Sophia.
   the old coverage map.
 - [E1 descriptor hosts](docs/E1-descriptor-hosts.md): retained coverage of the
   descriptor host modes (a 9P seam for the Narthex half).
-- [Gate mapping](docs/GATE-MAPPING.md): where every moved Sophia gate and test
-  lives now, and what is retired with product IPC.
-- [Sophia deletion list](docs/SOPHIA-DELETION-LIST.md): the Sophia-side half of
-  the move, with the inbound hunks.
+- [Output file native](docs/output-file-native.md).
 
 ## Inputs and pins
 

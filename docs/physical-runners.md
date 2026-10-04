@@ -5,8 +5,7 @@ These runners take real DRM, input and TTY ownership on the reference rig
 (Void Linux x86-64, AMD Radeon RX 7900 GRE, DP-1 2560x1440 and DP-2
 1920x1080, `seat0`). Each one is run deliberately by the operator from the text
 console it names; none runs in any automated gate. The offline gate covers
-their verifiers, archivers, identity preflights and static bounds instead
-(see [GATE-MAPPING](GATE-MAPPING.md)).
+their verifiers, archivers, identity preflights and static bounds instead.
 
 Sophia rule 13 put them here: they name Hagia, Narthex, Kitty, xterm,
 Firefox, vkcube, glxgears or zenity. Sophia keeps only generic primitives,
@@ -217,4 +216,4 @@ ordering; they do not establish an attended GPU pass. See
 
 Product IPC is being removed from Lom, Bemenu and Hagia. Physical and live
 coverage that exercised a product over the current IPC wire is recorded as
-retired together with that IPC, not moved (see [GATE-MAPPING](GATE-MAPPING.md)).
+retired together with that IPC, not moved.

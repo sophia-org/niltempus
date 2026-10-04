@@ -88,5 +88,5 @@ does not close this.
 
 - [Nix flake prototype](../plans/c7g8cnd5-nix-flake-prototype-for-reproducible-desktop-builds.md):
   measures a fixed-path sandboxed build for kleis.
-- `docs/component-updates.md` and `installer/README.md`: release identity and
-  component selections, which rely on exact artifacts.
+- [Install](../../install.md): the desktop is one Nix build, named by every
+  locked input.
