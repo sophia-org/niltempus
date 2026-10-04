@@ -29,9 +29,14 @@ pushed. Evidence lives in `development-evidence/n002-*`.
 | narthex | `nix/devshell` `56d513fa` | nimble build | identical | tests and format pass |
 | Bemenu | `nix/devshell` `75b70971` | `make bemenu-sophia`, 3.7 s | identical | `make check-sophia` passes |
 | Lom | `nix/devshell` `aa238221` | crane, 277 s cold, about 5 s warm | identical | fmt, clippy, doc tests, tools pass; tests 60 pass, 4 skipped |
-| Sophia | `nix/flake` `e6c07c3f` | crane, 138 s cold, about 48 s warm | identical | fmt and clippy pass; workspace tests 6611 pass, 110 fail |
+| Sophia | `nix/flake` `10bf14ff` | crane, 138 s cold, about 48 s warm | identical | fmt and clippy pass; workspace tests 6610 pass, 107 fail |
 
 ## Finding and resolution
+
+**Status: the builds and deterministic rebuilds pass; test qualification is
+incomplete.** The host isolated gates stay authoritative until equivalent
+Nix coverage passes. Nothing is skipped to turn a result green, except Lom's
+four signal tests, which are named and still run in the host gate.
 
 **Builds:**
 - Every product binary and Sophia's three session binaries build in Nix's
@@ -50,10 +55,16 @@ pushed. Evidence lives in `development-evidence/n002-*`.
    are skipped in Nix and stay in the host gate.
 4. **Sophia's workspace tests** expect `/usr/bin/bwrap`, `/usr/bin/true`,
    `sleep`, `sh`, xterm, Go and a C compiler, and protection domains that
-   bind only `/usr`. 110 fail for those reasons:
-   - 37 are protection-domain spawns (phase B);
-   - 19 are libxshmfence `dlopen` from test binaries;
-   - 51 are host tools and paths.
+   bind only `/usr`. All 107 failures are listed by name with evidence in
+   `n002-sophia-nix-01/RECONCILIATION.tsv`:
+   - 40 protection-domain or supervisor spawns (phase B), confirmed;
+   - 19 libxshmfence `dlopen` from test binaries, confirmed;
+   - 23 host tools at fixed paths or on `PATH`, confirmed, plus 1 cascade;
+   - 16 host-path fixtures, 3 re-executed children, 2 GBM probe statuses and
+     3 PAM-helper timeout stand-ins, whose exact causes are not yet proven.
+
+   An earlier count of 6611 passed and 110 failed also summed result lines
+   that re-executed child tests print inside their captured output.
 
    These tests are a separate package (`workspace-tests`), not a check.
 
@@ -62,12 +73,15 @@ pushed. Evidence lives in `development-evidence/n002-*`.
 setuid `unix_chkpwd`. The host libpam needs only libc up to `GLIBC_2.34`,
 and Nix's glibc is 2.44.
 
-**Graphics drivers block phase D** (`nix-flake-proposal-01/PHASE-D-GPU-NOTES.txt`):
-- Nix's libgbm looks for backends only in `/run/opengl-driver/lib/gbm`.
+**Graphics drivers are the open phase D question** (`nix-flake-proposal-01/PHASE-D-GPU-NOTES.txt`):
+- Nix's libgbm names only `/run/opengl-driver/lib/gbm` as its backend path.
+  That string alone does not prove GBM fails; a runtime check must.
 - Nix's Vulkan loader would load host Mesa drivers whose `/usr/lib`
   dependencies a Nix process cannot resolve.
-- Recommendation: build the pinned Mesa paths into the Nix packages, with no
-  `/run` state and no environment plumbing through sandboxes.
+- Agreed with Codex as the phase D candidate: package-scoped pinned Mesa and
+  loader paths (GBM, EGL and DRI, Vulkan ICDs, their closure and dlopen
+  libraries), with no global loader environment and no new `/run` state.
+  Driver loading and rendering must be shown in QEMU.
 
 ## Validation and remaining work
 
@@ -75,7 +89,8 @@ and Nix's glibc is 2.44.
 - **Not yet shown:** a Nix binary running inside a Sophia sandbox; that needs
   phase B (`/nix/store` visible, bwrap path configurable).
 - **Next:**
-  - phase B in Sophia (needs a t-ID and Codex review);
+  - phase B in Sophia, t301 (read-only `/nix/store` plus the configured
+    Bubblewrap path), reviewed by Codex;
   - the graphics-driver decision;
   - the niltempus Nix release kind (phase C);
   - an FHS test root for Sophia's workspace tests.
