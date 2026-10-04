@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Install and switch niltempus desktop releases built by `nix build .#desktop`.
+#
+#   tools/desktop install [STORE-PATH]   build (or take) a release, copy it in, make it current
+#   tools/desktop rollback               swap current and previous
+#   tools/desktop status                 show current and previous
+#   tools/desktop prune [N]              keep current, previous and the N newest (default 2)
+#
+# Releases live under /opt, owned by root: Sophia's PAM helper refuses a
+# group-writable parent, and /nix/store is one. A GC root per installed
+# release keeps its closure (the libraries its binaries name) in the store.
+set -euo pipefail
+
+prefix=/opt/sophia-niltempus-desktop
+sessions=/usr/share/wayland-sessions
+gcroots=${XDG_STATE_HOME:-$HOME/.local/state}/sophia-niltempus-desktop/gcroots
+repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+as_root() { if [ "$(id -u)" = 0 ]; then "$@"; else sudo "$@"; fi; }
+die() { echo "desktop: $*" >&2; exit 1; }
+
+# Point LINK at releases/ID by renaming a new link over it.
+switch() { as_root ln -sfn "releases/$2" "$prefix/.$1.new" && as_root mv -T "$prefix/.$1.new" "$prefix/$1"; }
+executables() { (cd "$1" && find . -type f -perm /111 | sort); }
+release_of() { local t; t=$(readlink "$prefix/$1" 2>/dev/null) && echo "${t#releases/}"; }
+
+cmd_install() {
+    local out=${1:-} id stage
+    [ -n "$out" ] || out=$(nix build --no-link --print-out-paths "$repo#desktop")
+    id=$(sed -n 's/^release_id=//p' "$out/manifest")
+    [[ $id =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "no release_id in $out/manifest"
+    mkdir -p "$gcroots"
+    nix-store --add-root "$gcroots/$id" --realise "$out" >/dev/null
+    if [ ! -d "$prefix/releases/$id" ]; then
+        stage=$prefix/releases/.tmp-$id
+        as_root rm -rf "$stage"
+        as_root mkdir -p "$prefix/releases"
+        as_root cp -r "$out" "$stage"
+        as_root chmod -R u+w "$stage"
+        as_root find "$stage" -type d -exec chmod 0755 {} +
+        as_root find "$stage" -type f -perm /111 -exec chmod 0755 {} +
+        as_root find "$stage" -type f ! -perm /111 -exec chmod 0644 {} +
+        as_root chown -R 0:0 "$stage"
+        # The store path is immutable: the copy must equal it file for file,
+        # with the same files executable.
+        { diff -r --no-dereference "$out" "$stage" &&
+            diff <(executables "$out") <(executables "$stage"); } >/dev/null ||
+            { as_root rm -rf "$stage"; die "copy of $id differs from $out"; }
+        as_root mv -T "$stage" "$prefix/releases/$id"
+    fi
+    local current; current=$(release_of current || true)
+    if [ "$current" != "$id" ]; then
+        [ -z "$current" ] || switch previous "$current"
+        switch current "$id"
+    fi
+    local entry=sophia-niltempus-desktop.desktop
+    sed "s|@SOPHIA_INSTALL_PREFIX@|$prefix|g" "$out/share/wayland-sessions/$entry" > "$gcroots/.$entry"
+    cmp -s "$gcroots/.$entry" "$sessions/$entry" || as_root install -Dm0644 "$gcroots/.$entry" "$sessions/$entry"
+    rm -f "$gcroots/.$entry"
+    echo "desktop: current is $id; log in again to use it"
+}
+
+cmd_rollback() {
+    local current previous
+    current=$(release_of current) || die "no current release"
+    previous=$(release_of previous) || die "no previous release"
+    switch current "$previous"
+    switch previous "$current"
+    echo "desktop: current is $previous; log in again to use it"
+}
+
+cmd_status() {
+    local link id
+    for link in current previous; do
+        id=$(release_of "$link") || { echo "$link: none"; continue; }
+        echo "$link: $id"
+        grep -E '^(built_at_utc|commit|integration_commit|hagia_source_commit|narthex_source_commit)=' \
+            "$prefix/releases/$id/manifest" | sed 's/^/    /'
+    done
+}
+
+cmd_prune() {
+    local keep=${1:-2} current previous id n=0
+    [[ $keep =~ ^[0-9]+$ ]] || die "prune takes a count"
+    current=$(release_of current || true) previous=$(release_of previous || true)
+    # Newest first; release IDs are single path components without spaces.
+    for id in $(find "$prefix/releases" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -printf '%T@ %f\n' | sort -rn | cut -d' ' -f2); do
+        if [ "$id" = "$current" ] || [ "$id" = "$previous" ]; then continue; fi
+        n=$((n + 1)); [ "$n" -le "$keep" ] && continue
+        as_root rm -rf "${prefix:?}/releases/$id"
+        rm -f "$gcroots/$id"
+        echo "desktop: removed $id"
+    done
+}
+
+case ${1:-} in
+    install) shift; cmd_install "$@" ;;
+    rollback) cmd_rollback ;;
+    status) cmd_status ;;
+    prune) shift; cmd_prune "$@" ;;
+    *) sed -n '2,7s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"; exit 2 ;;
+esac
