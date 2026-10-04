@@ -2,3 +2,7 @@
 /.provision/
 /.artifacts/
 __pycache__/
+
+# zk index
+/.zk/notebook.db*
+/.zk/*.log
