@@ -63,20 +63,43 @@ fn installed_watchdog_is_fixed_and_opt_in() {
 
 #[test]
 fn desktop_install_checks_the_root_owned_copy_before_switching() {
+    let install = &DESKTOP[DESKTOP.find("cmd_install() {").unwrap()..];
     let at = |needle: &str| {
-        DESKTOP
+        install
             .find(needle)
-            .unwrap_or_else(|| panic!("tools/desktop lacks {needle:?}"))
+            .unwrap_or_else(|| panic!("tools/desktop install lacks {needle:?}"))
     };
+    let lock = at("    lock\n");
+    let root = at("nix-store --add-root");
+    let existing = at("same \"$out\" \"$prefix/releases/$id\" ||");
     let copy = at("as_root cp -r \"$out\" \"$stage\"");
     let ownership = at("as_root chown -R 0:0 \"$stage\"");
-    let compare = at("diff -r --no-dereference \"$out\" \"$stage\"");
-    let modes = at("diff <(executables \"$out\") <(executables \"$stage\")");
+    let compare = at("same \"$out\" \"$stage\" ||");
     let promote = at("as_root mv -T \"$stage\" \"$prefix/releases/$id\"");
     let previous = at("switch previous \"$current\"");
     let current = at("switch current \"$id\"");
-    assert!(copy < ownership && ownership < compare && compare < modes);
-    assert!(modes < promote && promote < previous && previous < current);
+    assert!(lock < root && root < existing && existing < copy);
+    assert!(copy < ownership && ownership < compare && compare < promote);
+    assert!(promote < previous && previous < current);
+    // The comparison covers contents and the executable set.
+    assert!(DESKTOP.contains(
+        "same() { { diff -r --no-dereference \"$1\" \"$2\" && diff <(executables \"$1\") <(executables \"$2\"); }"
+    ));
+    // Rollback and prune change the prefix only under the same lock.
+    for command in ["cmd_rollback() {", "cmd_prune() {"] {
+        let body = &DESKTOP[DESKTOP.find(command).unwrap()..];
+        let body = &body[..body.find("\n}\n").unwrap()];
+        let locked = body.find("    lock\n").expect("command takes the lock");
+        let first_change = ["switch ", "as_root rm"]
+            .iter()
+            .filter_map(|change| body.find(change))
+            .min()
+            .unwrap();
+        assert!(
+            locked < first_change,
+            "{command} changes the prefix before locking"
+        );
+    }
     // A link is replaced only by renaming a complete new link over it.
     assert!(DESKTOP.contains("ln -sfn \"releases/$2\" \"$prefix/.$1.new\" && as_root mv -T"));
 }

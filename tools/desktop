@@ -9,6 +9,8 @@
 # Releases live under /opt, owned by root: Sophia's PAM helper refuses a
 # group-writable parent, and /nix/store is one. A GC root per installed
 # release keeps its closure (the libraries its binaries name) in the store.
+# One root-owned lock under the prefix serializes install, rollback and
+# prune; a build runs before it.
 set -euo pipefail
 
 prefix=/opt/sophia-niltempus-desktop
@@ -21,6 +23,20 @@ die() { echo "desktop: $*" >&2; exit 1; }
 # Point LINK at releases/ID by renaming a new link over it.
 switch() { as_root ln -sfn "releases/$2" "$prefix/.$1.new" && as_root mv -T "$prefix/.$1.new" "$prefix/$1"; }
 executables() { (cd "$1" && find . -type f -perm /111 | sort); }
+# A store path is immutable: a release directory is that output file for file,
+# with the same files executable.
+same() { { diff -r --no-dereference "$1" "$2" && diff <(executables "$1") <(executables "$2"); } >/dev/null 2>&1; }
+
+# Hold the prefix's lock until this command exits. The file is root's; any
+# user may open it to lock it, and it is never replaced, so every holder locks
+# the same file.
+lock() {
+    # shellcheck disable=SC2016 # $1 expands in root's shell, not here.
+    [ -e "$prefix/.lock" ] ||
+        as_root sh -c 'umask 022 && mkdir -p "$1" && : >>"$1/.lock"' sh "$prefix"
+    exec 9<"$prefix/.lock"
+    flock -w 600 9 || die "another tools/desktop still holds $prefix/.lock"
+}
 release_of() { local t; t=$(readlink "$prefix/$1" 2>/dev/null) && echo "${t#releases/}"; }
 
 cmd_install() {
@@ -30,9 +46,14 @@ cmd_install() {
     [[ $out == /nix/store/* ]] || die "$out is not a Nix store path"
     id=$(sed -n 's/^release_id=//p' "$out/manifest")
     [[ $id =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "no release_id in $out/manifest"
+    # The root is made under the lock, so a concurrent prune cannot remove it.
+    lock
     mkdir -p "$gcroots"
     nix-store --add-root "$gcroots/$id" --realise "$out" >/dev/null
-    if [ ! -d "$prefix/releases/$id" ]; then
+    if [ -d "$prefix/releases/$id" ]; then
+        same "$out" "$prefix/releases/$id" ||
+            die "$prefix/releases/$id differs from $out; remove it and install again"
+    else
         stage=$prefix/releases/.tmp-$id
         as_root rm -rf "$stage"
         as_root mkdir -p "$prefix/releases"
@@ -42,11 +63,7 @@ cmd_install() {
         as_root find "$stage" -type f -perm /111 -exec chmod 0755 {} +
         as_root find "$stage" -type f ! -perm /111 -exec chmod 0644 {} +
         as_root chown -R 0:0 "$stage"
-        # The store path is immutable: the copy must equal it file for file,
-        # with the same files executable.
-        { diff -r --no-dereference "$out" "$stage" &&
-            diff <(executables "$out") <(executables "$stage"); } >/dev/null ||
-            { as_root rm -rf "$stage"; die "copy of $id differs from $out"; }
+        same "$out" "$stage" || { as_root rm -rf "$stage"; die "copy of $id differs from $out"; }
         as_root mv -T "$stage" "$prefix/releases/$id"
     fi
     local current; current=$(release_of current || true)
@@ -63,6 +80,7 @@ cmd_install() {
 
 cmd_rollback() {
     local current previous
+    lock
     current=$(release_of current) || die "no current release"
     previous=$(release_of previous) || die "no previous release"
     switch current "$previous"
@@ -83,6 +101,7 @@ cmd_status() {
 cmd_prune() {
     local keep=${1:-2} current previous id n=0
     [[ $keep =~ ^[0-9]+$ ]] || die "prune takes a count"
+    lock
     current=$(release_of current || true) previous=$(release_of previous || true)
     # Newest first; release IDs are single path components without spaces.
     for id in $(find "$prefix/releases" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -printf '%T@ %f\n' | sort -rn | cut -d' ' -f2); do

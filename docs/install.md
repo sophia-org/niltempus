@@ -52,7 +52,14 @@ The copy belongs to root and no one else can write it, because Sophia's PAM
 helper refuses to start under a directory that others can write, and the Nix
 store is one. Before switching, the script compares the copy with the store
 path, file for file and executable for executable, and refuses a copy that
-differs. Each link is replaced by renaming a complete new link over it.
+differs. A release directory that is already there must match its store path
+the same way; a damaged one is refused until it is removed. Each link is
+replaced by renaming a complete new link over it.
+
+Install, rollback and prune hold one lock, `/opt/sophia-niltempus-desktop/.lock`,
+for as long as they change anything, so a second command waits for the first.
+A build runs before the lock is taken. `tools/check_desktop_tool.sh` checks
+all of this against a private prefix, without sudo.
 
 The script also keeps a garbage-collection root for each installed release in
 `~/.local/state/sophia-niltempus-desktop/gcroots`, so the libraries its
