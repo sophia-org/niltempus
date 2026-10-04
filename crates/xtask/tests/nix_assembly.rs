@@ -151,6 +151,14 @@ fn malformed_inputs_are_refused_before_any_output() {
             valid
                 .iter()
                 .cloned()
+                .chain(["--release-id=../escape".to_owned()])
+                .collect(),
+            "--release-id must be",
+        ),
+        (
+            valid
+                .iter()
+                .cloned()
                 .chain(["--extra=1".to_owned()])
                 .collect(),
             "unknown or empty option --extra",
@@ -199,8 +207,15 @@ fn extra_files_are_laid_out_and_sealed_and_bad_paths_are_refused() {
         "--file=share/sophia-niltempus-desktop/desktop.kdl={}",
         profile.display()
     ));
-    run(&args).unwrap();
+    args.push("--release-id=niltempus-0123456789abcdef0123".to_owned());
+    let lines = run(&args).unwrap();
+    assert!(
+        lines[0].contains(" release_id=niltempus-0123456789abcdef0123 "),
+        "{lines:?}"
+    );
     let files = contents(&out);
+    let manifest = String::from_utf8(files["manifest"].0.clone()).unwrap();
+    assert!(manifest.contains("\nrelease_id=niltempus-0123456789abcdef0123\n"));
     assert_eq!(files["target/release/lom"].1, 0o755);
     assert_eq!(files["share/sophia-niltempus-desktop/desktop.kdl"].1, 0o644);
     let sums = String::from_utf8(files["SHA256SUMS"].0.clone()).unwrap();

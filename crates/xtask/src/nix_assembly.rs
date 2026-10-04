@@ -10,11 +10,16 @@
 //!   --repo=/ABS --integration-commit=SHA --sophia-tree=/ABS --sophia-rev=SHA \
 //!   --sophia=/ABS --factotum=/ABS --pam-helper=/ABS --xtask=/ABS --preflight=/ABS \
 //!   --hagia=/ABS --hagia-commit=SHA --narthex=/ABS --narthex-commit=SHA \
-//!   --profile=/ABS --c-sdk-manifest=/ABS --c-sdk-rev=SHA [--verifier-interpreter=/ABS]
+//!   --profile=/ABS --c-sdk-manifest=/ABS --c-sdk-rev=SHA [--verifier-interpreter=/ABS] \
+//!   [--release-id=ID] [--file=DEST=/ABS ...]
 //!
 //! --verifier-interpreter runs the release's packaged policy verifier through
 //! that shell, for a build sandbox without /usr/bin/env; the shipped script
 //! keeps its own interpreter line.
+//!
+//! --release-id names the release in place of the Sophia and integration
+//! commits: the flake derives it from every locked input, and the rendered
+//! profile names the release directory by it.
 
 use std::path::{Path, PathBuf};
 
@@ -27,9 +32,9 @@ const USAGE: &str = "usage: cargo xtask assemble-nix --out=/ABS --built-at-utc=Y
 --repo=/ABS --integration-commit=SHA --sophia-tree=/ABS --sophia-rev=SHA --sophia=/ABS \
 --factotum=/ABS --pam-helper=/ABS --xtask=/ABS --preflight=/ABS --hagia=/ABS --hagia-commit=SHA \
 --narthex=/ABS --narthex-commit=SHA --profile=/ABS --c-sdk-manifest=/ABS --c-sdk-rev=SHA \
-[--verifier-interpreter=/ABS] [--file=DEST=/ABS ...]";
+[--verifier-interpreter=/ABS] [--release-id=ID] [--file=DEST=/ABS ...]";
 
-const KEYS: [&str; 19] = [
+const KEYS: [&str; 20] = [
     "out",
     "built-at-utc",
     "repo",
@@ -49,6 +54,7 @@ const KEYS: [&str; 19] = [
     "c-sdk-manifest",
     "c-sdk-rev",
     "verifier-interpreter",
+    "release-id",
 ];
 
 /// Records what the Nix closure replaces: Hagia and narthex were built
@@ -90,6 +96,15 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
                 ));
             }
             Some(path)
+        }
+        None => None,
+    };
+    let release_id = match options.get("release-id") {
+        Some(id) if valid_release_id(id) => Some((*id).to_owned()),
+        Some(id) => {
+            return Err(format!(
+                "--release-id must be 1-64 of [a-z0-9-], starting alphanumeric: {id:?}"
+            ));
         }
         None => None,
     };
@@ -181,6 +196,7 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
         built_at_utc: built_at_utc.to_owned(),
         verifier_interpreter,
         extra_files,
+        release_id,
     };
     // `assemble` checks the C SDK manifest names --c-sdk-rev and runs the
     // packaged policy verifier, exactly as for package-desktop.
@@ -193,6 +209,15 @@ fn absolute(key: &str, value: &str) -> Result<PathBuf, String> {
         return Err(format!("--{key} must be absolute: {value}"));
     }
     Ok(path)
+}
+
+/// A release ID is one path component under the install prefix.
+fn valid_release_id(id: &str) -> bool {
+    (1..=64).contains(&id.len())
+        && id.as_bytes()[0].is_ascii_alphanumeric()
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
 /// `YYYY-MM-DDTHH:MM:SSZ`, digits where digits belong. A Nix build passes

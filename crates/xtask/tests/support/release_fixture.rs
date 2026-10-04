@@ -246,6 +246,7 @@ pub fn assembly(root: &Path) -> Assembly {
         out: root.join("release"),
         built_at_utc: "2026-09-27T00:00:00Z".into(),
         verifier_interpreter: None,
+        release_id: None,
         extra_files: Vec::new(),
     }
 }

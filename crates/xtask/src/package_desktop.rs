@@ -370,6 +370,9 @@ pub struct Assembly {
     /// rendered profile a Nix build adds. Executable sources are installed
     /// 0755, others 0644.
     pub extra_files: Vec<(PathBuf, PathBuf)>,
+    /// The release ID, when the caller binds more inputs than Sophia and
+    /// this repository (a Nix build binds every locked input).
+    pub release_id: Option<String>,
 }
 
 pub fn run(repo: &Path, args: &[String]) -> Result<Vec<String>, String> {
@@ -513,6 +516,7 @@ pub fn run_with(
         out,
         built_at_utc: utc_now()?,
         verifier_interpreter: None,
+        release_id: None,
         extra_files: Vec::new(),
     };
     assemble(&assembly)
@@ -736,6 +740,9 @@ fn utc_now() -> Result<String, String> {
 
 /// The release id: Sophia version, then the Sophia and integration commits.
 pub fn release_id(assembly: &Assembly) -> String {
+    if let Some(id) = &assembly.release_id {
+        return id.clone();
+    }
     format!(
         "{}-{}-{}",
         assembly.sophia_version,
