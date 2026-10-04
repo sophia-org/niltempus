@@ -33,7 +33,7 @@ fn unknown_product_ambiguous_revision_and_existing_destination_are_refused() {
     assert!(
         run(&args(&["narthex", &root, &"0".repeat(40), "unused"]))
             .unwrap_err()
-            .contains("prepare-wm-pair")
+            .contains("ships only with Hagia")
     );
     let zero = "0".repeat(40);
     assert!(

@@ -1,12 +1,12 @@
 //! `cargo xtask assemble-nix`: the release a Nix build assembles from
-//! prebuilt inputs is byte for byte the release `package-desktop` assembles
+//! prebuilt inputs is byte for byte the release `release::assemble` lays out
 //! from the same files, and malformed inputs are refused before anything is
 //! written.
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use xtask::nix_assembly::run;
-use xtask::package_desktop::{Assembly, assemble};
+use xtask::release::{Assembly, assemble};
 
 #[path = "support/release_fixture.rs"]
 mod fixture;
@@ -28,6 +28,7 @@ fn arguments(a: &Assembly, out: &Path) -> Vec<String> {
     [
         ("out", path(out)),
         ("built-at-utc", a.built_at_utc.clone()),
+        ("release-id", a.release_id.clone()),
         ("repo", path(&a.repo)),
         ("integration-commit", a.integration_commit.clone()),
         ("sophia-tree", path(&a.sophia_tree)),
@@ -42,7 +43,7 @@ fn arguments(a: &Assembly, out: &Path) -> Vec<String> {
         ("narthex", path(&a.pair.narthex)),
         ("narthex-commit", a.pair.narthex_commit.clone()),
         ("profile", path(&a.pair.profile)),
-        ("c-sdk-manifest", path(&a.pair.hagia_c_sdk_manifest)),
+        ("c-sdk", path(a.pair.hagia_c_sdk_manifest.parent().unwrap())),
         ("c-sdk-rev", a.pair.hagia_c_sdk_revision.clone()),
     ]
     .into_iter()
@@ -79,7 +80,7 @@ fn contents(root: &Path) -> BTreeMap<String, (Vec<u8>, u32)> {
 }
 
 #[test]
-fn a_nix_assembly_equals_the_package_desktop_assembly() {
+fn a_nix_assembly_equals_the_direct_assembly() {
     let dir = Dir::new("nix-equal");
     let mut assembly = assembly(&dir.0);
     let nix_out = dir.0.join("nix-release");
@@ -147,14 +148,7 @@ fn malformed_inputs_are_refused_before_any_output() {
                 .collect(),
             "--verifier-interpreter must be absolute",
         ),
-        (
-            valid
-                .iter()
-                .cloned()
-                .chain(["--release-id=../escape".to_owned()])
-                .collect(),
-            "--release-id must be",
-        ),
+        (with("release-id", "../escape"), "--release-id must be"),
         (
             valid
                 .iter()
@@ -174,7 +168,7 @@ fn malformed_inputs_are_refused_before_any_output() {
 }
 
 #[test]
-fn a_c_sdk_revision_the_manifest_does_not_name_leaves_no_release() {
+fn a_c_sdk_snapshot_that_is_not_the_revision_leaves_no_release() {
     let dir = Dir::new("nix-sdk");
     let assembly = assembly(&dir.0);
     let out = dir.0.join("nix-release");
@@ -185,7 +179,14 @@ fn a_c_sdk_revision_the_manifest_does_not_name_leaves_no_release() {
             *arg = format!("--c-sdk-rev={other}");
         }
     }
-    assert!(run(&args).is_err());
+    let error = run(&args).unwrap_err();
+    assert!(error.contains("not the supplied"), "{error}");
+    assert!(!out.exists());
+
+    // A vendored file that differs from the snapshot's manifest.
+    let sdk = assembly.pair.hagia_c_sdk_manifest.parent().unwrap();
+    fs::write(sdk.join("source/src/client.c"), "changed").unwrap();
+    assert!(run(&arguments(&assembly, &out)).is_err());
     assert!(!out.exists());
 }
 
@@ -207,7 +208,11 @@ fn extra_files_are_laid_out_and_sealed_and_bad_paths_are_refused() {
         "--file=share/sophia-niltempus-desktop/desktop.kdl={}",
         profile.display()
     ));
-    args.push("--release-id=niltempus-0123456789abcdef0123".to_owned());
+    for arg in &mut args {
+        if arg.starts_with("--release-id=") {
+            *arg = "--release-id=niltempus-0123456789abcdef0123".to_owned();
+        }
+    }
     let lines = run(&args).unwrap();
     assert!(
         lines[0].contains(" release_id=niltempus-0123456789abcdef0123 "),

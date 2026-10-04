@@ -1,11 +1,9 @@
 //! A client's vendored C SDK snapshot, bound to an explicitly supplied
-//! revision (Hagia's, for the WM pair): the manifest names it, upstream.commit
+//! revision (Hagia's, which the Nix release step checks): the manifest names it, upstream.commit
 //! hashes to it with source/'s tree, and source/ is exactly the manifest's
 //! files. Built offline from a synthetic snapshot; no SDK repository is read.
 use std::fs;
-use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Stdio};
 
 use xtask::c_sdk_pin::verify_vendored;
 
@@ -13,40 +11,9 @@ use xtask::c_sdk_pin::verify_vendored;
 mod fixture;
 use fixture::Dir;
 
-fn git_hash(kind: &str, bytes: &[u8]) -> String {
-    let mut child = Command::new("git")
-        .args(["hash-object", "--stdin", "-t", kind])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child.stdin.take().unwrap().write_all(bytes).unwrap();
-    let out = child.wait_with_output().unwrap();
-    assert!(out.status.success());
-    String::from_utf8(out.stdout).unwrap().trim().to_owned()
-}
-
 /// A valid snapshot under `dir`; returns its revision.
 fn snapshot(dir: &Path) -> String {
-    let source = dir.join("source");
-    fs::create_dir_all(source.join("src")).unwrap();
-    fs::write(source.join("README.md"), "sdk\n").unwrap();
-    fs::write(source.join("src/client.c"), "int x;\n").unwrap();
-    let inventory = xtask::git_tree::inventory(&source).unwrap();
-    let commit = format!(
-        "tree {}\nauthor A <a@example.org> 0 +0000\ncommitter A <a@example.org> 0 +0000\n\nsnapshot\n",
-        inventory.tree
-    );
-    let revision = git_hash("commit", commit.as_bytes());
-    fs::write(dir.join("upstream.commit"), &commit).unwrap();
-    let manifest = serde_json::json!({
-        "schema": 1,
-        "repository": "https://github.com/sophia-org/sophia-desktop-sdk-c",
-        "revision": revision,
-        "files": inventory.files,
-    });
-    fs::write(dir.join("manifest.json"), manifest.to_string()).unwrap();
-    revision
+    fixture::c_sdk_snapshot(dir)
 }
 
 #[test]
@@ -129,27 +96,4 @@ fn a_missing_manifest_or_unbound_commit_is_refused() {
         error.contains("does not identify upstream.commit"),
         "{error}"
     );
-}
-
-#[test]
-fn installed_snapshot_verifier_has_a_versioned_verdict_and_refuses_tamper() {
-    let dir = Dir::new("sdk-vendored-cli");
-    let revision = snapshot(&dir.0);
-    let run = || {
-        Command::new(env!("CARGO_BIN_EXE_xtask"))
-            .arg("verify-c-sdk")
-            .arg(&dir.0)
-            .arg(format!("--revision={revision}"))
-            .output()
-            .unwrap()
-    };
-    let output = run();
-    assert!(output.status.success(), "{output:?}");
-    let record = String::from_utf8(output.stdout).unwrap();
-    assert_eq!(record.lines().count(), 1);
-    assert!(record.starts_with(&format!(
-        "c_sdk_verification schema=1 status=pass revision={revision} manifest_sha256="
-    )));
-    fs::write(dir.0.join("source/src/client.c"), "changed").unwrap();
-    assert!(!run().status.success());
 }

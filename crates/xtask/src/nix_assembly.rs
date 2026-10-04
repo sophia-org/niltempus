@@ -1,38 +1,42 @@
 //! Assemble a desktop release from prebuilt inputs (`cargo xtask assemble-nix`),
-//! the release step of a Nix build. The Nix flake builds every product from
-//! its locked input, and flake.lock pins those inputs, so this step builds
-//! nothing, reads no git repository and applies no pins of its own. It lays
-//! out exactly the release `package-desktop` lays out, through the same
-//! `assemble`. The commits it records are the locked inputs' revisions; the
-//! digests are computed from the files given.
+//! the release step of the Nix build. The flake builds every product from its
+//! locked input, so this step builds nothing, reads no git repository and
+//! applies no pins of its own. The commits it records are the locked inputs'
+//! revisions; the digests are computed from the files given.
 //!
 //! cargo xtask assemble-nix --out=/ABS --built-at-utc=YYYY-MM-DDTHH:MM:SSZ \
-//!   --repo=/ABS --integration-commit=SHA --sophia-tree=/ABS --sophia-rev=SHA \
-//!   --sophia=/ABS --factotum=/ABS --pam-helper=/ABS --xtask=/ABS --preflight=/ABS \
-//!   --hagia=/ABS --hagia-commit=SHA --narthex=/ABS --narthex-commit=SHA \
-//!   --profile=/ABS --c-sdk-manifest=/ABS --c-sdk-rev=SHA [--verifier-interpreter=/ABS] \
-//!   [--release-id=ID] [--file=DEST=/ABS ...]
+//!   --release-id=ID --repo=/ABS --integration-commit=SHA --sophia-tree=/ABS \
+//!   --sophia-rev=SHA --sophia=/ABS --factotum=/ABS --pam-helper=/ABS --xtask=/ABS \
+//!   --preflight=/ABS --hagia=/ABS --hagia-commit=SHA --narthex=/ABS \
+//!   --narthex-commit=SHA --profile=/ABS --c-sdk=/ABS --c-sdk-rev=SHA \
+//!   [--verifier-interpreter=/ABS] [--file=DEST=/ABS ...]
+//!
+//! --release-id names the release directory under the install prefix; the
+//! flake derives it from every locked input, and the rendered profile names
+//! the release by it.
+//!
+//! --c-sdk is Hagia's vendored C SDK snapshot. It must be exactly
+//! --c-sdk-rev, file for file, before its manifest is sealed in the release.
 //!
 //! --verifier-interpreter runs the release's packaged policy verifier through
 //! that shell, for a build sandbox without /usr/bin/env; the shipped script
 //! keeps its own interpreter line.
 //!
-//! --release-id names the release in place of the Sophia and integration
-//! commits: the flake derives it from every locked input, and the rendered
-//! profile names the release directory by it.
+//! --file=DEST=SRC adds one release file before the release is sealed: the
+//! components and the rendered profile.
 
 use std::path::{Path, PathBuf};
 
-use crate::package_desktop::{Assembly, Binaries, assemble, workspace_version};
+use crate::c_sdk_pin::{SNAPSHOT_MANIFEST, verify_vendored};
 use crate::product_artifact::options;
-use crate::wm_pair::VerifiedPair;
+use crate::release::{Assembly, Binaries, WmPair, assemble, valid_release_id, workspace_version};
 use crate::{hex, read, sha256};
 
 const USAGE: &str = "usage: cargo xtask assemble-nix --out=/ABS --built-at-utc=YYYY-MM-DDTHH:MM:SSZ \
---repo=/ABS --integration-commit=SHA --sophia-tree=/ABS --sophia-rev=SHA --sophia=/ABS \
---factotum=/ABS --pam-helper=/ABS --xtask=/ABS --preflight=/ABS --hagia=/ABS --hagia-commit=SHA \
---narthex=/ABS --narthex-commit=SHA --profile=/ABS --c-sdk-manifest=/ABS --c-sdk-rev=SHA \
-[--verifier-interpreter=/ABS] [--release-id=ID] [--file=DEST=/ABS ...]";
+--release-id=ID --repo=/ABS --integration-commit=SHA --sophia-tree=/ABS --sophia-rev=SHA \
+--sophia=/ABS --factotum=/ABS --pam-helper=/ABS --xtask=/ABS --preflight=/ABS --hagia=/ABS \
+--hagia-commit=SHA --narthex=/ABS --narthex-commit=SHA --profile=/ABS --c-sdk=/ABS \
+--c-sdk-rev=SHA [--verifier-interpreter=/ABS] [--file=DEST=/ABS ...]";
 
 const KEYS: [&str; 20] = [
     "out",
@@ -51,16 +55,11 @@ const KEYS: [&str; 20] = [
     "narthex",
     "narthex-commit",
     "profile",
-    "c-sdk-manifest",
+    "c-sdk",
     "c-sdk-rev",
     "verifier-interpreter",
     "release-id",
 ];
-
-/// Records what the Nix closure replaces: Hagia and narthex were built
-/// from their locked flake inputs, not from a reviewed Nim manifest. The
-/// release manifest does not carry it.
-const NIX_CLOSURE: &str = "nix-flake-closure";
 
 pub fn run(args: &[String]) -> Result<Vec<String>, String> {
     // --file=DEST=SRC may repeat: each adds one release file before sealing.
@@ -99,15 +98,6 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
         }
         None => None,
     };
-    let release_id = match options.get("release-id") {
-        Some(id) if valid_release_id(id) => Some((*id).to_owned()),
-        Some(id) => {
-            return Err(format!(
-                "--release-id must be 1-64 of [a-z0-9-], starting alphanumeric: {id:?}"
-            ));
-        }
-        None => None,
-    };
     let get = |key: &str| {
         options
             .get(key)
@@ -124,6 +114,12 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
         if !hex(get(key)?, 40) {
             return Err(format!("--{key} must be 40 lowercase hex: {:?}", get(key)?));
         }
+    }
+    let release_id = get("release-id")?;
+    if !valid_release_id(release_id) {
+        return Err(format!(
+            "--release-id must be 1-64 of [a-z0-9-], starting alphanumeric: {release_id:?}"
+        ));
     }
     let built_at_utc = get("built-at-utc")?;
     if !utc_timestamp(built_at_utc) {
@@ -156,24 +152,17 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
         ));
     }
     let sophia_tree = directory("sophia-tree")?;
-    let (hagia, narthex, profile, sdk_manifest) = (
-        file("hagia")?,
-        file("narthex")?,
-        file("profile")?,
-        file("c-sdk-manifest")?,
-    );
-    let pair = VerifiedPair {
-        dir: hagia.parent().unwrap_or(Path::new("/")).to_path_buf(),
+    let (hagia, narthex, profile) = (file("hagia")?, file("narthex")?, file("profile")?);
+    let sdk = verify_vendored(&directory("c-sdk")?, get("c-sdk-rev")?)?;
+    let pair = WmPair {
         hagia_sha256: sha256(&read(&hagia)?),
         narthex_sha256: sha256(&read(&narthex)?),
         profile_sha256: sha256(&read(&profile)?),
         hagia_commit: get("hagia-commit")?.to_owned(),
         narthex_commit: get("narthex-commit")?.to_owned(),
-        hagia_nim_deps_sha256: NIX_CLOSURE.to_owned(),
-        narthex_nim_deps_sha256: NIX_CLOSURE.to_owned(),
-        hagia_c_sdk_manifest_sha256: sha256(&read(&sdk_manifest)?),
-        hagia_c_sdk_revision: get("c-sdk-rev")?.to_owned(),
-        hagia_c_sdk_manifest: sdk_manifest,
+        hagia_c_sdk_revision: sdk.revision,
+        hagia_c_sdk_manifest: directory("c-sdk")?.join(SNAPSHOT_MANIFEST),
+        hagia_c_sdk_manifest_sha256: sdk.manifest_sha256,
         hagia,
         narthex,
         profile,
@@ -196,10 +185,8 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
         built_at_utc: built_at_utc.to_owned(),
         verifier_interpreter,
         extra_files,
-        release_id,
+        release_id: release_id.to_owned(),
     };
-    // `assemble` checks the C SDK manifest names --c-sdk-rev and runs the
-    // packaged policy verifier, exactly as for package-desktop.
     assemble(&assembly)
 }
 
@@ -209,15 +196,6 @@ fn absolute(key: &str, value: &str) -> Result<PathBuf, String> {
         return Err(format!("--{key} must be absolute: {value}"));
     }
     Ok(path)
-}
-
-/// A release ID is one path component under the install prefix.
-fn valid_release_id(id: &str) -> bool {
-    (1..=64).contains(&id.len())
-        && id.as_bytes()[0].is_ascii_alphanumeric()
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
 /// `YYYY-MM-DDTHH:MM:SSZ`, digits where digits belong. A Nix build passes

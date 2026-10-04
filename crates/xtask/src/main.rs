@@ -4,18 +4,15 @@ use std::path::{Path, PathBuf};
 const USAGE: &str = "usage:
   xtask prepare-bemenu-artifact SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR
   xtask prepare-product-artifact lom|provlita|hagia SOURCE-REPO SIGNED-COMMIT NEW-OUTPUT-DIR --build-dir=/ABS [--nim-deps=/ABS --nim-deps-sha256=SHA]
-  xtask prepare-wm-pair --hagia REPO COMMIT --narthex REPO COMMIT NEW-OUTPUT-DIR --build-dir=/ABS --hagia-nim-deps=/ABS --hagia-nim-deps-sha256=SHA --narthex-nim-deps=/ABS --narthex-nim-deps-sha256=SHA --hagia-c-sdk-rev=REV
   xtask prepare-physical-inputs --sophia-root=/ABS --build-dir=/ABS --out=/ABS/NEW --sophia-features=F [--sophia-packages=P] [--hagia=... --narthex=...] [--profile=OWNER:PATH ...]
   xtask prepare-physical-inputs verify --out=/ABS --manifest-sha256=SHA
+  xtask assemble-nix --out=/ABS ...   (the Nix build's release step: crates/xtask/src/nix_assembly.rs)
   xtask nim-deps draft --store=/ABS --source=/ABS --commit=SHA --product=hagia|narthex --nim=/ABS --nim-lib=/ABS --gcc=/ABS --bwrap=/ABS --build-dir=/ABS --pin=NAME=VERSION ... --out=/ABS/NEW
-  xtask package-desktop --sophia-root=/ABS --sophia-rev=SHA --wm-pair=/ABS --wm-pair-commits=H,N --wm-pair-sha256=H,N --wm-pair-profile-sha256=SHA --wm-pair-c-sdk-rev=REV --build-dir=/ABS --out=/ABS/NEW
   xtask direct-scanout-gate [WIDTH HEIGHT HOLD WORKLOAD] [--overlay-proof] [--cost] [--cursor] [--atomic-cursor]
   xtask verify-archives [--legacy]
   xtask output-file-native verify --inputs=/ABS --inputs-manifest-sha256=SHA --preparation=/ABS --preparation-sha256=SHA --run=/ABS --run-manifest-sha256=SHA
   xtask output-file-native prepare-run ...   (explicit inputs and layouts: docs/output-file-native.md)
   xtask output-file-native run --plan=/ABS/run-plan.json --plan-sha256=SHA --out=/ABS/NEW
-  xtask verify-release /ABS/RELEASE-DIR --c-sdk-rev=<40 lowercase hex>   (read-only; runs without the checkout)
-  xtask verify-c-sdk /ABS/SNAPSHOT --revision=<40 lowercase hex>   (read-only; runs without the checkout)
   xtask desktop-comparison install-reference|prepare|prepare-soak|cursor-theme|gate|status|attest|preflight|qualify|capture|finalize|replay|workload|verify|report ...
   xtask session-recipe prepare-arguments|prepare-inputs|stage-proofs|prepare-environment --name=value ... -- [session arguments]
   xtask check-pins
@@ -51,43 +48,21 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
         xtask::session::run(&arguments[1..]).map_err(|e| e.to_string())?;
         return Ok(Vec::new());
     }
-    // Read-only release verification for the installer: no repository.
-    if arguments.first().map(String::as_str) == Some("verify-release") {
-        return xtask::release_verify::run(&arguments[1..]);
-    }
     // A Nix build's release step: every input is a store path, and the
     // build checkout this binary came from does not exist.
     if arguments.first().map(String::as_str) == Some("assemble-nix") {
         return xtask::nix_assembly::run(&arguments[1..]);
     }
-    // Product builders take explicit signed sources and private build inputs.
-    // The installed component updater must not need this build checkout.
+    // Product builders take explicit signed sources and private build inputs,
+    // and need no build checkout.
     if arguments.first().map(String::as_str) == Some("prepare-product-artifact") {
         return xtask::product_artifact::run(&arguments[1..]);
-    }
-    if arguments.first().map(String::as_str) == Some("verify-c-sdk") {
-        let [_, path, revision] = arguments else {
-            return Err("usage: xtask verify-c-sdk /ABS/SNAPSHOT --revision=40hex".into());
-        };
-        let revision = revision
-            .strip_prefix("--revision=")
-            .ok_or("missing SDK revision")?;
-        if !Path::new(path).is_absolute() {
-            return Err("SDK snapshot must be absolute".into());
-        }
-        let snapshot = xtask::c_sdk_pin::verify_vendored(Path::new(path), revision)?;
-        return Ok(vec![format!(
-            "c_sdk_verification schema=1 status=pass revision={} manifest_sha256={}",
-            snapshot.revision, snapshot.manifest_sha256
-        )]);
     }
     let repo = workspace_root()?;
     match arguments.first().map(String::as_str) {
         Some("prepare-bemenu-artifact") => xtask::bemenu_artifact::run(&repo, &arguments[1..]),
-        Some("prepare-wm-pair") => xtask::wm_pair::run(&arguments[1..]),
         Some("prepare-physical-inputs") => xtask::physical_inputs::run(&repo, &arguments[1..]),
         Some("nim-deps") => xtask::nim_deps::run(&arguments[1..]),
-        Some("package-desktop") => xtask::package_desktop::run(&repo, &arguments[1..]),
         Some("direct-scanout-gate") => gate_direct_scanout(&repo, &arguments[1..]),
         Some("verify-archives") => xtask::verify_archives::run(&repo, &arguments[1..]),
         Some("output-file-native")

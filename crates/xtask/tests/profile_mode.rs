@@ -229,16 +229,13 @@ fn retired() -> Vec<String> {
 const FROZEN: [&str; 1] = ["crates/xtask/tests/fixtures/session_arguments_before_t027.sh"];
 
 // These exact lines attest compatibility or remove inherited legacy values.
-// None may select a legacy value for a newly launched process. Go's probe,
-// launcher and environment tests exercise their behavior.
+// None may select a legacy value for a newly launched process.
+// tests/desktop_launcher.rs exercises the launcher's.
 fn compatibility_lines() -> Vec<(&'static str, String)> {
     vec![
-        ("installer/preflight.go", ["const policyEnvironmentContract = \"hagia_environment_contract schema=1 wm_policy=sophia-wm-policy-v1 names=SOPHIA_WM_POLICY_CHECKPOINT,SOPHIA_WM_POLICY_CANDIDATE,SOPHIA_WM_POLICY_PROFILE_ACTIVATION legacy=", "HAGIA_POLICY", "_CHECKPOINT,", "HAGIA_POLICY", "_CANDIDATE,", "HAGIA_POLICY", "_PROFILE_ACTIVATION precedence=presence\""].concat()),
-        ("installer/release.go", ["unset SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE ", "SOPHIA_HAGIA", "_PROFILE_MODE SOPHIA_DESKTOP_PROFILE_MODE"].concat()),
+        ("tools/installed/sophia-niltempus-desktop-session", ["expected='hagia_environment_contract schema=1 wm_policy=sophia-wm-policy-v1 names=SOPHIA_WM_POLICY_CHECKPOINT,SOPHIA_WM_POLICY_CANDIDATE,SOPHIA_WM_POLICY_PROFILE_ACTIVATION legacy=", "HAGIA_POLICY", "_CHECKPOINT,", "HAGIA_POLICY", "_CANDIDATE,", "HAGIA_POLICY", "_PROFILE_ACTIVATION precedence=presence'"].concat()),
+        ("tools/installed/sophia-niltempus-desktop-session", ["unset SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE ", "SOPHIA_HAGIA", "_PROFILE_MODE SOPHIA_DESKTOP_PROFILE_MODE"].concat()),
         ("docs/release-recovery.md", ["env -u SOPHIA_DESKTOP_PROFILE_MODE -u ", "SOPHIA_HAGIA", "_PROFILE_MODE \\"].concat()),
-        ("installer/launcher_test.go", ["printf '%s\\n' \"$", "SOPHIA_HAGIA", "_BIN\" \"$SOPHIA_DESKTOP_PROFILE\" \"${", "SOPHIA_HAGIA", "_PROFILE_MODE-unset}\" \"${SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE-unset}\" \"$SOPHIA_INSTALL_PREFIX\" \"$@\""].concat()),
-        ("installer/launcher_test.go", ["\tcmd.Env = append(os.Environ(), \"XDG_RUNTIME_DIR=\"+root, \"XDG_STATE_HOME=\"+state, \"", "SOPHIA_HAGIA", "_BIN=/stale/hagia\", \"SOPHIA_DESKTOP_PROFILE=/stale/profile\", \"", "SOPHIA_HAGIA", "_PROFILE_MODE=packaged-promotion\", \"SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1\")"].concat()),
-        ("installer/development_test.go", ["\tenv := strings.Join(buildEnvironment([]string{\"", "HAGIA_POLICY", "_CHECKPOINT=/live\", \"", "HAGIA_POLICY", "_SOCKET=/live/socket\", \"DBUS_SESSION_BUS_ADDRESS=live\", \"PATH=/usr/bin\"}), \"\\n\")"].concat()),
     ]
 }
 

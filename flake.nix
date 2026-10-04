@@ -129,12 +129,16 @@
       # component's private config: those live in the user's home, which the
       # build cannot read, and only their presence is checked here.
       desktop = pkgs.runCommand "niltempus-desktop-${releaseId}" {
-        nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnused pkgs.gawk pkgs.gnugrep ];
+        # git hashes the vendored C SDK snapshot to check its revision.
+        nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnused pkgs.gawk pkgs.gnugrep pkgs.git ];
         passthru = { inherit releaseId; };
       } ''
+        # The launcher checks Hagia's WM environment contract at every login;
+        # check the packaged Hagia against the same line now.
         hagia=${hagiaPackage}/bin/hagia
+        expected=$(sed -n "s/^expected='\(.*\)'$/\1/p" ${self}/tools/installed/sophia-niltempus-desktop-session)
         contract=$($hagia config check-environment-contract)
-        test "$contract" = "hagia_environment_contract schema=1 wm_policy=sophia-wm-policy-v1 names=SOPHIA_WM_POLICY_CHECKPOINT,SOPHIA_WM_POLICY_CANDIDATE,SOPHIA_WM_POLICY_PROFILE_ACTIVATION legacy=HAGIA_POLICY_CHECKPOINT,HAGIA_POLICY_CANDIDATE,HAGIA_POLICY_PROFILE_ACTIVATION precedence=presence" \
+        test -n "$expected" && test "$contract" = "$expected" \
           || { echo "Hagia does not confirm the WM environment contract: $contract" >&2; exit 1; }
 
         mkdir check
@@ -170,7 +174,7 @@
           --hagia=$hagia --hagia-commit=${revision hagia} \
           --narthex=${narthexPackage}/bin/narthex --narthex-commit=${revision narthex} \
           --profile=${hagia}/examples/config/default.kdl \
-          --c-sdk-manifest=${sdk}/manifest.json --c-sdk-rev=${sdkRevision} \
+          --c-sdk=${sdk} --c-sdk-rev=${sdkRevision} \
           --verifier-interpreter=${pkgs.bash}/bin/bash \
           --file=target/release/lom=${components.lom} \
           --file=target/release/bemenu-sophia=${components.bemenu-sophia} \

@@ -13,7 +13,6 @@ checks=(
     tools/check_installed_native_chrome_verifier.sh
     tools/check_installed_session_lifecycle_verifier.sh
     tools/check_installed_watchdog_recovery.sh
-    tools/check_installed_hagia_ledger.sh
 )
 for check in "${checks[@]}"; do
     "$check"

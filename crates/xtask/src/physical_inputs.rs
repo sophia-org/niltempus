@@ -38,10 +38,10 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::bemenu_artifact::{SignedTree, authorize, set_mode, signed_tree_under};
-use crate::nim_deps::{FileEntry, Manifest, NOTE, inventory, writable_again};
-use crate::package_desktop::{
+use crate::checkout::{
     cargo, clean_checkout, git_text, private_dir, provisioned, resolve_lexically,
 };
+use crate::nim_deps::{FileEntry, Manifest, NOTE, inventory, writable_again};
 use crate::product_artifact::{Built, NimDeps, TOOLCHAIN_NOTE, build, nim_deps_option, product};
 use crate::records::{Record, parse_text, relative_path, render};
 use crate::{hex, pins, read, sha256};

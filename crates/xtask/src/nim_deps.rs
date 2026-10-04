@@ -1060,7 +1060,7 @@ fn draft(args: &[String]) -> Result<Vec<String>, String> {
         return Err(format!("--out already exists: {}", out.display()));
     }
     let build_dir = PathBuf::from(get("build-dir")?);
-    crate::package_desktop::private_dir(&build_dir)?;
+    crate::checkout::private_dir(&build_dir)?;
     let store = std::fs::canonicalize(get("store")?).map_err(|e| format!("--store: {e}"))?;
     let toolchain = probe_toolchain(
         Path::new(get("nim")?),
