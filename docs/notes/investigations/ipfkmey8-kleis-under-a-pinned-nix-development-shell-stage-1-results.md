@@ -63,6 +63,24 @@ of the [Nix flake plan](../plans/c7g8cnd5-nix-flake-prototype-for-reproducible-d
 4. **The dev shell provides no isolation.** It standardizes tools and
    environment only, so the bwrap-isolated product build stays the gate.
 
+## Stage 2: sandboxed derivation (measurement only, approved 2026-10-04)
+
+kleis branch `nix/devshell`, commit `d8430385` (signed). `packages.kleis` runs
+kleis's own `nimble build` task inside Nix's sandbox, with the 98 unit tests as
+its check phase; `checks.format` runs `nimble fmtCheck`.
+
+| Check | Result |
+| --- | --- |
+| Sandboxed build | 18 s; 98 tests OK inside the sandbox; format check passes |
+| Determinism, first attempt | **Not deterministic.** `nix build --rebuild` reported that the output differs. diffoscope showed only Nim `NTIv2__<hash>` type-info symbols, plus a one-byte `.strtab` size change |
+| Cause | The Nimble home was a random `mktemp` directory, and Nim keeps its build cache beneath `HOME` |
+| Determinism, fixed home path | `nix build --rebuild`: identical, twice. Binary sha256 `23bba0cd8133ce0618517ff5445b72dd9b4887c1cbdf33560c3943bf29c05ce1` |
+| Production `LockFileService` | `matrix_images=3 presented=6 retired=4 indigo=true back_to_matrix=true blank=true` |
+
+Nix's fixed `/build` path was not enough on its own: the cache path inside the
+build also had to be fixed. That is direct evidence for
+[n001](rm8sjc2m-desktop-product-builds-are-not-byte-reproducible-across-build-directories.md).
+
 ## Validation and remaining work
 
 **Stage 1's exit is met:**
@@ -72,11 +90,10 @@ of the [Nix flake plan](../plans/c7g8cnd5-nix-flake-prototype-for-reproducible-d
 - an offline rebuild;
 - the real `LockFileService` run.
 
-**The remaining part of n002's exit is the decision on stage 2.** It belongs to
-niltempus and w9:pT. My recommendation: admit stage 2 as a measurement. Build a
-sandboxed kleis derivation, run the equivalence and gate checks, then build it
-twice in different directories (for n001), and only then consider replacing a
-bwrap gate. Deployment stays unchanged until finding 2 is decided.
+Stage 2 was approved as a measurement and is recorded above. Still open: the
+deployment question (finding 2), and whether any bwrap gate is replaced. That
+needs controls equivalent to the gate's. Both are decisions for niltempus and
+w9:pT.
 
 ## Connections
 

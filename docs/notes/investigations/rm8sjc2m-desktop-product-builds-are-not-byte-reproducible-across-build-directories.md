@@ -67,6 +67,15 @@ example a Nix derivation under `/build`) removes one cause. It does not on its
 own guarantee reproducibility: timestamps, build ids, link order and toolchain
 identity still need checking.
 
+**Controlled confirmation for Nim (2026-10-04).** In the kleis Nix
+derivation (`nix/devshell` `d8430385`), two sandboxed builds at the same `/build`
+path still differed, only in `NTIv2__<hash>` symbols, while the Nim cache lived
+beneath a randomly named `HOME`. With that `HOME` path fixed, the rebuilds were
+byte-identical. Nim's type-info hashes depend on the build and cache paths, so
+the niltempus product builder's per-run `--nimcache` and scratch paths
+(`product_artifact.rs`) are the confirmed cause class for Hagia and Narthex.
+Bemenu's and the xtask's embedded paths are still inferred from strings.
+
 ## Validation and remaining work
 
 The exit is two release builds of the same plan, in different directories,
