@@ -55,6 +55,11 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
     if arguments.first().map(String::as_str) == Some("verify-release") {
         return xtask::release_verify::run(&arguments[1..]);
     }
+    // A Nix build's release step: every input is a store path, and the
+    // build checkout this binary came from does not exist.
+    if arguments.first().map(String::as_str) == Some("assemble-nix") {
+        return xtask::nix_assembly::run(&arguments[1..]);
+    }
     // Product builders take explicit signed sources and private build inputs.
     // The installed component updater must not need this build checkout.
     if arguments.first().map(String::as_str) == Some("prepare-product-artifact") {

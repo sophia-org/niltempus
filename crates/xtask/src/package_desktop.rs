@@ -652,7 +652,7 @@ impl StagedTree {
     }
 }
 
-fn workspace_version(tree: &Path) -> Result<String, String> {
+pub(crate) fn workspace_version(tree: &Path) -> Result<String, String> {
     let manifest = String::from_utf8(read(&tree.join("Cargo.toml"))?).map_err(|e| e.to_string())?;
     manifest
         .lines()
