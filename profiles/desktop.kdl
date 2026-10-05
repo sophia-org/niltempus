@@ -281,7 +281,8 @@ session {
     lock-provider {
         executable "@kleis@"
         config "/home/niltempus/.config/kleis/config.kdl"
-        gpu "denied"
+        // The granted render node: kleis draws Matrix frames offscreen on it.
+        gpu "direct"
     }
     startup
 }
