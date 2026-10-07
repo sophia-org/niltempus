@@ -41,6 +41,17 @@ login does. The build cannot read your home directory, so in that check each
 component's configuration file is an empty stand-in; only its presence is
 checked there.
 
+The daily layout uses DP-1 at 2560x1440, 120 Hz, with workspaces 1 through 6.
+The output block sets `inherit-sophia #false`, so other detected outputs are
+disabled by profile reconciliation. The iGPU monitor is reserved for
+development in this layout. It is deliberately unnamed: even a named disabled
+connector must exist in the startup topology, so naming an unplugged monitor
+can refuse login with `UnknownConnector`.
+
+This controls the desktop layout, not DRM card ownership. Sophia can open
+cards and bring up heads before reconciling the profile. Running another KMS
+session on the iGPU still needs separate card and seat/VT ownership.
+
 ## Installing
 
 `tools/desktop install` builds the release, copies it to

@@ -9,13 +9,13 @@ policy {
     layout-cycle scroller split-tree notion spiral dwindle center-tile
     // Triad: workspaces.default-count 3
     view-count 3
-    // Stable global numbers; monitor affinity is an explicit WM policy key.
+    // All six workspaces belong to the daily DP-1 desktop (policy key 1).
     workspace 1 output-key=1
     workspace 2 output-key=1
     workspace 3 output-key=1
-    workspace 4 output-key=2
-    workspace 5 output-key=2
-    workspace 6 output-key=2
+    workspace 4 output-key=1
+    workspace 5 output-key=1
+    workspace 6 output-key=1
     // Niri spacing: one gap around and between panes; no reserved edge previews.
     gaps 8
     // Tile master area, at Triad's defaults. Both adjust at runtime.
@@ -326,15 +326,9 @@ output {
         focus-at-startup #true
         vrr 1
     }
-    named DP-2 {
-        policy-key 2
-        mode "1920x1080@60"
-        scale auto
-        position 2560 0
-        enabled #true
-        vrr 0
-    }
-    inherit-sophia #true
+    // Keep other outputs outside the daily layout. The iGPU monitor is for
+    // development; naming even a disabled connector would require it at login.
+    inherit-sophia #false
 }
 broker {
     enabled #false
