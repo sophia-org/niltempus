@@ -288,13 +288,12 @@
         "rust-overlay": "rust-overlay_3"
       },
       "locked": {
-        "lastModified": 1791554388,
-        "narHash": "sha256-CRxudX4IKW5RgmJzHpiWShwy9tfqNkmyZHqz5vgqkxo=",
-        "ref": "fix/workspace-render-recovery-20261009",
-        "rev": "bacfdb207567afa8dc57ba5a99ba14f381afbe74",
-        "revCount": 4342,
-        "type": "git",
-        "url": "file:///home/niltempus/dev/sophia-workspace-recovery"
+        "lastModified": 1791555420,
+        "narHash": "sha256-37PYF8ESUdyJtO3b8QwrqEp+USkB4LocbQSQ4HQjkys=",
+        "owner": "sophia-org",
+        "repo": "sophia",
+        "rev": "22b124c882be0044fb5fceb7c9bdf5d3c6d6f0f0",
+        "type": "github"
       },
       "original": {
         "owner": "sophia-org",
