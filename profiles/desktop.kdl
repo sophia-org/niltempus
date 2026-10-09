@@ -260,6 +260,8 @@ shortcut {
 }
 session {
     window-manager "@hagia@"
+    // Keep the development GPU outside this desktop even without its seat1 rule.
+    exclude-gpu "pci-0000:16:00.0"
     // Admits host scripting for WM reloads.
     control "host-admin"
     application "terminal" { exec "/usr/bin/kitty"; }
@@ -328,8 +330,7 @@ output {
         focus-at-startup #true
         vrr 1
     }
-    // Keep the development monitor excluded even if it is absent or its seat
-    // rule is removed. Card ownership is still controlled by the seat rule.
+    // Keep the development connector dark as well as excluding its GPU above.
     named HDMI-A-2 { enabled #false; }
     // Unnamed outputs stay off unless a fallback is needed to reach the desktop.
     inherit-sophia #false

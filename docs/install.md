@@ -42,20 +42,27 @@ component's configuration file is an empty stand-in; only its presence is
 checked there.
 
 The daily layout prefers DP-1 at 2560x1440, 120 Hz, with workspaces 1 through 6.
-Its adaptive output policy tolerates an absent preferred monitor. If no configured
-output is available, one connected unnamed output receives the desktop at its
-preferred mode and keeps workspace affinity 1. This permits moving the main
-monitor to another port without preventing login. Other unnamed outputs remain
-disabled ordinarily. HDMI-A-2 is explicitly disabled for development; its absence
-also permits login. Settings on a present named output still require support.
-Fallback uses the monitor's preferred refresh rate with VRR disabled; the saved
-120 Hz and VRR settings remain specific to DP-1.
+Its adaptive output policy resolves available outputs before activating heads.
+If the preferred output is absent, one eligible connected output receives the
+desktop and workspace affinity 1. The current fallback is retained while it
+remains eligible; DP-1's return restores its preferences and affinity. Other
+unnamed outputs remain disabled ordinarily, and HDMI-A-2 is explicitly disabled.
 
-This controls the desktop layout, not DRM card ownership. Sophia can open
-cards assigned to its seat and bring up heads before reconciling the profile.
-The host's iGPU seat1 rule keeps that card out of the normal seat0 session.
-Running another KMS session still needs separate card and seat/VT ownership.
-Startup fallback does not establish live output loss/return recovery.
+Unsupported preferences use advertised safe settings without changing the
+profile. A fallback normally uses the monitor's preferred timing with VRR off.
+A hardware refusal permits one conservative attempt on one complete logical
+output group at an advertised timing near 60 Hz, unit scale and VRR off.
+With no usable output, startup waits before launching applications; a running
+session retains its application and workspace state while waiting for return.
+A settings reload that would leave a working desktop without an output is
+declined. These paths still need attended acceptance on the installed release.
+
+The session also excludes the development GPU by its exact udev identity,
+`pci-0000:16:00.0`, before opening KMS or render nodes. This is separate from
+disabling a connector. Keep the host's iGPU seat1 rule as well; the profile
+exclusion only narrows which devices this desktop may use. Another KMS session
+still needs separate card and seat/VT ownership. The profile and the Sophia
+version that understands it must be released together.
 
 ## Installing
 
