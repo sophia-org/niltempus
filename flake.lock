@@ -288,11 +288,11 @@
         "rust-overlay": "rust-overlay_3"
       },
       "locked": {
-        "lastModified": 1791566435,
-        "narHash": "sha256-wJWIcXycaYIoM4qGdwWyNnsrsAYBZDb+GvyK8CnbB1Q=",
+        "lastModified": 1791578022,
+        "narHash": "sha256-zZLaK+IKCs9EK6Whx/Cw80Sf2SQyPfM5BshNSe+lLV4=",
         "owner": "sophia-org",
         "repo": "sophia",
-        "rev": "83c68c7c47d344aa07b53535bd59b5c4c7928d1d",
+        "rev": "3ef3d5b77c013fd96a8a64b1930b29ffff990b6e",
         "type": "github"
       },
       "original": {
