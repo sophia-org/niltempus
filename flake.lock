@@ -288,13 +288,13 @@
         "rust-overlay": "rust-overlay_3"
       },
       "locked": {
-        "lastModified": 1791548949,
-        "narHash": "sha256-AzhqJ4D745qO5OsudFROGt8Xc5A59hEyrB5borcdABo=",
-        "ref": "fix/t310-startup-output-fallback",
-        "rev": "838d5b16acad9a6afd119ce25b8622c068b32646",
-        "revCount": 4341,
+        "lastModified": 1791554388,
+        "narHash": "sha256-CRxudX4IKW5RgmJzHpiWShwy9tfqNkmyZHqz5vgqkxo=",
+        "ref": "fix/workspace-render-recovery-20261009",
+        "rev": "bacfdb207567afa8dc57ba5a99ba14f381afbe74",
+        "revCount": 4342,
         "type": "git",
-        "url": "file:///home/niltempus/dev/sophia-output-fallback"
+        "url": "file:///home/niltempus/dev/sophia-workspace-recovery"
       },
       "original": {
         "owner": "sophia-org",
