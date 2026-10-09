@@ -41,16 +41,21 @@ login does. The build cannot read your home directory, so in that check each
 component's configuration file is an empty stand-in; only its presence is
 checked there.
 
-The daily layout uses DP-1 at 2560x1440, 120 Hz, with workspaces 1 through 6.
-The output block sets `inherit-sophia #false`, so other detected outputs are
-disabled by profile reconciliation. The iGPU monitor is reserved for
-development in this layout. It is deliberately unnamed: even a named disabled
-connector must exist in the startup topology, so naming an unplugged monitor
-can refuse login with `UnknownConnector`.
+The daily layout prefers DP-1 at 2560x1440, 120 Hz, with workspaces 1 through 6.
+Its adaptive output policy tolerates an absent preferred monitor. If no configured
+output is available, one connected unnamed output receives the desktop at its
+preferred mode and keeps workspace affinity 1. This permits moving the main
+monitor to another port without preventing login. Other unnamed outputs remain
+disabled ordinarily. HDMI-A-2 is explicitly disabled for development; its absence
+also permits login. Settings on a present named output still require support.
+Fallback uses the monitor's preferred refresh rate with VRR disabled; the saved
+120 Hz and VRR settings remain specific to DP-1.
 
 This controls the desktop layout, not DRM card ownership. Sophia can open
-cards and bring up heads before reconciling the profile. Running another KMS
-session on the iGPU still needs separate card and seat/VT ownership.
+cards assigned to its seat and bring up heads before reconciling the profile.
+The host's iGPU seat1 rule keeps that card out of the normal seat0 session.
+Running another KMS session still needs separate card and seat/VT ownership.
+Startup fallback does not establish live output loss/return recovery.
 
 ## Installing
 

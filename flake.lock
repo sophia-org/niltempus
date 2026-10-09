@@ -288,12 +288,13 @@
         "rust-overlay": "rust-overlay_3"
       },
       "locked": {
-        "lastModified": 1791512590,
-        "narHash": "sha256-m66nMlywbtCTKkV3UE+pWue2+kCDFOCbVbKAle1YW3c=",
-        "owner": "sophia-org",
-        "repo": "sophia",
-        "rev": "19403a511a1ad268681bbe3875be9214f5d6daf6",
-        "type": "github"
+        "lastModified": 1791548949,
+        "narHash": "sha256-AzhqJ4D745qO5OsudFROGt8Xc5A59hEyrB5borcdABo=",
+        "ref": "fix/t310-startup-output-fallback",
+        "rev": "838d5b16acad9a6afd119ce25b8622c068b32646",
+        "revCount": 4341,
+        "type": "git",
+        "url": "file:///home/niltempus/dev/sophia-output-fallback"
       },
       "original": {
         "owner": "sophia-org",

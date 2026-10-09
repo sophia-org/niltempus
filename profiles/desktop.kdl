@@ -9,7 +9,7 @@ policy {
     layout-cycle scroller split-tree notion spiral dwindle center-tile
     // Triad: workspaces.default-count 3
     view-count 3
-    // All six workspaces belong to the daily DP-1 desktop (policy key 1).
+    // All six workspaces follow the preferred or fallback desktop (policy key 1).
     workspace 1 output-key=1
     workspace 2 output-key=1
     workspace 3 output-key=1
@@ -317,6 +317,8 @@ input {
     inherit-sophia #true
 }
 output {
+    availability "adaptive"
+    fallback-policy-key 1
     named DP-1 {
         policy-key 1
         mode "2560x1440@120"
@@ -326,8 +328,10 @@ output {
         focus-at-startup #true
         vrr 1
     }
-    // Keep other outputs outside the daily layout. The iGPU monitor is for
-    // development; naming even a disabled connector would require it at login.
+    // Keep the development monitor excluded even if it is absent or its seat
+    // rule is removed. Card ownership is still controlled by the seat rule.
+    named HDMI-A-2 { enabled #false; }
+    // Unnamed outputs stay off unless a fallback is needed to reach the desktop.
     inherit-sophia #false
 }
 broker {
