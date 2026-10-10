@@ -52,3 +52,12 @@ automatic/requested restart with checkpoint refresh on an **empty headless
 scene**. See Hagia's external-test README for exact supplied and real boundaries.
 No installed process, GPU, input device, display server or release is accessed.
 This is neither a performance result nor full t249/h006 acceptance.
+
+The first recorded run, `t249-sdk-lifecycle-01` under Sophia's development
+evidence directory, passes all three cases with Hagia `870bfc68b` and runner
+`dbda3009b`. Its manifest hash is
+`b5ac4542073194c5ba27200a292862eb77489624236549f2b40add43c9df23c6`.
+`t249-sdk-lifecycle-controls-02` binds the final test binary and a separately
+built no-checkpoint-restore mutant; the restart case fails as intended when the
+client no longer sends its restored-state refresh. The empty-scene limit still
+applies. Production sources, release pins and installed processes are unchanged.
