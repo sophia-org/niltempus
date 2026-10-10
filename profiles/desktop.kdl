@@ -9,13 +9,13 @@ policy {
     layout-cycle scroller split-tree notion spiral dwindle center-tile
     // Triad: workspaces.default-count 3
     view-count 3
-    // All six workspaces follow the preferred or fallback desktop (policy key 1).
+    // Temporary t310 qualification: two admitted monitors, three workspaces each.
     workspace 1 output-key=1
     workspace 2 output-key=1
     workspace 3 output-key=1
-    workspace 4 output-key=1
-    workspace 5 output-key=1
-    workspace 6 output-key=1
+    workspace 4 output-key=2
+    workspace 5 output-key=2
+    workspace 6 output-key=2
     // Niri spacing: one gap around and between panes; no reserved edge previews.
     gaps 8
     // Tile master area, at Triad's defaults. Both adjust at runtime.
@@ -322,6 +322,7 @@ output {
     availability "adaptive"
     fallback-policy-key 1
     named DP-1 {
+        gpu "pci-0000:03:00.0"
         policy-key 1
         mode "2560x1440@120"
         scale auto
@@ -329,6 +330,16 @@ output {
         enabled #true
         focus-at-startup #true
         vrr 1
+    }
+    named HDMI-A-1 {
+        gpu "pci-0000:03:00.0"
+        policy-key 2
+        mode "1920x1080@60"
+        scale 1
+        position 2560 0
+        enabled #true
+        focus-at-startup #false
+        vrr 0
     }
     // Keep the development connector dark as well as excluding its GPU above.
     named HDMI-A-2 { enabled #false; }
