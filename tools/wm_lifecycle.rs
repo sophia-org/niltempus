@@ -10,12 +10,14 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const SOPHIA: &str = "0f2ad2386baa063ab92d9567a145148f5232bccb";
+const SOPHIA: &str = "9f52403be19346a49ad275481886de9a5d4015a3";
 const MOUNT: &str = "crates/sophia-session/tests/support/desktop_launch_reload.rs";
-const CASES: [&str; 3] = [
+const CASES: [&str; 5] = [
     "sdk_lifecycle_startup",
     "sdk_lifecycle_profile_rollback",
     "sdk_lifecycle_restart",
+    "sdk_occupied_settlement",
+    "sdk_occupied_restart",
 ];
 
 fn checked(command: &mut Command) -> Result<String> {
@@ -234,6 +236,7 @@ fn run() -> Result<()> {
     fs::set_permissions(&work, fs::Permissions::from_mode(0o700))?;
     let result = (|| -> Result<()> {
         let fixture = hagia.join("tests/external/lifecycle.rs");
+        let occupied = hagia.join("tests/external/occupied.rs");
         fs::write(
             work.join("runner.sha256"),
             hash(&env::current_exe()?)? + "\n",
@@ -251,7 +254,7 @@ fn run() -> Result<()> {
         fs::write(
             work.join("identity"),
             format!(
-                "sophia={SOPHIA}\nhagia={}\nfixture_sha256={}\nmount_sha256={}\nscene=empty\nadmission=protected_supervisor\nautomatic_restart_trigger=terminate_fixture_child\nnative=false\n",
+                "sophia={SOPHIA}\nhagia={}\nfixture_sha256={}\nmount_sha256={}\nscene=empty_and_supplied_occupied\nlayout_completion=supplied\nadmission=protected_supervisor\nautomatic_restart_trigger=terminate_fixture_child\nnative=false\n",
                 git(&hagia, &["rev-parse", "HEAD"])?,
                 hash(&fixture)?,
                 hash(&sophia.join(MOUNT))?
@@ -266,6 +269,7 @@ fn run() -> Result<()> {
             git(&hagia, &["status", "--porcelain"])?,
         )?;
         fs::copy(&fixture, work.join("lifecycle.rs"))?;
+        fs::copy(&occupied, work.join("occupied.rs"))?;
         let overlay = work.join("sophia");
         archive(&sophia, SOPHIA, &overlay)?;
         let hagia_source = work.join("hagia-source");
@@ -280,6 +284,8 @@ fn run() -> Result<()> {
         )?;
         let module = overlay.join("crates/sophia-session/tests/support/hagia_sdk_lifecycle.rs");
         fs::copy(&fixture, &module)?;
+        let occupied_module = module.with_file_name("occupied.rs");
+        fs::copy(&occupied, &occupied_module)?;
         let mount = overlay.join(MOUNT);
         let original = fs::read_to_string(&mount)?;
         fs::write(
@@ -289,9 +295,10 @@ fn run() -> Result<()> {
         fs::write(
             work.join("overlay.sha256"),
             format!(
-                "{}  {MOUNT}\n{}  hagia_sdk_lifecycle.rs\n",
+                "{}  {MOUNT}\n{}  hagia_sdk_lifecycle.rs\n{}  occupied.rs\n",
                 hash(&mount)?,
-                hash(&module)?
+                hash(&module)?,
+                hash(&occupied_module)?
             ),
         )?;
         let run = Run {
@@ -370,7 +377,10 @@ fn run() -> Result<()> {
                 return Err(format!("{case}: missing one-test result").into());
             }
         }
-        if hash(&fixture)? != hash(&module)? || hash(&binary)? != digest {
+        if hash(&fixture)? != hash(&module)?
+            || hash(&occupied)? != hash(&occupied_module)?
+            || hash(&binary)? != digest
+        {
             return Err("input changed during run".into());
         }
         Ok(())
@@ -378,7 +388,7 @@ fn run() -> Result<()> {
     fs::write(
         work.join("RESULT"),
         match &result {
-            Ok(()) => "PASS lifecycle=3 native=false\n".into(),
+            Ok(()) => "PASS lifecycle=3 occupied=2 native=false\n".into(),
             Err(e) => format!("STOP {e}\n"),
         },
     )?;
@@ -409,7 +419,7 @@ mod tests {
             .iter()
             .map(|c| format!("owner::{c}: test\n"))
             .collect::<String>();
-        assert_eq!(listed_tests(&text).unwrap().len(), 3);
+        assert_eq!(listed_tests(&text).unwrap().len(), CASES.len());
         assert!(listed_tests(&(text.clone() + &text)).is_err());
     }
 
