@@ -10,9 +10,9 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const SOPHIA: &str = "ea64b1f027ace8b9064935d966697acfac37d004";
+const SOPHIA: &str = "65440ff5d411c8e18f3b376529c8a65fa4d9b59d";
 const MOUNT: &str = "crates/sophia-session/tests/support/desktop_launch_reload.rs";
-const CASES: [&str; 8] = [
+const CASES: [&str; 9] = [
     "sdk_lifecycle_startup",
     "sdk_lifecycle_profile_rollback",
     "sdk_lifecycle_restart",
@@ -21,6 +21,7 @@ const CASES: [&str; 8] = [
     "sdk_operation_settlement",
     "sdk_operation_refused_action",
     "sdk_operation_disconnect",
+    "sdk_slow_peer_response_deadline",
 ];
 
 fn checked(command: &mut Command) -> Result<String> {
@@ -241,6 +242,7 @@ fn run() -> Result<()> {
         let fixture = hagia.join("tests/external/lifecycle.rs");
         let occupied = hagia.join("tests/external/occupied.rs");
         let operations = hagia.join("tests/external/operations.rs");
+        let slow_peer = hagia.join("tests/external/slow_peer.rs");
         fs::write(
             work.join("runner.sha256"),
             hash(&env::current_exe()?)? + "\n",
@@ -258,7 +260,7 @@ fn run() -> Result<()> {
         fs::write(
             work.join("identity"),
             format!(
-                "sophia={SOPHIA}\nhagia={}\nfixture_sha256={}\nmount_sha256={}\nscene=empty_and_supplied_occupied\nlayout_completion=supplied\nadmission=protected_supervisor\nautomatic_restart_trigger=terminate_fixture_child\nnative=false\n",
+                "sophia={SOPHIA}\nhagia={}\nfixture_sha256={}\nmount_sha256={}\nscene=empty_and_supplied_occupied\nlayout_completion=supplied\nadmission=protected_supervisor\nautomatic_restart_trigger=terminate_fixture_child\nslow_peer_trigger=sigstop_fixture_peer_production_response_deadline\nnative=false\n",
                 git(&hagia, &["rev-parse", "HEAD"])?,
                 hash(&fixture)?,
                 hash(&sophia.join(MOUNT))?
@@ -275,6 +277,7 @@ fn run() -> Result<()> {
         fs::copy(&fixture, work.join("lifecycle.rs"))?;
         fs::copy(&occupied, work.join("occupied.rs"))?;
         fs::copy(&operations, work.join("operations.rs"))?;
+        fs::copy(&slow_peer, work.join("slow_peer.rs"))?;
         let overlay = work.join("sophia");
         archive(&sophia, SOPHIA, &overlay)?;
         let hagia_source = work.join("hagia-source");
@@ -293,6 +296,8 @@ fn run() -> Result<()> {
         fs::copy(&occupied, &occupied_module)?;
         let operations_module = module.with_file_name("operations.rs");
         fs::copy(&operations, &operations_module)?;
+        let slow_peer_module = module.with_file_name("slow_peer.rs");
+        fs::copy(&slow_peer, &slow_peer_module)?;
         let mount = overlay.join(MOUNT);
         let original = fs::read_to_string(&mount)?;
         fs::write(
@@ -302,11 +307,12 @@ fn run() -> Result<()> {
         fs::write(
             work.join("overlay.sha256"),
             format!(
-                "{}  {MOUNT}\n{}  hagia_sdk_lifecycle.rs\n{}  occupied.rs\n{}  operations.rs\n",
+                "{}  {MOUNT}\n{}  hagia_sdk_lifecycle.rs\n{}  occupied.rs\n{}  operations.rs\n{}  slow_peer.rs\n",
                 hash(&mount)?,
                 hash(&module)?,
                 hash(&occupied_module)?,
-                hash(&operations_module)?
+                hash(&operations_module)?,
+                hash(&slow_peer_module)?
             ),
         )?;
         let run = Run {
@@ -388,6 +394,7 @@ fn run() -> Result<()> {
         if hash(&fixture)? != hash(&module)?
             || hash(&occupied)? != hash(&occupied_module)?
             || hash(&operations)? != hash(&operations_module)?
+            || hash(&slow_peer)? != hash(&slow_peer_module)?
             || hash(&binary)? != digest
         {
             return Err("input changed during run".into());
@@ -397,7 +404,7 @@ fn run() -> Result<()> {
     fs::write(
         work.join("RESULT"),
         match &result {
-            Ok(()) => "PASS lifecycle=3 occupied=2 operations=3 native=false\n".into(),
+            Ok(()) => "PASS lifecycle=3 occupied=2 operations=3 slow_peer=1 native=false\n".into(),
             Err(e) => format!("STOP {e}\n"),
         },
     )?;

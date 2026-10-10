@@ -19,7 +19,7 @@ Run with five explicit absolute paths:
 ```
 
 The Sophia checkout must be clean at
-`ea64b1f027ace8b9064935d966697acfac37d004`. Updating this pin requires reviewing
+`65440ff5d411c8e18f3b376529c8a65fa4d9b59d`. Updating this pin requires reviewing
 the test mount and owner APIs, not silently following master. The supplied
 Hagia checkout supplies the external fixture and the exact committed ordinary
 Hagia source; dirty production inputs are refused. The runner records remaining
@@ -39,7 +39,7 @@ read-only except the work, target and Cargo cache directories. Every build/test
 has an outer timeout with five-second kill escalation. This is a development
 build, not the release dependency/toolchain gate.
 
-Eight tests must each appear exactly once in the ignored-test listing and then
+Nine tests must each appear exactly once in the ignored-test listing and then
 each report one passed test. Missing tests, zero tests, a failing command, or
 changed fixture/binary bytes refuse the run. `RESULT` and the self-excluding
 `SHA256SUMS` close the records on success or failure. The manifest covers the
@@ -56,8 +56,12 @@ they do not prove visual readiness or physical focus. See Hagia's external-test
 README for exact supplied and real boundaries.
 `operations.rs` adds accepted/refused typed intent, refused-action continuation,
 and disconnect with an unsettled projection or operation. No returned intent is
-executed. The source-pin change from `9f52403be` is documentation only; the mount
-and production owner code are unchanged.
+executed. `slow_peer.rs` pauses only the fixture's own protected Hagia process
+and requires Session's unmodified twelve-second response deadline to replace
+it while the protected leader is still running; its detection and replacement
+times are recorded observations, not latency qualification. The source pin
+`65440ff5d` differs from `ea64b1f02` only in documentation: no crate, tool or
+Cargo file changed, and the mount file is byte-identical.
 No installed process, GPU, input device, display server or release is accessed.
 This is neither a performance result nor full t249/h006 acceptance.
 
