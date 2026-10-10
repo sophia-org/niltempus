@@ -98,7 +98,7 @@ read-only except the work, build, slot and Cargo cache directories. Every build/
 has an outer timeout with five-second kill escalation. This is a development
 build, not the release dependency/toolchain gate.
 
-Twelve tests must each appear exactly once in the ignored-test listing and then
+Thirteen tests must each appear exactly once in the ignored-test listing and then
 each report one passed test. Missing tests, zero tests, a failing command, or
 changed fixture/binary bytes refuse the run. `RESULT` and the self-excluding
 `SHA256SUMS` close the records on success or failure. The manifest covers the
@@ -110,7 +110,7 @@ never reused.
 The assertions cover protected startup, real profile rejection/rollback, and
 automatic/requested restart with checkpoint refresh on an empty headless
 scene, plus occupied settlement and restart in `tests/external/occupied.rs`.
-All seven external module hashes are bound. Occupied cases supply authority facts
+All eight external module hashes are bound. Occupied cases supply authority facts
 and layout completion, and compare committed policy focus and checkpoint state;
 they do not prove visual readiness or physical focus. See Hagia's external-test
 README for exact supplied and real boundaries.
@@ -148,6 +148,12 @@ recovery, rejects the old action identity, distinguishes an owed release from
 an unowed duplicate using the no-focus routing counter, then commits a fresh
 chord in the new epoch. Its control clears capture state at restart. This
 excludes pending layout settlement, application delivery and pointer debt.
+The child `presentation_cancel.rs` supplies a keyboard-matching transition to
+Session's cancellation owner. It correlates the exact chord and Cancelled cause,
+requires unchanged focus before withdrawal receipts, and checks a fresh chord
+after cancellation. The control rebuilds an archived Hagia whose terminal
+handler treats cancellation as release. Actual locking, other cancellation
+triggers and AbortSettlement remain separate.
 No installed process, GPU, input device, display server or release is accessed.
 This is neither a performance result nor full t249/h006 acceptance.
 
