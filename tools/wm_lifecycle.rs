@@ -20,7 +20,7 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const SOPHIA: &str = "8ce7c40effce25251856d52d3fb234532ca9e921";
+const SOPHIA: &str = "a8c5fdf29c8932580b04b3de0f807327e0d0a34b";
 const MOUNT: &str = "crates/sophia-session/tests/support/desktop_launch_reload.rs";
 /// Written first into a build root this runner created; reuse and cleanup
 /// require it.
@@ -28,12 +28,13 @@ const MARKER: &str = ".wm-lifecycle-build-root";
 const MARKER_HEADER: &str = "owner=niltempus tools/wm_lifecycle.rs";
 const EVIDENCE: &str = ".local/state/sophia/development-evidence";
 const SLOTS: &str = ".cache/cargo-slots";
-const CASES: [&str; 18] = [
+const CASES: [&str; 19] = [
     "sdk_lifecycle_startup",
     "sdk_lifecycle_profile_rollback",
     "sdk_lifecycle_restart",
     "sdk_occupied_settlement",
     "sdk_occupied_restart",
+    "sdk_occupied_reused_surface_generation_after_restart",
     "sdk_disconnect_aborts_pending_settlement",
     "sdk_occupied_manage_settles_admission",
     "sdk_occupied_manage_admits_cpu_candidate",
@@ -754,6 +755,7 @@ fn run() -> Result<()> {
         )?;
         let fixture = hagia.join("tests/external/lifecycle.rs");
         let occupied = hagia.join("tests/external/occupied.rs");
+        let reused_identity = hagia.join("tests/external/reused_identity.rs");
         let operations = hagia.join("tests/external/operations.rs");
         let slow_peer = hagia.join("tests/external/slow_peer.rs");
         let presentation = hagia.join("tests/external/presentation.rs");
@@ -798,6 +800,7 @@ fn run() -> Result<()> {
         )?;
         fs::copy(&fixture, work.join("lifecycle.rs"))?;
         fs::copy(&occupied, work.join("occupied.rs"))?;
+        fs::copy(&reused_identity, work.join("reused_identity.rs"))?;
         fs::copy(&operations, work.join("operations.rs"))?;
         fs::copy(&slow_peer, work.join("slow_peer.rs"))?;
         fs::copy(&presentation, work.join("presentation.rs"))?;
@@ -835,6 +838,11 @@ fn run() -> Result<()> {
         fs::copy(&fixture, &module)?;
         let occupied_module = module.with_file_name("occupied.rs");
         fs::copy(&occupied, &occupied_module)?;
+        let reused_identity_module = module.with_file_name("reused_identity.rs");
+        if reused_identity_module.exists() {
+            return Err("reused identity module would replace a pinned file".into());
+        }
+        fs::copy(&reused_identity, &reused_identity_module)?;
         let operations_module = module.with_file_name("operations.rs");
         fs::copy(&operations, &operations_module)?;
         let slow_peer_module = module.with_file_name("slow_peer.rs");
@@ -894,10 +902,11 @@ fn run() -> Result<()> {
         fs::write(
             work.join("overlay.sha256"),
             format!(
-                "{}  {MOUNT}\n{}  hagia_sdk_lifecycle.rs\n{}  occupied.rs\n{}  operations.rs\n{}  slow_peer.rs\n{}  presentation.rs\n{}  presentation_revocation.rs\n{}  presentation_disconnect.rs\n{}  presentation_cancel.rs\n{}  abort_settlement.rs\n{}  manage.rs\n{}  manage_pixels.rs\n{}  presentation_consensus.rs\n{}  presentation_repaint.rs\n",
+                "{}  {MOUNT}\n{}  hagia_sdk_lifecycle.rs\n{}  occupied.rs\n{}  reused_identity.rs\n{}  operations.rs\n{}  slow_peer.rs\n{}  presentation.rs\n{}  presentation_revocation.rs\n{}  presentation_disconnect.rs\n{}  presentation_cancel.rs\n{}  abort_settlement.rs\n{}  manage.rs\n{}  manage_pixels.rs\n{}  presentation_consensus.rs\n{}  presentation_repaint.rs\n",
                 hash(&mount)?,
                 hash(&module)?,
                 hash(&occupied_module)?,
+                hash(&reused_identity_module)?,
                 hash(&operations_module)?,
                 hash(&slow_peer_module)?,
                 hash(&presentation_module)?,
@@ -998,6 +1007,7 @@ fn run() -> Result<()> {
         }
         if hash(&fixture)? != hash(&module)?
             || hash(&occupied)? != hash(&occupied_module)?
+            || hash(&reused_identity)? != hash(&reused_identity_module)?
             || hash(&operations)? != hash(&operations_module)?
             || hash(&slow_peer)? != hash(&slow_peer_module)?
             || hash(&presentation)? != hash(&presentation_module)?
@@ -1018,7 +1028,7 @@ fn run() -> Result<()> {
     let result = finish(
         &work,
         result,
-        "PASS lifecycle=3 occupied=5 operations=3 slow_peer=1 presented=6 native=false\n",
+        "PASS lifecycle=3 occupied=6 operations=3 slow_peer=1 presented=6 native=false\n",
     );
     // Supervised steps have been waited for; the lease ends after closure.
     drop(lease);

@@ -29,7 +29,7 @@ runner does not inspect. Never export a slot path by hand or nest cargo-slot
 inside a leased run.
 
 The Sophia checkout must be clean at
-`8ce7c40effce25251856d52d3fb234532ca9e921`. Updating this pin requires reviewing
+`a8c5fdf29c8932580b04b3de0f807327e0d0a34b`. Updating this pin requires reviewing
 the test mount and owner APIs, not silently following master. The supplied
 Hagia checkout supplies the external fixture and the exact committed ordinary
 Hagia source; dirty production inputs are refused. The runner records remaining
@@ -98,7 +98,7 @@ read-only except the work, build, slot and Cargo cache directories. Every build/
 has an outer timeout with five-second kill escalation. This is a development
 build, not the release dependency/toolchain gate.
 
-Eighteen tests must each appear exactly once in the ignored-test listing and then
+Nineteen tests must each appear exactly once in the ignored-test listing and then
 each report one passed test. Missing tests, zero tests, a failing command, or
 changed fixture/binary bytes refuse the run. `RESULT` and the self-excluding
 `SHA256SUMS` close the records on success or failure. The manifest covers the
@@ -110,10 +110,20 @@ never reused.
 The assertions cover protected startup, real profile rejection/rollback, and
 automatic/requested restart with checkpoint refresh on an empty headless
 scene, plus occupied settlement and restart in `tests/external/occupied.rs`.
-All thirteen external module hashes are bound. Occupied cases supply authority facts
+All fourteen external module hashes are bound. Occupied cases supply authority facts
 and layout completion, and compare committed policy focus and checkpoint state;
 they do not prove visual readiness or physical focus. See Hagia's external-test
 README for exact supplied and real boundaries.
+`reused_identity.rs` adds t323's recovery join: a real supervised restart,
+replacement of a surface by the same numeric index with a new generation,
+synchronous refusal of the old focus identity, and a correlated fresh-focus
+answer from Hagia. Surface facts and layout completion are supplied; this is
+not physical input or Manage admission. The index-only guard control must fail
+at the old-identity admission assertion, before any later cause filtering.
+The pin update from `8ce7c40ef` changes only documentation, test fixtures and
+test-only module wiring. Production WM owners and all five bound GLUE spans
+are unchanged; the t323 credit slice's isolated repository gate passes at this
+source. The nineteen-case paired run still requires its own evidence.
 `operations.rs` adds accepted/refused typed intent, refused-action continuation,
 and disconnect with an unsettled projection or operation. No returned intent is
 executed. `slow_peer.rs` pauses only the fixture's own protected Hagia process
