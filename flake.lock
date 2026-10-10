@@ -93,11 +93,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791080586,
-        "narHash": "sha256-r39ltnrWKD4SVylo2jspYpz6jgydkzmVZy3AEF9s5nE=",
+        "lastModified": 1791631443,
+        "narHash": "sha256-3TwjKz0kCaaibotKoC+UuG9ZQeaQTGkxrakdmOBDrUc=",
         "owner": "sophia-org",
         "repo": "hagia",
-        "rev": "155daab6c0b035dd3328fd114e70af65456ff336",
+        "rev": "ed2f30060a09c5796f80f779ff8f8ebf2033c516",
         "type": "github"
       },
       "original": {
