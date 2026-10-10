@@ -8,7 +8,7 @@ Compile and check the dependency-free Rust runner:
 
 ```sh
 rustc +1.96.1 --edition 2024 --test tools/wm_lifecycle.rs -o /tmp/wm-lifecycle-tests
-/tmp/wm-lifecycle-tests
+/tmp/wm-lifecycle-tests --test-threads=1
 rustc +1.96.1 --edition 2024 tools/wm_lifecycle.rs -o /tmp/wm-lifecycle
 ```
 
@@ -40,17 +40,47 @@ clean committed fixture run.
 products: the archived Sophia workspace, each run's Hagia source archive, Nim
 cache and binary under `runs/<NEW_WORK name>`. Both are resolved through their
 existing parents, so symlinks cannot hide an overlap. The runner refuses roots
-that overlap in either direction, a build root under the evidence directory,
-any cargo slot or a Git checkout, and an existing build root without its owner
-marker. Runs of one slice reuse one build root: the Sophia archive is
-re-extracted at the same path, so cargo reuses unchanged slot artifacts.
+that overlap in either direction, a build root overlapping the evidence tree,
+and either root overlapping the cargo-slot pool, Cargo home, supplied checkouts
+or runner executable. A build root cannot contain HOME or lie inside a Git
+checkout. Existing build roots require the runner's owner marker, which records
+the creator's protected paths for cleanup. Runs of one slice reuse one build
+root: the Sophia archive is re-extracted at the same path, so cargo reuses
+unchanged slot artifacts.
 Evidence records the binary's path, hash and size, never the binary.
+
+The runner holds a separate, exclusive nonblocking build-root lock from before
+record creation through manifest closure. Its stable sibling path is
+`.<BUILD_ROOT name>.wm-lifecycle.lock`; never unlink this file, even after
+cleanup. A busy lock refuses the run before either root changes. Cleanup takes
+the same lock before reading the marker or deleting anything. Controls and
+checks that use the retained archive or binary must hold this lock too, for
+their entire use of the root, for example with `flock --exclusive --nonblock
+/absolute/parent/.build-name.wm-lifecycle.lock COMMAND ...`. Cargo commands
+also need their own `cargo-slot sophia` lease. The build-root lock does not
+replace the cargo-slot lock. `resources` records the build-root lock path,
+device and inode.
+
+Each build/test timeout supervisor inherits the build-root lease. If the runner
+is killed while that step survives in its separate process group, the lock
+remains held until the supervisor exits. The `git archive` and `tar` writers
+also inherit the lease, so interrupted source preparation remains protected.
+Read-only source and hashing helpers do not inherit it. Bubblewrap bounds the
+build/test process tree; this mechanism does not extend the separate cargo-slot
+wrapper's lifetime.
+
+An externally locked command may inspect, mutate or test the retained archive;
+it must not call the runner or its cleanup command, which acquire the lock
+themselves and would correctly refuse a second acquisition. Invoke the runner
+directly under cargo-slot, and invoke cleanup directly after external controls
+release their lease.
 
 On closure the runner checks the record set: regular files at the top level and
 in `cases/<case>/`, with no symlinks, other directories, executables, ELF or
-archive objects. A violation turns the result into STOP and still closes the
-manifest, so the run remains diagnosable. Size is not a criterion; large logs
-are records.
+archive objects. A violation or inspection error turns the result into STOP;
+`record-policy` preserves the findings alongside any original run failure.
+Unhashable files also force STOP, with a manifest of the readable records.
+Size is not a criterion; large logs are records.
 
 After a slice's runs, controls and checks have all ended, remove its build root
 with `wm-lifecycle cleanup BUILD_ROOT NEW_CLEANUP_RECORD`. It removes only that
@@ -72,9 +102,10 @@ Ten tests must each appear exactly once in the ignored-test listing and then
 each report one passed test. Missing tests, zero tests, a failing command, or
 changed fixture/binary bytes refuse the run. `RESULT` and the self-excluding
 `SHA256SUMS` close the records on success or failure. The manifest covers the
-top-level records, binary and case artifacts; archived source/build caches are
-not evidence-manifest entries. Source commits and the overlay hashes identify
-the test source. A failed run is kept and its path is never reused.
+top-level records and case records, including binary paths and hashes; binaries
+and archived source/build caches stay outside evidence. Source commits and the
+overlay hashes identify the test source. A failed run is kept and its path is
+never reused.
 
 The assertions cover protected startup, real profile rejection/rollback, and
 automatic/requested restart with checkpoint refresh on an empty headless
@@ -186,7 +217,7 @@ bit-reproducibility claim follows from separate Nim builds of identical source.
 The new global build policy applies to future executions: use `cargo-slot
 sophia` to hold a pool slot for the whole runner and pass its assigned target;
 never allocate a per-task target or copy built binaries into evidence. This
-runner currently places its Hagia binary and Nim cache under NEW_WORK, so its
-build-product/record separation must be adapted before another evidence run.
-The frozen historical packages above remain intact. This integration runs no
-build, changes no release pin and does not close t249/h006.
+runner now separates build products from NEW_WORK and holds an independent
+build-root lease through closure; controls and checks must take that same lease.
+The frozen historical packages above remain intact. The resource change does
+not change a release pin or close t249/h006.

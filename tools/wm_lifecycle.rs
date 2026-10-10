@@ -4,7 +4,11 @@
 //! Run the whole command under one `cargo-slot sophia` lease. Build products
 //! (archived sources, Nim cache, Hagia binary) live under BUILD_ROOT, never in
 //! the NEW_WORK evidence records, which hold records, sources and hashes only.
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::{
+    fs::{MetadataExt, PermissionsExt},
+    io::AsRawFd,
+    process::CommandExt,
+};
 use std::{
     env,
     error::Error,
@@ -233,9 +237,11 @@ fn check_roots(
 }
 
 /// One exclusive, nonblocking lease per build root, on a stable sibling lock
-/// file that is never unlinked, so every holder locks the same inode. Std
-/// opens it close-on-exec: children never inherit it. Run, cleanup and the
-/// control/check scripts take it before any marker read, reuse or deletion.
+/// file that is never unlinked, so every holder locks the same inode. It is
+/// flock(2), so external controls and checks can hold it with flock(1). Std
+/// opens it close-on-exec; only steps given it by `inherit_lease` keep it.
+/// Run, cleanup and controls take it before any marker read, reuse or
+/// deletion.
 fn lease_build_root(build: &Path) -> Result<(fs::File, String)> {
     let name = build.file_name().ok_or("BUILD_ROOT has no name")?;
     let lock = build
@@ -261,6 +267,37 @@ fn lease_build_root(build: &Path) -> Result<(fs::File, String)> {
         meta.ino()
     );
     Ok((file, identity))
+}
+
+unsafe extern "C" {
+    fn fcntl(fd: i32, cmd: i32, ...) -> i32;
+}
+const F_SETFD: i32 = 2;
+
+/// Hand the lease to a child that writes the build root, so it outlives a
+/// killed runner.
+///
+/// timeout puts itself in its own process group, so a runner-only SIGKILL or
+/// a terminal interrupt leaves the step running in BUILD_ROOT. A flock
+/// belongs to the open file description and ends only when its last
+/// descriptor closes, so the inherited copy keeps the root leased until the
+/// step's whole process chain exits. timeout and nice keep descriptors across
+/// exec; bwrap may close extras in the sandboxed command, but timeout holds
+/// its copy until bwrap exits, and with --unshare-pid every sandboxed
+/// process ends with bwrap. No step here starts a daemon outside that
+/// sandbox. Source archive writers also inherit it; read-only helpers do not.
+fn inherit_lease(command: &mut Command, lease: &fs::File) {
+    let fd = lease.as_raw_fd();
+    // SAFETY: fcntl is async-signal-safe and clears close-on-exec only in
+    // the forked child's descriptor table; the runner's copy is unchanged.
+    unsafe {
+        command.pre_exec(move || {
+            if fcntl(fd, F_SETFD, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
 }
 
 fn marker_text(protected: &[PathBuf]) -> String {
@@ -435,24 +472,22 @@ fn git(root: &Path, args: &[&str]) -> Result<String> {
     checked(Command::new("git").arg("-C").arg(root).args(args)).map(|s| s.trim().into())
 }
 
-fn archive(root: &Path, revision: &str, destination: &Path) -> Result<()> {
+fn archive(root: &Path, revision: &str, destination: &Path, lease: &fs::File) -> Result<()> {
     let tar = destination.with_extension("tar");
-    checked(
-        Command::new("git")
-            .arg("-C")
-            .arg(root)
-            .args(["archive", "--format=tar"])
-            .arg(format!("--output={}", tar.display()))
-            .arg(revision),
-    )?;
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(root)
+        .args(["archive", "--format=tar"])
+        .arg(format!("--output={}", tar.display()))
+        .arg(revision);
+    inherit_lease(&mut command, lease);
+    checked(&mut command)?;
     fs::create_dir(destination)?;
-    checked(
-        Command::new("tar")
-            .arg("-xf")
-            .arg(&tar)
-            .arg("-C")
-            .arg(destination),
-    )?;
+    let mut command = Command::new("tar");
+    command.arg("-xf").arg(&tar).arg("-C").arg(destination);
+    inherit_lease(&mut command, lease);
+    checked(&mut command)?;
     fs::remove_file(tar)?;
     Ok(())
 }
@@ -474,13 +509,14 @@ fn log_step(work: &Path, name: &str, command: &mut Command) -> Result<()> {
     Ok(())
 }
 
-struct Run {
+struct Run<'a> {
     work: PathBuf,
     build: PathBuf,
     target: PathBuf,
     cargo: PathBuf,
+    lease: &'a fs::File,
 }
-impl Run {
+impl Run<'_> {
     fn isolated(&self, cwd: &Path, seconds: u32, program: &str, args: &[String]) -> Command {
         let mut cmd = Command::new("timeout");
         cmd.args(["--signal=TERM", "--kill-after=5"])
@@ -535,6 +571,7 @@ impl Run {
             .env("CARGO_PROFILE_DEV_DEBUG", "0")
             .env("CARGO_PROFILE_TEST_DEBUG", "0")
             .env("RUSTUP_TOOLCHAIN", "1.96.1");
+        inherit_lease(&mut cmd, self.lease);
         cmd
     }
 }
@@ -748,9 +785,14 @@ fn run() -> Result<()> {
         if fs::symlink_metadata(&overlay).is_ok() {
             fs::remove_dir_all(&overlay)?;
         }
-        archive(&sophia, SOPHIA, &overlay)?;
+        archive(&sophia, SOPHIA, &overlay, &lease)?;
         let hagia_source = products.join("hagia-source");
-        archive(&hagia, &git(&hagia, &["rev-parse", "HEAD"])?, &hagia_source)?;
+        archive(
+            &hagia,
+            &git(&hagia, &["rev-parse", "HEAD"])?,
+            &hagia_source,
+            &lease,
+        )?;
         fs::copy(
             hagia_source.join("vendor/sophia-desktop-sdk/manifest.json"),
             work.join("sdk-manifest.json"),
@@ -796,6 +838,7 @@ fn run() -> Result<()> {
             build: build.clone(),
             target,
             cargo,
+            lease: &lease,
         };
         let binary = products.join("hagia");
         let nim_args = vec![
@@ -891,7 +934,7 @@ fn run() -> Result<()> {
         result,
         "PASS lifecycle=3 occupied=2 operations=3 slow_peer=1 presented=1 native=false\n",
     );
-    // Children have all been waited for; the lease ends after closure.
+    // Supervised steps have been waited for; the lease ends after closure.
     drop(lease);
     result
 }
@@ -1184,7 +1227,10 @@ mod tests {
         let exe = root.join("exe");
         fs::write(&exe, "sentinel").unwrap();
         let home = root.join("home");
-        assert!(cleanup(&build, &evidence.join("c1"), &evidence, &slots, &home, &exe).is_err());
+        let refused = cleanup(&build, &evidence.join("c1"), &evidence, &slots, &home, &exe)
+            .unwrap_err()
+            .to_string();
+        assert!(refused.contains("BUILD_ROOT is busy"), "{refused}");
         assert!(build.join("in-use").exists() && !evidence.join("c1").exists());
         drop(held);
         // The same lock inode serves the next holder; it is never unlinked.
@@ -1251,6 +1297,161 @@ mod tests {
         );
         assert!(record_violations(&record).is_empty());
         assert!(cleanup(&build, &evidence.join("c2"), &evidence, &slots, &home, &exe).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn only_supervised_steps_inherit_the_lease() {
+        let root = scratch("inherit");
+        let (lease, _) = lease_build_root(&root.join("build")).unwrap();
+        let probe = format!("test -e /proc/$$/fd/{}", lease.as_raw_fd());
+        let mut step = Command::new("sh");
+        step.args(["-c", &probe]);
+        inherit_lease(&mut step, &lease);
+        assert!(step.status().unwrap().success());
+        assert!(
+            !Command::new("sh")
+                .args(["-c", &probe])
+                .status()
+                .unwrap()
+                .success()
+        );
+        drop(lease);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    const HOLDER: &str = "WM_LIFECYCLE_LEASE_HOLDER";
+
+    /// The lease-owning runner for the control below, run in its own process
+    /// so the control can SIGKILL it. Without the variable it does nothing.
+    #[test]
+    #[ignore]
+    fn lease_holder_process() {
+        let Some(root) = env::var_os(HOLDER).map(PathBuf::from) else {
+            return;
+        };
+        let build = root.join("build");
+        let (lease, _) = lease_build_root(&build).unwrap();
+        own_build_root(&build, &[]).unwrap();
+        if env::var("WM_LIFECYCLE_LEASE_STEP").unwrap() != "step" {
+            let revision = fs::read_to_string(root.join("revision")).unwrap();
+            fs::write(root.join("work/held.argv"), "archive child control\n").unwrap();
+            archive(
+                &root.join("repo"),
+                revision.trim(),
+                &build.join("source"),
+                &lease,
+            )
+            .unwrap();
+            return;
+        }
+        let run = Run {
+            work: root.join("work"),
+            build,
+            target: root.join("target"),
+            cargo: root.join("cargo"),
+            lease: &lease,
+        };
+        // The step waits for the control's release, bounded by its timeout.
+        let script =
+            "touch started; until [ -e release ]; do sleep 0.02; done; touch finished".to_owned();
+        let _ = log_step(
+            &run.work,
+            "held",
+            &mut run.isolated(&run.work, 20, "sh", &["-c".into(), script]),
+        );
+    }
+
+    #[test]
+    fn a_killed_runner_leaves_the_root_leased_until_its_step_exits() {
+        killed_writer("step");
+    }
+
+    #[test]
+    fn a_killed_runner_leaves_the_root_leased_until_git_archive_exits() {
+        killed_writer("git");
+    }
+
+    #[test]
+    fn a_killed_runner_leaves_the_root_leased_until_tar_exits() {
+        killed_writer("tar");
+    }
+
+    fn killed_writer(writer: &str) {
+        use std::{
+            thread::sleep,
+            time::{Duration, Instant},
+        };
+        let root = scratch(&format!("orphan-{writer}"));
+        for dir in ["work", "target", "cargo"] {
+            fs::create_dir(root.join(dir)).unwrap();
+        }
+        let mut command = Command::new(env::current_exe().unwrap());
+        command
+            .args(["--exact", "tests::lease_holder_process", "--ignored"])
+            .env(HOLDER, &root)
+            .env("WM_LIFECYCLE_LEASE_STEP", writer)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        if writer != "step" {
+            checked(
+                Command::new("git")
+                    .args(["init", "--quiet"])
+                    .arg(root.join("repo")),
+            )
+            .unwrap();
+            let revision = checked(
+                Command::new("git")
+                    .arg("-C")
+                    .arg(root.join("repo"))
+                    .arg("mktree"),
+            )
+            .unwrap();
+            fs::write(root.join("revision"), revision).unwrap();
+            let executable =
+                checked(Command::new("sh").args(["-c", &format!("command -v {writer}")])).unwrap();
+            let bin = root.join("bin");
+            fs::create_dir(&bin).unwrap();
+            // Pause the actual archive writer at exec, with a bounded
+            // handshake, so SIGKILL tests the production archive() call.
+            let script = "#!/bin/sh\nexec timeout 15 sh -c 'touch \"$WM_LIFECYCLE_LEASE_HOLDER/work/started\"; until [ -e \"$WM_LIFECYCLE_LEASE_HOLDER/work/release\" ]; do sleep 0.02; done; \"$WM_LIFECYCLE_REAL_WRITER\" \"$@\"; result=$?; touch \"$WM_LIFECYCLE_LEASE_HOLDER/work/finished\"; exit \"$result\"' sh \"$@\"\n";
+            fs::write(bin.join(writer), script).unwrap();
+            fs::set_permissions(bin.join(writer), fs::Permissions::from_mode(0o700)).unwrap();
+            let mut paths = vec![bin];
+            paths.extend(env::split_paths(&env::var_os("PATH").unwrap()));
+            command.env("PATH", env::join_paths(paths).unwrap());
+            command.env("WM_LIFECYCLE_REAL_WRITER", executable.trim());
+        }
+        let mut holder = command.spawn().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !root.join("work/started").exists() {
+            assert!(holder.try_wait().unwrap().is_none(), "holder exited early");
+            assert!(Instant::now() < deadline, "sandboxed step never started");
+            sleep(Duration::from_millis(20));
+        }
+        // SIGKILL the runner alone; timeout, in its own group, survives.
+        holder.kill().unwrap();
+        holder.wait().unwrap();
+        let build = root.join("build");
+        let busy = lease_build_root(&build).unwrap_err().to_string();
+        assert!(busy.contains("BUILD_ROOT is busy"), "{busy}");
+        assert!(!root.join("work/finished").exists());
+        // Still busy after a pause: the orphaned step, not timing, holds it.
+        sleep(Duration::from_millis(200));
+        let busy = lease_build_root(&build).unwrap_err().to_string();
+        assert!(busy.contains("BUILD_ROOT is busy"), "{busy}");
+        fs::write(root.join("work/release"), "").unwrap();
+        let (_lease, _) = loop {
+            match lease_build_root(&build) {
+                Ok(lease) => break lease,
+                Err(e) => assert!(e.to_string().contains("BUILD_ROOT is busy"), "{e}"),
+            }
+            assert!(Instant::now() < deadline, "lease never released");
+            sleep(Duration::from_millis(20));
+        };
+        // The lease ended only after the orphaned step had finished.
+        assert!(root.join("work/finished").exists());
+        assert!(root.join("work/held.argv").exists());
         fs::remove_dir_all(root).unwrap();
     }
 
