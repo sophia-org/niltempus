@@ -181,6 +181,17 @@ native retirement, backend presentation receipts and all-head consensus remain
 separate t249 joins.
 This is neither a performance result nor full t249/h006 acceptance.
 
+`presentation_consensus.rs` uses the existing backend
+`SessionPolicyPresentationFixture`: one output with two mirrored heads, real
+retained composition and publication stamps, with worker/device completions
+simulated per head. Session must emit Presented only after both heads complete,
+and Withdrawn only after both retire the replacement without the switcher.
+Repeated publication must not duplicate either receipt. Separate controls make
+the backend ignore the second head during presentation or only during withdrawal.
+The Session frame-service calls retain the existing hash-bound ordering; the
+concrete native-selection tail of `service_presented_policy` remains a distinct
+t249 coverage gap. No device completion or physical display is claimed.
+
 The first recorded run, `t249-sdk-lifecycle-01` under Sophia's development
 evidence directory, passes all three cases with Hagia `870bfc68b` and runner
 `dbda3009b`. Its manifest hash is
