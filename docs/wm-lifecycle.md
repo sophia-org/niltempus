@@ -19,7 +19,7 @@ Run with five explicit absolute paths:
 ```
 
 The Sophia checkout must be clean at
-`65440ff5d411c8e18f3b376529c8a65fa4d9b59d`. Updating this pin requires reviewing
+`f77244abe3063255c57c283a32eafe1666d6e684`. Updating this pin requires reviewing
 the test mount and owner APIs, not silently following master. The supplied
 Hagia checkout supplies the external fixture and the exact committed ordinary
 Hagia source; dirty production inputs are refused. The runner records remaining
@@ -39,7 +39,7 @@ read-only except the work, target and Cargo cache directories. Every build/test
 has an outer timeout with five-second kill escalation. This is a development
 build, not the release dependency/toolchain gate.
 
-Nine tests must each appear exactly once in the ignored-test listing and then
+Ten tests must each appear exactly once in the ignored-test listing and then
 each report one passed test. Missing tests, zero tests, a failing command, or
 changed fixture/binary bytes refuse the run. `RESULT` and the self-excluding
 `SHA256SUMS` close the records on success or failure. The manifest covers the
@@ -50,7 +50,7 @@ the test source. A failed run is kept and its path is never reused.
 The assertions cover protected startup, real profile rejection/rollback, and
 automatic/requested restart with checkpoint refresh on an empty headless
 scene, plus occupied settlement and restart in `tests/external/occupied.rs`.
-All four external module hashes are bound. Occupied cases supply authority facts
+All five external module hashes are bound. Occupied cases supply authority facts
 and layout completion, and compare committed policy focus and checkpoint state;
 they do not prove visual readiness or physical focus. See Hagia's external-test
 README for exact supplied and real boundaries.
@@ -62,6 +62,17 @@ it while the protected leader is still running; its detection and replacement
 times are recorded observations, not latency qualification. The source pin
 `65440ff5d` differs from `ea64b1f02` only in documentation: no crate, tool or
 Cargo file changed, and the mount file is byte-identical.
+`presentation.rs` selects Session's native presentation ceiling without a
+device and commits three owned CPU buffers through one ordinary CPU production
+cycle, bypassing Session admission and visual readiness for those pixels. Real
+Hagia's held recent-windows publication must pass unmodified preflight, and a
+supplied completion, captured key and chord release must commit the selection
+expected beforehand from the checkpoint. Heads, completions and router time are
+supplied; no native retirement, pixels, physical input or latency is claimed.
+Its copied dispatch arms and routing call mirror four pinned production spans,
+located by semantic anchors and hashed; a changed span refuses the run, and the
+glue must then be compared again by review. The source pin `f77244abe` differs
+from `65440ff5d` only in documentation, with the same mount file.
 No installed process, GPU, input device, display server or release is accessed.
 This is neither a performance result nor full t249/h006 acceptance.
 

@@ -10,9 +10,9 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const SOPHIA: &str = "65440ff5d411c8e18f3b376529c8a65fa4d9b59d";
+const SOPHIA: &str = "f77244abe3063255c57c283a32eafe1666d6e684";
 const MOUNT: &str = "crates/sophia-session/tests/support/desktop_launch_reload.rs";
-const CASES: [&str; 9] = [
+const CASES: [&str; 10] = [
     "sdk_lifecycle_startup",
     "sdk_lifecycle_profile_rollback",
     "sdk_lifecycle_restart",
@@ -22,7 +22,85 @@ const CASES: [&str; 9] = [
     "sdk_operation_refused_action",
     "sdk_operation_disconnect",
     "sdk_slow_peer_response_deadline",
+    "sdk_presented_chord_switcher",
 ];
+/// Production spans the presentation fixture mirrors or calls, found by
+/// semantic anchors in the archived pin. A changed hash refuses the run: the
+/// copied dispatch and routing glue must be compared again, by review.
+const GLUE: [(&str, &str, &str, &str); 4] = [
+    (
+        "crates/sophia-session/src/live_session/owner_loop/policy_input_phase.rs",
+        "macro_rules! dispatch_physical_policy_inputs",
+        "PhysicalPolicyInput::Action(action) => action,",
+        "e0a546c455e64d7c4678b1277e44eb2c80e4ca5373d89546d4b0db1faa9eb11b",
+    ),
+    (
+        "crates/sophia-session/src/live_session/owner_loop/lifecycle.rs",
+        "Chords owe the WM whatever physical input is doing",
+        "dispatch_physical_policy_inputs!(&chord_report);",
+        "fc05de66b519c123e2bd3cbf9deadfde69cd351a0a11635608f7e7a6a26e7acf",
+    ),
+    (
+        "crates/sophia-session/src/live_session/input/routing.rs",
+        "fn route_input_events_with_launcher(",
+        ") -> Result<PhysicalInputRouteReport",
+        "83aae5ec3331b8e4d69e1b5d1998392bd789d6dd93c5cda588698a6f72be26cb",
+    ),
+    (
+        "crates/sophia-session/src/live_session/wm/presentation.rs",
+        "fn service_presented_policy(",
+        "fn preflight_staged_presentation(",
+        "0d2b862c482ce624981887337bf321895e304d8741fd8651302d230797ac6292",
+    ),
+];
+
+/// The lines from the one line containing `start` through the first line
+/// after it containing `end`.
+fn span(text: &str, start: &str, end: &str) -> Result<String> {
+    let lines: Vec<_> = text.split('\n').collect();
+    let starts: Vec<_> = (0..lines.len())
+        .filter(|i| lines[*i].contains(start))
+        .collect();
+    let [first] = starts[..] else {
+        return Err(format!("anchor {start:?} matched {} lines", starts.len()).into());
+    };
+    let last = (first..lines.len())
+        .find(|i| lines[*i].contains(end))
+        .ok_or(format!("anchor {end:?} missing"))?;
+    Ok(lines[first..=last].join("\n") + "\n")
+}
+
+fn sha256(bytes: &[u8]) -> Result<String> {
+    use std::io::Write;
+    let mut child = Command::new("sha256sum")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()?;
+    child.stdin.take().ok_or("stdin")?.write_all(bytes)?;
+    let out = child.wait_with_output()?;
+    if !out.status.success() {
+        return Err("sha256sum failed".into());
+    }
+    Ok(String::from_utf8(out.stdout)?
+        .split_whitespace()
+        .next()
+        .ok_or("hash missing")?
+        .into())
+}
+
+/// Refuse a pin whose mirrored production spans changed.
+fn check_glue(overlay: &Path) -> Result<String> {
+    let mut record = String::new();
+    for (path, start, end, expected) in GLUE {
+        let digest =
+            sha256(span(&fs::read_to_string(overlay.join(path))?, start, end)?.as_bytes())?;
+        if digest != expected {
+            return Err(format!("glue span changed: {path} {digest}").into());
+        }
+        record.push_str(&format!("{digest}  {path} [{start}] .. [{end}]\n"));
+    }
+    Ok(record)
+}
 
 fn checked(command: &mut Command) -> Result<String> {
     let out = command.output()?;
@@ -243,6 +321,7 @@ fn run() -> Result<()> {
         let occupied = hagia.join("tests/external/occupied.rs");
         let operations = hagia.join("tests/external/operations.rs");
         let slow_peer = hagia.join("tests/external/slow_peer.rs");
+        let presentation = hagia.join("tests/external/presentation.rs");
         fs::write(
             work.join("runner.sha256"),
             hash(&env::current_exe()?)? + "\n",
@@ -260,7 +339,7 @@ fn run() -> Result<()> {
         fs::write(
             work.join("identity"),
             format!(
-                "sophia={SOPHIA}\nhagia={}\nfixture_sha256={}\nmount_sha256={}\nscene=empty_and_supplied_occupied\nlayout_completion=supplied\nadmission=protected_supervisor\nautomatic_restart_trigger=terminate_fixture_child\nslow_peer_trigger=sigstop_fixture_peer_production_response_deadline\nnative=false\n",
+                "sophia={SOPHIA}\nhagia={}\nfixture_sha256={}\nmount_sha256={}\nscene=empty_and_supplied_occupied\nlayout_completion=supplied\nadmission=protected_supervisor\nautomatic_restart_trigger=terminate_fixture_child\nslow_peer_trigger=sigstop_fixture_peer_production_response_deadline\npresented_case=sdk_presented_chord_switcher native_ceiling=selected_without_device presentation_completion=supplied surface_content=supplied_cpu_intake heads=supplied router_time=supplied admission_visual_readiness=bypassed\nnative=false\n",
                 git(&hagia, &["rev-parse", "HEAD"])?,
                 hash(&fixture)?,
                 hash(&sophia.join(MOUNT))?
@@ -278,6 +357,7 @@ fn run() -> Result<()> {
         fs::copy(&occupied, work.join("occupied.rs"))?;
         fs::copy(&operations, work.join("operations.rs"))?;
         fs::copy(&slow_peer, work.join("slow_peer.rs"))?;
+        fs::copy(&presentation, work.join("presentation.rs"))?;
         let overlay = work.join("sophia");
         archive(&sophia, SOPHIA, &overlay)?;
         let hagia_source = work.join("hagia-source");
@@ -298,6 +378,12 @@ fn run() -> Result<()> {
         fs::copy(&operations, &operations_module)?;
         let slow_peer_module = module.with_file_name("slow_peer.rs");
         fs::copy(&slow_peer, &slow_peer_module)?;
+        let presentation_module = module.with_file_name("presentation.rs");
+        if presentation_module.exists() {
+            return Err("presentation module would replace a pinned file".into());
+        }
+        fs::copy(&presentation, &presentation_module)?;
+        fs::write(work.join("glue.sha256"), check_glue(&overlay)?)?;
         let mount = overlay.join(MOUNT);
         let original = fs::read_to_string(&mount)?;
         fs::write(
@@ -307,12 +393,13 @@ fn run() -> Result<()> {
         fs::write(
             work.join("overlay.sha256"),
             format!(
-                "{}  {MOUNT}\n{}  hagia_sdk_lifecycle.rs\n{}  occupied.rs\n{}  operations.rs\n{}  slow_peer.rs\n",
+                "{}  {MOUNT}\n{}  hagia_sdk_lifecycle.rs\n{}  occupied.rs\n{}  operations.rs\n{}  slow_peer.rs\n{}  presentation.rs\n",
                 hash(&mount)?,
                 hash(&module)?,
                 hash(&occupied_module)?,
                 hash(&operations_module)?,
-                hash(&slow_peer_module)?
+                hash(&slow_peer_module)?,
+                hash(&presentation_module)?
             ),
         )?;
         let run = Run {
@@ -395,6 +482,7 @@ fn run() -> Result<()> {
             || hash(&occupied)? != hash(&occupied_module)?
             || hash(&operations)? != hash(&operations_module)?
             || hash(&slow_peer)? != hash(&slow_peer_module)?
+            || hash(&presentation)? != hash(&presentation_module)?
             || hash(&binary)? != digest
         {
             return Err("input changed during run".into());
@@ -404,7 +492,10 @@ fn run() -> Result<()> {
     fs::write(
         work.join("RESULT"),
         match &result {
-            Ok(()) => "PASS lifecycle=3 occupied=2 operations=3 slow_peer=1 native=false\n".into(),
+            Ok(()) => {
+                "PASS lifecycle=3 occupied=2 operations=3 slow_peer=1 presented=1 native=false\n"
+                    .into()
+            }
             Err(e) => format!("STOP {e}\n"),
         },
     )?;
@@ -437,6 +528,15 @@ mod tests {
             .collect::<String>();
         assert_eq!(listed_tests(&text).unwrap().len(), CASES.len());
         assert!(listed_tests(&(text.clone() + &text)).is_err());
+    }
+
+    #[test]
+    fn glue_spans_need_one_start_and_an_end() {
+        let text = "a\nstart x\nb\nend y\nc\n";
+        assert_eq!(span(text, "start", "end").unwrap(), "start x\nb\nend y\n");
+        assert!(span("start\nstart\nend\n", "start", "end").is_err());
+        assert!(span("start\nb\n", "start", "end").is_err());
+        assert!(span("b\nend\n", "start", "end").is_err());
     }
 
     #[test]
