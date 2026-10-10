@@ -29,7 +29,7 @@ runner does not inspect. Never export a slot path by hand or nest cargo-slot
 inside a leased run.
 
 The Sophia checkout must be clean at
-`f77244abe3063255c57c283a32eafe1666d6e684`. Updating this pin requires reviewing
+`8ce7c40effce25251856d52d3fb234532ca9e921`. Updating this pin requires reviewing
 the test mount and owner APIs, not silently following master. The supplied
 Hagia checkout supplies the external fixture and the exact committed ordinary
 Hagia source; dirty production inputs are refused. The runner records remaining
@@ -98,7 +98,7 @@ read-only except the work, build, slot and Cargo cache directories. Every build/
 has an outer timeout with five-second kill escalation. This is a development
 build, not the release dependency/toolchain gate.
 
-Fifteen tests must each appear exactly once in the ignored-test listing and then
+Eighteen tests must each appear exactly once in the ignored-test listing and then
 each report one passed test. Missing tests, zero tests, a failing command, or
 changed fixture/binary bytes refuse the run. `RESULT` and the self-excluding
 `SHA256SUMS` close the records on success or failure. The manifest covers the
@@ -110,7 +110,7 @@ never reused.
 The assertions cover protected startup, real profile rejection/rollback, and
 automatic/requested restart with checkpoint refresh on an empty headless
 scene, plus occupied settlement and restart in `tests/external/occupied.rs`.
-All ten external module hashes are bound. Occupied cases supply authority facts
+All thirteen external module hashes are bound. Occupied cases supply authority facts
 and layout completion, and compare committed policy focus and checkpoint state;
 they do not prove visual readiness or physical focus. See Hagia's external-test
 README for exact supplied and real boundaries.
@@ -191,6 +191,16 @@ the backend ignore the second head during presentation or only during withdrawal
 The Session frame-service calls retain the existing hash-bound ordering; the
 concrete native-selection tail of `service_presented_policy` remains a distinct
 t249 coverage gap. No device completion or physical display is claimed.
+
+`presentation_repaint.rs` checks a source-only update under an unchanged
+presentation. Both mirror heads must retire preview instances naming the new
+committed source generation while Session keeps the original Presented identity
+and starts no WM cycle. Retained CPU bytes are checked separately. The Sophia
+pin adds only a read-only retired-instance accessor to the existing generic
+backend test fixture; production sources and all five GLUE spans are unchanged
+from `f77244abe`. A control clamps the captured preview source generation to 1.
+Recomposition is explicitly requested by the fixture, and device completions
+are simulated: production repaint scheduling and preview pixels remain separate.
 
 The first recorded run, `t249-sdk-lifecycle-01` under Sophia's development
 evidence directory, passes all three cases with Hagia `870bfc68b` and runner

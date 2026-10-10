@@ -20,7 +20,7 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const SOPHIA: &str = "f77244abe3063255c57c283a32eafe1666d6e684";
+const SOPHIA: &str = "8ce7c40effce25251856d52d3fb234532ca9e921";
 const MOUNT: &str = "crates/sophia-session/tests/support/desktop_launch_reload.rs";
 /// Written first into a build root this runner created; reuse and cleanup
 /// require it.
@@ -28,7 +28,7 @@ const MARKER: &str = ".wm-lifecycle-build-root";
 const MARKER_HEADER: &str = "owner=niltempus tools/wm_lifecycle.rs";
 const EVIDENCE: &str = ".local/state/sophia/development-evidence";
 const SLOTS: &str = ".cache/cargo-slots";
-const CASES: [&str; 17] = [
+const CASES: [&str; 18] = [
     "sdk_lifecycle_startup",
     "sdk_lifecycle_profile_rollback",
     "sdk_lifecycle_restart",
@@ -46,6 +46,7 @@ const CASES: [&str; 17] = [
     "sdk_presented_disconnect_preserves_release_debt",
     "sdk_presented_cancel_preserves_focus",
     "sdk_presented_receipts_require_all_heads",
+    "sdk_presented_source_repaint_preserves_identity",
 ];
 /// Production spans the external fixtures mirror or call, found by
 /// semantic anchors in the archived pin. A changed hash refuses the run: the
@@ -763,6 +764,7 @@ fn run() -> Result<()> {
         let manage = hagia.join("tests/external/manage.rs");
         let manage_pixels = hagia.join("tests/external/manage_pixels.rs");
         let consensus = hagia.join("tests/external/presentation_consensus.rs");
+        let repaint = hagia.join("tests/external/presentation_repaint.rs");
         fs::write(
             work.join("runner.sha256"),
             hash(&env::current_exe()?)? + "\n",
@@ -806,6 +808,7 @@ fn run() -> Result<()> {
         fs::copy(&manage, work.join("manage.rs"))?;
         fs::copy(&manage_pixels, work.join("manage_pixels.rs"))?;
         fs::copy(&consensus, work.join("presentation_consensus.rs"))?;
+        fs::copy(&repaint, work.join("presentation_repaint.rs"))?;
         // One build workspace per slice: re-extracted at the same path so
         // cargo reuses the slot's unchanged artifacts.
         let overlay = build.join("sophia");
@@ -876,6 +879,11 @@ fn run() -> Result<()> {
             return Err("presentation consensus module would replace a pinned file".into());
         }
         fs::copy(&consensus, &consensus_module)?;
+        let repaint_module = module.with_file_name("presentation_repaint.rs");
+        if repaint_module.exists() {
+            return Err("presentation repaint module would replace a pinned file".into());
+        }
+        fs::copy(&repaint, &repaint_module)?;
         fs::write(work.join("glue.sha256"), check_glue(&overlay)?)?;
         let mount = overlay.join(MOUNT);
         let original = fs::read_to_string(&mount)?;
@@ -886,7 +894,7 @@ fn run() -> Result<()> {
         fs::write(
             work.join("overlay.sha256"),
             format!(
-                "{}  {MOUNT}\n{}  hagia_sdk_lifecycle.rs\n{}  occupied.rs\n{}  operations.rs\n{}  slow_peer.rs\n{}  presentation.rs\n{}  presentation_revocation.rs\n{}  presentation_disconnect.rs\n{}  presentation_cancel.rs\n{}  abort_settlement.rs\n{}  manage.rs\n{}  manage_pixels.rs\n{}  presentation_consensus.rs\n",
+                "{}  {MOUNT}\n{}  hagia_sdk_lifecycle.rs\n{}  occupied.rs\n{}  operations.rs\n{}  slow_peer.rs\n{}  presentation.rs\n{}  presentation_revocation.rs\n{}  presentation_disconnect.rs\n{}  presentation_cancel.rs\n{}  abort_settlement.rs\n{}  manage.rs\n{}  manage_pixels.rs\n{}  presentation_consensus.rs\n{}  presentation_repaint.rs\n",
                 hash(&mount)?,
                 hash(&module)?,
                 hash(&occupied_module)?,
@@ -899,7 +907,8 @@ fn run() -> Result<()> {
                 hash(&abort_module)?,
                 hash(&manage_module)?,
                 hash(&manage_pixels_module)?,
-                hash(&consensus_module)?
+                hash(&consensus_module)?,
+                hash(&repaint_module)?
             ),
         )?;
         let run = Run {
@@ -999,6 +1008,7 @@ fn run() -> Result<()> {
             || hash(&manage)? != hash(&manage_module)?
             || hash(&manage_pixels)? != hash(&manage_pixels_module)?
             || hash(&consensus)? != hash(&consensus_module)?
+            || hash(&repaint)? != hash(&repaint_module)?
             || hash(&binary)? != digest
         {
             return Err("input changed during run".into());
@@ -1008,7 +1018,7 @@ fn run() -> Result<()> {
     let result = finish(
         &work,
         result,
-        "PASS lifecycle=3 occupied=5 operations=3 slow_peer=1 presented=5 native=false\n",
+        "PASS lifecycle=3 occupied=5 operations=3 slow_peer=1 presented=6 native=false\n",
     );
     // Supervised steps have been waited for; the lease ends after closure.
     drop(lease);
