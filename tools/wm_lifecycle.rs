@@ -21,7 +21,7 @@ const MOUNT: &str = "crates/sophia-session/tests/support/desktop_launch_reload.r
 /// Written first into a build root this runner created; reuse and cleanup
 /// require it.
 const MARKER: &str = ".wm-lifecycle-build-root";
-const MARKER_TEXT: &str = "owner=niltempus tools/wm_lifecycle.rs\n";
+const MARKER_HEADER: &str = "owner=niltempus tools/wm_lifecycle.rs";
 const EVIDENCE: &str = ".local/state/sophia/development-evidence";
 const SLOTS: &str = ".cache/cargo-slots";
 const CASES: [&str; 10] = [
@@ -195,18 +195,36 @@ fn inside_checkout(path: &Path) -> bool {
         .is_ok_and(|o| o.status.success() && o.stdout.starts_with(b"true"))
 }
 
-/// Refuse overlapping record and build roots, either direction, and build
-/// roots under evidence, any cargo slot or a Git checkout. Both are resolved
-/// through existing parents, so a symlinked parent cannot hide an overlap.
-fn check_roots(work: &Path, build: &Path, evidence: &Path, slots: &Path) -> Result<()> {
-    if work.starts_with(build) || build.starts_with(work) {
+fn overlaps(a: &Path, b: &Path) -> bool {
+    a.starts_with(b) || b.starts_with(a)
+}
+
+/// Refuse a build root that overlaps, in either direction, the records, the
+/// evidence directory, the cargo slots, any other protected path (Cargo home,
+/// supplied checkouts, this executable, HOME itself), or that lies inside a
+/// Git checkout. Records must not overlap the slots or protected paths
+/// either. Paths are resolved through existing parents, so a symlinked
+/// parent cannot hide an overlap.
+fn check_roots(
+    work: &Path,
+    build: &Path,
+    evidence: &Path,
+    slots: &Path,
+    protected: &[PathBuf],
+) -> Result<()> {
+    if overlaps(work, build) {
         return Err("NEW_WORK and BUILD_ROOT overlap".into());
     }
-    if build.starts_with(evidence) {
-        return Err("BUILD_ROOT is under the evidence directory".into());
+    if overlaps(build, evidence) {
+        return Err("BUILD_ROOT overlaps the evidence directory".into());
     }
-    if build.starts_with(slots) || work.starts_with(slots) {
-        return Err("a root is under the cargo slots".into());
+    if overlaps(build, slots) || overlaps(work, slots) {
+        return Err("a root overlaps the cargo slots".into());
+    }
+    for path in protected {
+        if overlaps(build, path) || overlaps(work, path) {
+            return Err(format!("a root overlaps protected {}", path.display()).into());
+        }
     }
     if inside_checkout(build) {
         return Err("BUILD_ROOT is inside a Git checkout".into());
@@ -214,25 +232,77 @@ fn check_roots(work: &Path, build: &Path, evidence: &Path, slots: &Path) -> Resu
     Ok(())
 }
 
-/// Create the build root, or reuse one this runner marked.
-fn own_build_root(build: &Path) -> Result<()> {
+/// One exclusive, nonblocking lease per build root, on a stable sibling lock
+/// file that is never unlinked, so every holder locks the same inode. Std
+/// opens it close-on-exec: children never inherit it. Run, cleanup and the
+/// control/check scripts take it before any marker read, reuse or deletion.
+fn lease_build_root(build: &Path) -> Result<(fs::File, String)> {
+    let name = build.file_name().ok_or("BUILD_ROOT has no name")?;
+    let lock = build
+        .parent()
+        .ok_or("BUILD_ROOT has no parent")?
+        .join(format!(".{}.wm-lifecycle.lock", name.to_string_lossy()));
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&lock)?;
+    match file.try_lock() {
+        Ok(()) => {}
+        Err(fs::TryLockError::WouldBlock) => {
+            return Err(format!("BUILD_ROOT is busy: {} is held", lock.display()).into());
+        }
+        Err(fs::TryLockError::Error(e)) => return Err(e.into()),
+    }
+    let meta = file.metadata()?;
+    let identity = format!(
+        "build_root_lock={} dev={} ino={}\n",
+        lock.display(),
+        meta.dev(),
+        meta.ino()
+    );
+    Ok((file, identity))
+}
+
+fn marker_text(protected: &[PathBuf]) -> String {
+    let mut text = format!("{MARKER_HEADER}\n");
+    for path in protected {
+        text.push_str(&format!("protect={}\n", path.display()));
+    }
+    text
+}
+
+/// The protected paths a marked root's creator recorded; None if unmarked.
+fn marked(build: &Path) -> Option<Vec<PathBuf>> {
+    let text = fs::read_to_string(build.join(MARKER)).ok()?;
+    let mut lines = text.lines();
+    (lines.next()? == MARKER_HEADER).then(|| {
+        lines
+            .filter_map(|l| l.strip_prefix("protect=").map(PathBuf::from))
+            .collect()
+    })
+}
+
+/// Create the build root, or reuse one this runner marked. The caller holds
+/// the build-root lease.
+fn own_build_root(build: &Path, protected: &[PathBuf]) -> Result<()> {
     if fs::symlink_metadata(build).is_ok() {
-        if fs::read_to_string(build.join(MARKER)).ok().as_deref() != Some(MARKER_TEXT) {
+        if marked(build).is_none() {
             return Err("existing BUILD_ROOT is not marked as this runner's".into());
         }
         return Ok(());
     }
     fs::create_dir(build)?;
     fs::set_permissions(build, fs::Permissions::from_mode(0o700))?;
-    fs::write(build.join(MARKER), MARKER_TEXT)?;
+    fs::write(build.join(MARKER), marker_text(protected))?;
     Ok(())
 }
 
 /// What a record directory may hold: regular files at the top and one level
 /// of case directories of regular files. Symlinks, other directories and
-/// executable or object files are violations. Size is not a criterion.
-fn record_violations(work: &Path) -> Result<Vec<String>> {
-    fn artifact(path: &Path) -> Result<bool> {
+/// executable or object files are violations; so is anything that cannot be
+/// inspected. Size is not a criterion.
+fn record_violations(work: &Path) -> Vec<String> {
+    fn artifact(path: &Path) -> std::io::Result<bool> {
         let mut head = [0u8; 8];
         let read = fs::File::open(path)?.read(&mut head)?;
         let name = path.extension().and_then(OsStr::to_str).unwrap_or("");
@@ -241,47 +311,110 @@ fn record_violations(work: &Path) -> Result<Vec<String>> {
             || ["rlib", "rmeta", "o", "so", "a", "d"].contains(&name)
             || fs::metadata(path)?.mode() & 0o111 != 0)
     }
-    let mut out = Vec::new();
-    for entry in fs::read_dir(work)? {
-        let entry = entry?;
-        let kind = entry.file_type()?;
-        let name = entry.file_name();
-        if kind.is_symlink() {
-            out.push(format!("symlink {}", name.to_string_lossy()));
-        } else if kind.is_file() {
-            if artifact(&entry.path())? {
-                out.push(format!("artifact {}", name.to_string_lossy()));
+    fn file(out: &mut Vec<String>, path: &Path, rel: &str) {
+        match artifact(path) {
+            Ok(true) => out.push(format!("artifact {rel}")),
+            Ok(false) => {}
+            Err(e) => out.push(format!("inspection error {rel}: {e}")),
+        }
+    }
+    fn entries(
+        out: &mut Vec<String>,
+        dir: &Path,
+        rel: &str,
+    ) -> Vec<(String, PathBuf, fs::FileType)> {
+        let mut found = Vec::new();
+        match fs::read_dir(dir) {
+            Ok(iter) => {
+                for entry in iter {
+                    match entry.and_then(|e| Ok((e.file_name(), e.path(), e.file_type()?))) {
+                        Ok((name, path, kind)) => {
+                            found.push((format!("{rel}{}", name.to_string_lossy()), path, kind));
+                        }
+                        Err(e) => out.push(format!("inspection error {rel}: {e}")),
+                    }
+                }
             }
-        } else if name == "cases" && kind.is_dir() {
-            for case in fs::read_dir(entry.path())? {
-                let case = case?;
-                if !case.file_type()?.is_dir() {
-                    out.push(format!(
-                        "cases entry {}",
-                        case.file_name().to_string_lossy()
-                    ));
+            Err(e) => out.push(format!("inspection error {rel}: {e}")),
+        }
+        found
+    }
+    let mut out = Vec::new();
+    for (rel, path, kind) in entries(&mut out, work, "") {
+        if kind.is_symlink() {
+            out.push(format!("symlink {rel}"));
+        } else if kind.is_file() {
+            file(&mut out, &path, &rel);
+        } else if rel == "cases" && kind.is_dir() {
+            for (case, path, kind) in entries(&mut out, &path, "cases/") {
+                if !kind.is_dir() {
+                    out.push(format!("cases entry {case}"));
                     continue;
                 }
-                for file in fs::read_dir(case.path())? {
-                    let file = file?;
-                    let rel = format!(
-                        "cases/{}/{}",
-                        case.file_name().to_string_lossy(),
-                        file.file_name().to_string_lossy()
-                    );
-                    if !file.file_type()?.is_file() {
+                for (rel, path, kind) in entries(&mut out, &path, &format!("{case}/")) {
+                    if !kind.is_file() {
                         out.push(format!("not a file {rel}"));
-                    } else if artifact(&file.path())? {
-                        out.push(format!("artifact {rel}"));
+                    } else {
+                        file(&mut out, &path, &rel);
                     }
                 }
             }
         } else {
-            out.push(format!("directory {}", name.to_string_lossy()));
+            out.push(format!("directory {rel}"));
         }
     }
     out.sort();
-    Ok(out)
+    out
+}
+
+/// Record the outcome and close the records. The original failure and any
+/// record-policy violation are both kept; a closure that cannot hash every
+/// record turns the result into STOP and still writes what it could.
+fn finish(work: &Path, result: Result<()>, pass: &str) -> Result<()> {
+    let violations = record_violations(work);
+    let mut policy = format!("violations={}\n", violations.len());
+    for line in violations.iter().take(200) {
+        policy.push_str(line);
+        policy.push('\n');
+    }
+    let mut result = match result {
+        Ok(()) if !violations.is_empty() => Err(format!(
+            "record policy: {} violation(s); see record-policy",
+            violations.len()
+        )
+        .into()),
+        Err(e) if !violations.is_empty() => Err(format!(
+            "{e}; record policy: {} violation(s); see record-policy",
+            violations.len()
+        )
+        .into()),
+        other => other,
+    };
+    let written = fs::write(work.join("record-policy"), policy).and_then(|()| {
+        fs::write(
+            work.join("RESULT"),
+            match &result {
+                Ok(()) => pass.to_owned(),
+                Err(e) => format!("STOP {e}\n"),
+            },
+        )
+    });
+    if let Err(e) = written {
+        return Err(format!("records not written: {e}").into());
+    }
+    if let Err(e) = close_records(work) {
+        let prior = match &result {
+            Ok(()) => "none".to_owned(),
+            Err(prior) => prior.to_string(),
+        };
+        result = Err(format!("record closure failed: {e}; prior: {prior}").into());
+        fs::write(
+            work.join("RESULT"),
+            format!("STOP {}\n", result.as_ref().unwrap_err()),
+        )?;
+        let _ = close_records(work);
+    }
+    result
 }
 
 fn checked(command: &mut Command) -> Result<String> {
@@ -447,14 +580,20 @@ fn close_records(work: &Path) -> Result<()> {
     }
     files.sort();
     let mut manifest = String::new();
+    let mut unhashed = Vec::new();
     for file in files {
-        manifest.push_str(&format!(
-            "{}  {}\n",
-            hash(&file)?,
-            file.strip_prefix(work)?.display()
-        ));
+        match hash(&file) {
+            Ok(digest) => manifest.push_str(&format!(
+                "{digest}  {}\n",
+                file.strip_prefix(work)?.display()
+            )),
+            Err(_) => unhashed.push(file.strip_prefix(work)?.display().to_string()),
+        }
     }
     fs::write(work.join("SHA256SUMS"), manifest)?;
+    if !unhashed.is_empty() {
+        return Err(format!("unhashable records: {}", unhashed.join(", ")).into());
+    }
     checked(Command::new("sha256sum").current_dir(work).args([
         "--check",
         "--quiet",
@@ -477,6 +616,8 @@ fn run() -> Result<()> {
             &resolved(Path::new(&args[2]))?,
             &resolved(&home.join(EVIDENCE))?,
             &resolved(&home.join(SLOTS))?,
+            &fs::canonicalize(&home)?,
+            &fs::canonicalize(env::current_exe()?)?,
         );
     }
     if args.len() != 5 {
@@ -492,7 +633,22 @@ fn run() -> Result<()> {
     let cargo = fs::canonicalize(&args[4])?;
     let home = home()?;
     let slots = resolved(&home.join(SLOTS))?;
-    check_roots(&work, &build, &resolved(&home.join(EVIDENCE))?, &slots)?;
+    let protected = vec![
+        cargo.clone(),
+        sophia.clone(),
+        hagia.clone(),
+        fs::canonicalize(env::current_exe()?)?,
+    ];
+    if fs::canonicalize(&home)?.starts_with(&build) {
+        return Err("BUILD_ROOT contains HOME".into());
+    }
+    check_roots(
+        &work,
+        &build,
+        &resolved(&home.join(EVIDENCE))?,
+        &slots,
+        &protected,
+    )?;
     let target = slot_target(
         &slots.join("sophia"),
         env::var_os("CARGO_SLOT_ROOT").is_some() || env::var_os("CARGO_SLOTS").is_some(),
@@ -522,10 +678,12 @@ fn run() -> Result<()> {
     }
     // The overlay is deliberately external. Record the Hagia working-tree
     // diff too: a development run cannot silently become signed qualification.
+    // The build-root lease comes before any mutation; busy roots are refused.
+    let (lease, lease_identity) = lease_build_root(&build)?;
     fs::create_dir(&work)?;
     fs::set_permissions(&work, fs::Permissions::from_mode(0o700))?;
     let result = (|| -> Result<()> {
-        own_build_root(&build)?;
+        own_build_root(&build, &protected)?;
         if fs::canonicalize(&work)? != work || fs::canonicalize(&build)? != build {
             return Err("a root resolved differently after creation".into());
         }
@@ -536,7 +694,7 @@ fn run() -> Result<()> {
         fs::write(
             work.join("resources"),
             format!(
-                "{wrapper}cargo_target_dir={} (cargo-slot path check only; the lease is the wrapper's lock, not verified here)\nbuild_root={}\nrun_products={}\ncargo_home={}\n",
+                "{wrapper}cargo_target_dir={} (cargo-slot path check only; the lease is the wrapper's lock, not verified here)\n{lease_identity}build_root={}\nrun_products={}\ncargo_home={}\n",
                 target.display(),
                 build.display(),
                 products.display(),
@@ -728,40 +886,41 @@ fn run() -> Result<()> {
         }
         Ok(())
     })();
-    let violations = record_violations(&work)?;
-    let result = match result {
-        Ok(()) if !violations.is_empty() => {
-            Err(format!("record policy: {}", violations.join("; ")).into())
-        }
-        other => other,
-    };
-    fs::write(
-        work.join("RESULT"),
-        match &result {
-            Ok(()) => {
-                "PASS lifecycle=3 occupied=2 operations=3 slow_peer=1 presented=1 native=false\n"
-                    .into()
-            }
-            Err(e) => format!("STOP {e}\n"),
-        },
-    )?;
-    close_records(&work)?;
+    let result = finish(
+        &work,
+        result,
+        "PASS lifecycle=3 occupied=2 operations=3 slow_peer=1 presented=1 native=false\n",
+    );
+    // Children have all been waited for; the lease ends after closure.
+    drop(lease);
     result
 }
 
 /// Remove exactly one marked build root once its slice's runs, controls and
 /// checks have ended, recording what was removed in a new record directory.
-fn cleanup(build: &Path, record: &Path, evidence: &Path, slots: &Path) -> Result<()> {
+fn cleanup(
+    build: &Path,
+    record: &Path,
+    evidence: &Path,
+    slots: &Path,
+    home: &Path,
+    exe: &Path,
+) -> Result<()> {
     if fs::symlink_metadata(record).is_ok() {
         return Err("cleanup record must not exist".into());
     }
     if !build.is_dir() || fs::canonicalize(build)? != build {
         return Err("BUILD_ROOT is not a canonical directory".into());
     }
-    check_roots(record, build, evidence, slots)?;
-    if fs::read_to_string(build.join(MARKER)).ok().as_deref() != Some(MARKER_TEXT) {
-        return Err("BUILD_ROOT is not marked as this runner's".into());
+    if home.starts_with(build) {
+        return Err("BUILD_ROOT contains HOME".into());
     }
+    check_roots(record, build, evidence, slots, &[exe.to_path_buf()])?;
+    // The lease before the marker is read, held through removal and closure.
+    let (lease, lease_identity) = lease_build_root(build)?;
+    let mut protected = marked(build).ok_or("BUILD_ROOT is not marked as this runner's")?;
+    protected.push(exe.to_path_buf());
+    check_roots(record, build, evidence, slots, &protected)?;
     // Read-only check that no process of ours still runs from or in the root.
     let uid = fs::metadata("/proc/self")?.uid();
     for entry in fs::read_dir("/proc")? {
@@ -794,7 +953,7 @@ fn cleanup(build: &Path, record: &Path, evidence: &Path, slots: &Path) -> Result
     fs::set_permissions(record, fs::Permissions::from_mode(0o700))?;
     fs::write(
         record.join("removed"),
-        format!("build_root={}\n{listing}", build.display()),
+        format!("build_root={}\n{lease_identity}{listing}", build.display()),
     )?;
     let removal = fs::remove_dir_all(build);
     let gone = fs::symlink_metadata(build).is_err();
@@ -806,6 +965,7 @@ fn cleanup(build: &Path, record: &Path, evidence: &Path, slots: &Path) -> Result
         },
     )?;
     close_records(record)?;
+    drop(lease);
     removal?;
     if !gone {
         return Err("build root still present".into());
@@ -881,24 +1041,49 @@ mod tests {
     #[test]
     fn overlapping_or_misplaced_roots_refuse() {
         let root = scratch("roots");
-        let evidence = root.join("evidence");
-        let slots = root.join("slots");
-        for dir in [&evidence, &slots] {
-            fs::create_dir(dir).unwrap();
+        let evidence = root.join("state/evidence");
+        let slots = root.join("cache/slots");
+        let cargo = root.join("cache/cargo-home");
+        let sophia = root.join("dev/sophia");
+        let exe = root.join("bin/runner");
+        for dir in [&evidence, &slots, &cargo, &sophia, &root.join("bin")] {
+            fs::create_dir_all(dir).unwrap();
         }
+        fs::write(&exe, "sentinel").unwrap();
+        let protected = [cargo.clone(), sophia.clone(), exe.clone()];
+        let roots =
+            |work: &Path, build: &Path| check_roots(work, build, &evidence, &slots, &protected);
         let work = evidence.join("run");
-        let build = root.join("build");
-        assert!(check_roots(&work, &build, &evidence, &slots).is_ok());
-        assert!(check_roots(&work, &work.join("b"), &evidence, &slots).is_err());
-        assert!(check_roots(&build.join("w"), &build, &evidence, &slots).is_err());
-        assert!(check_roots(&work, &evidence.join("b"), &evidence, &slots).is_err());
-        assert!(check_roots(&work, &slots.join("sophia/1/b"), &evidence, &slots).is_err());
+        let build = root.join("scratch/build");
+        fs::create_dir_all(root.join("scratch")).unwrap();
+        assert!(roots(&work, &build).is_ok());
+        // Descendants, ancestors and equality, in both directions.
+        for bad in [
+            work.join("b"),
+            work.clone(),
+            evidence.join("b"),
+            evidence.clone(),
+            root.join("state"),
+            slots.join("sophia/1/b"),
+            slots.clone(),
+            root.join("cache"),
+            cargo.join("b"),
+            sophia.join("b"),
+            sophia.clone(),
+            root.join("dev"),
+            root.join("bin"),
+            root.clone(),
+        ] {
+            assert!(roots(&work, &bad).is_err(), "{}", bad.display());
+        }
+        assert!(roots(&build.join("w"), &build).is_err());
+        assert!(roots(&slots.join("w"), &build).is_err());
         // A symlinked parent resolves to the directory it names.
         fs::create_dir(&work).unwrap();
         std::os::unix::fs::symlink(&work, root.join("link")).unwrap();
         let hidden = resolved(&root.join("link").join("b")).unwrap();
         assert_eq!(hidden, work.join("b"));
-        assert!(check_roots(&work, &hidden, &evidence, &slots).is_err());
+        assert!(roots(&work, &hidden).is_err());
         // A tracked checkout cannot hold build products.
         let checkout = root.join("checkout");
         fs::create_dir(&checkout).unwrap();
@@ -911,7 +1096,9 @@ mod tests {
                 .unwrap()
                 .success()
         );
-        assert!(check_roots(&work, &checkout.join("b"), &evidence, &slots).is_err());
+        assert!(roots(&work, &checkout.join("b")).is_err());
+        // Nothing was created or removed by refusing.
+        assert!(!build.exists() && evidence.exists() && slots.exists() && exe.exists());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -922,9 +1109,11 @@ mod tests {
         fs::create_dir_all(root.join("cases/one")).unwrap();
         fs::write(root.join("cases/one/observations.txt"), "ok\n").unwrap();
         assert!(
-            record_violations(&root).unwrap().is_empty(),
+            record_violations(&root).is_empty(),
             "large text is a record"
         );
+        assert!(finish(&root, Ok(()), "PASS\n").is_ok());
+        assert_eq!(fs::read_to_string(root.join("RESULT")).unwrap(), "PASS\n");
         fs::write(root.join("hagia"), b"\x7fELF\x02\x01\x01").unwrap();
         fs::write(root.join("cases/one/lib.rlib"), "!<arch>\n").unwrap();
         fs::write(root.join("run.sh"), "#!/bin/sh\n").unwrap();
@@ -932,7 +1121,7 @@ mod tests {
         fs::create_dir(root.join("nimcache")).unwrap();
         std::os::unix::fs::symlink("/etc/passwd", root.join("escape")).unwrap();
         assert_eq!(
-            record_violations(&root).unwrap(),
+            record_violations(&root),
             [
                 "artifact cases/one/lib.rlib",
                 "artifact hagia",
@@ -941,10 +1130,66 @@ mod tests {
                 "symlink escape",
             ]
         );
-        // A violating directory still closes, so the STOP stays diagnosable.
-        close_records(&root).unwrap();
+        // The original failure and the policy refusal are both kept, and
+        // the violating directory still closes so the STOP stays diagnosable.
+        assert!(finish(&root, Err("case failed".into()), "PASS\n").is_err());
+        let result = fs::read_to_string(root.join("RESULT")).unwrap();
+        assert!(
+            result.starts_with("STOP case failed; record policy: 5"),
+            "{result}"
+        );
+        assert!(
+            fs::read_to_string(root.join("record-policy"))
+                .unwrap()
+                .contains("artifact hagia")
+        );
         let manifest = fs::read_to_string(root.join("SHA256SUMS")).unwrap();
         assert!(manifest.contains("big.log") && !manifest.contains("escape"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_unreadable_record_cannot_pass() {
+        let root = scratch("unreadable");
+        fs::write(root.join("log"), "text\n").unwrap();
+        fs::set_permissions(root.join("log"), fs::Permissions::from_mode(0o000)).unwrap();
+        assert!(finish(&root, Ok(()), "PASS\n").is_err());
+        let result = fs::read_to_string(root.join("RESULT")).unwrap();
+        assert!(result.starts_with("STOP "), "{result}");
+        let policy = fs::read_to_string(root.join("record-policy")).unwrap();
+        assert!(policy.contains("inspection error log"), "{policy}");
+        let manifest = fs::read_to_string(root.join("SHA256SUMS")).unwrap();
+        assert!(manifest.contains("RESULT") && !manifest.contains("  log\n"));
+        fs::set_permissions(root.join("log"), fs::Permissions::from_mode(0o600)).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn one_holder_leases_a_build_root() {
+        let root = scratch("lease");
+        let evidence = root.join("evidence");
+        let slots = root.join("slots");
+        for dir in [&evidence, &slots] {
+            fs::create_dir(dir).unwrap();
+        }
+        let build = root.join("build");
+        let (held, identity) = lease_build_root(&build).unwrap();
+        assert!(identity.contains(".build.wm-lifecycle.lock"));
+        // A second, independently opened handle is refused while held.
+        let busy = lease_build_root(&build).unwrap_err().to_string();
+        assert!(busy.contains("busy"), "{busy}");
+        own_build_root(&build, &[]).unwrap();
+        fs::write(build.join("in-use"), "active").unwrap();
+        // Cleanup cannot remove an active root.
+        let exe = root.join("exe");
+        fs::write(&exe, "sentinel").unwrap();
+        let home = root.join("home");
+        assert!(cleanup(&build, &evidence.join("c1"), &evidence, &slots, &home, &exe).is_err());
+        assert!(build.join("in-use").exists() && !evidence.join("c1").exists());
+        drop(held);
+        // The same lock inode serves the next holder; it is never unlinked.
+        let (_again, again) = lease_build_root(&build).unwrap();
+        assert_eq!(identity, again);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -953,28 +1198,59 @@ mod tests {
         let root = scratch("cleanup");
         let evidence = root.join("evidence");
         let slots = root.join("slots");
-        for dir in [&evidence, &slots] {
+        let checkout = root.join("checkout");
+        for dir in [&evidence, &slots, &checkout] {
             fs::create_dir(dir).unwrap();
         }
+        let exe = root.join("exe");
+        fs::write(&exe, "sentinel").unwrap();
+        let home = root.join("home");
         let foreign = root.join("foreign");
         fs::create_dir(&foreign).unwrap();
-        assert!(own_build_root(&foreign).is_err());
-        assert!(cleanup(&foreign, &evidence.join("c0"), &evidence, &slots).is_err());
+        assert!(own_build_root(&foreign, &[]).is_err());
+        assert!(
+            cleanup(
+                &foreign,
+                &evidence.join("c0"),
+                &evidence,
+                &slots,
+                &home,
+                &exe
+            )
+            .is_err()
+        );
         assert!(foreign.exists());
+        // A root that contains the cleanup executable or HOME is never removed.
+        assert!(cleanup(&root, &evidence.join("c1"), &evidence, &slots, &home, &exe).is_err());
+        let homed = root.join("homed");
+        own_build_root(&homed, &[]).unwrap();
+        assert!(
+            cleanup(
+                &homed,
+                &evidence.join("c1"),
+                &evidence,
+                &slots,
+                &homed.join("h"),
+                &exe
+            )
+            .is_err()
+        );
+        assert!(exe.exists() && foreign.exists() && homed.exists());
         let build = root.join("build");
-        own_build_root(&build).unwrap();
-        own_build_root(&build).unwrap();
+        own_build_root(&build, &[checkout.clone()]).unwrap();
+        own_build_root(&build, &[checkout.clone()]).unwrap();
+        assert_eq!(marked(&build), Some(vec![checkout.clone()]));
         fs::create_dir_all(build.join("runs/one")).unwrap();
         fs::write(build.join("runs/one/hagia"), b"\x7fELF").unwrap();
         let record = evidence.join("cleanup-01");
-        cleanup(&build, &record, &evidence, &slots).unwrap();
-        assert!(!build.exists());
+        cleanup(&build, &record, &evidence, &slots, &home, &exe).unwrap();
+        assert!(!build.exists() && checkout.exists() && exe.exists());
         assert_eq!(
             fs::read_to_string(record.join("RESULT")).unwrap(),
             "PASS build root removed\n"
         );
-        assert!(record_violations(&record).unwrap().is_empty());
-        assert!(cleanup(&build, &evidence.join("c2"), &evidence, &slots).is_err());
+        assert!(record_violations(&record).is_empty());
+        assert!(cleanup(&build, &evidence.join("c2"), &evidence, &slots, &home, &exe).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 
