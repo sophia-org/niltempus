@@ -98,7 +98,7 @@ read-only except the work, build, slot and Cargo cache directories. Every build/
 has an outer timeout with five-second kill escalation. This is a development
 build, not the release dependency/toolchain gate.
 
-Thirteen tests must each appear exactly once in the ignored-test listing and then
+Fourteen tests must each appear exactly once in the ignored-test listing and then
 each report one passed test. Missing tests, zero tests, a failing command, or
 changed fixture/binary bytes refuse the run. `RESULT` and the self-excluding
 `SHA256SUMS` close the records on success or failure. The manifest covers the
@@ -110,7 +110,7 @@ never reused.
 The assertions cover protected startup, real profile rejection/rollback, and
 automatic/requested restart with checkpoint refresh on an empty headless
 scene, plus occupied settlement and restart in `tests/external/occupied.rs`.
-All eight external module hashes are bound. Occupied cases supply authority facts
+All nine external module hashes are bound. Occupied cases supply authority facts
 and layout completion, and compare committed policy focus and checkpoint state;
 they do not prove visual readiness or physical focus. See Hagia's external-test
 README for exact supplied and real boundaries.
@@ -155,6 +155,11 @@ after cancellation. The control rebuilds an archived Hagia whose terminal
 handler treats cancellation as release. Actual locking, other cancellation
 triggers and AbortSettlement remain separate.
 No installed process, GPU, input device, display server or release is accessed.
+`abort_settlement.rs` stages a real fullscreen proposal pending frontend state
+acknowledgements, with a supplied long deadline and locally retained controls.
+Peer exit must force timeout settlement in the old epoch before replacement;
+controls omit forced expiry or bypass that barrier. Frontend delivery, rollback
+ACKs and native settlement remain outside the fixture.
 This is neither a performance result nor full t249/h006 acceptance.
 
 The first recorded run, `t249-sdk-lifecycle-01` under Sophia's development
