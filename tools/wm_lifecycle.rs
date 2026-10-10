@@ -1,10 +1,16 @@
 //! Offline current-SDK Hagia lifecycle qualification. Compile with rustc;
 //! no dependency on niltempus's older public-crate qualification pin.
-use std::os::unix::fs::PermissionsExt;
+//!
+//! Run the whole command under one `cargo-slot sophia` lease. Build products
+//! (archived sources, Nim cache, Hagia binary) live under BUILD_ROOT, never in
+//! the NEW_WORK evidence records, which hold records, sources and hashes only.
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::{
     env,
     error::Error,
+    ffi::OsStr,
     fs,
+    io::Read,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
@@ -12,6 +18,12 @@ use std::{
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 const SOPHIA: &str = "f77244abe3063255c57c283a32eafe1666d6e684";
 const MOUNT: &str = "crates/sophia-session/tests/support/desktop_launch_reload.rs";
+/// Written first into a build root this runner created; reuse and cleanup
+/// require it.
+const MARKER: &str = ".wm-lifecycle-build-root";
+const MARKER_TEXT: &str = "owner=niltempus tools/wm_lifecycle.rs\n";
+const EVIDENCE: &str = ".local/state/sophia/development-evidence";
+const SLOTS: &str = ".cache/cargo-slots";
 const CASES: [&str; 10] = [
     "sdk_lifecycle_startup",
     "sdk_lifecycle_profile_rollback",
@@ -102,6 +114,176 @@ fn check_glue(overlay: &Path) -> Result<String> {
     Ok(record)
 }
 
+fn home() -> Result<PathBuf> {
+    Ok(PathBuf::from(env::var_os("HOME").ok_or("HOME is unset")?))
+}
+
+/// An existing directory, canonical, or the canonical parent joined with a
+/// plain final component when it does not exist yet.
+fn resolved(path: &Path) -> Result<PathBuf> {
+    if !path.is_absolute() {
+        return Err(format!("{} is not absolute", path.display()).into());
+    }
+    if fs::symlink_metadata(path).is_ok() {
+        return Ok(fs::canonicalize(path)?);
+    }
+    let name = path.file_name().ok_or("path has no final component")?;
+    if name == OsStr::new("..") || name == OsStr::new(".") {
+        return Err("path ends in a relative component".into());
+    }
+    Ok(fs::canonicalize(path.parent().ok_or("path has no parent")?)?.join(name))
+}
+
+/// The target directory cargo-slot assigned: a direct numbered child of the
+/// default sophia pool. This is a path check, not proof of an active lease;
+/// the lease is the wrapper process holding its lock for this run.
+fn slot_target(pool: &Path, overrides: bool, target: Option<&OsStr>) -> Result<PathBuf> {
+    if overrides {
+        return Err("CARGO_SLOT_ROOT/CARGO_SLOTS must not be set".into());
+    }
+    let target =
+        fs::canonicalize(target.ok_or("CARGO_TARGET_DIR is unset: run under cargo-slot sophia")?)?;
+    let pool = fs::canonicalize(pool)?;
+    let numbered = target
+        .file_name()
+        .and_then(OsStr::to_str)
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+    if target.parent() != Some(pool.as_path()) || !numbered {
+        return Err(format!("{} is not a sophia cargo slot", target.display()).into());
+    }
+    Ok(target)
+}
+
+/// The parent process's command line, which must be cargo-slot for sophia.
+fn wrapper_record() -> Result<String> {
+    let parent = std::os::unix::process::parent_id();
+    let mut bytes = Vec::new();
+    fs::File::open(format!("/proc/{parent}/cmdline"))?.read_to_end(&mut bytes)?;
+    let argv: Vec<String> = bytes
+        .split(|b| *b == 0)
+        .filter(|a| !a.is_empty())
+        .map(|a| String::from_utf8_lossy(a).into_owned())
+        .collect();
+    let index = argv
+        .iter()
+        .position(|a| Path::new(a).file_name() == Some(OsStr::new("cargo-slot")))
+        .ok_or("parent is not cargo-slot")?;
+    if argv.get(index + 1).map(String::as_str) != Some("sophia") {
+        return Err("cargo-slot project is not sophia".into());
+    }
+    let wrapper = fs::canonicalize(&argv[index])?;
+    Ok(format!(
+        "wrapper={} sha256={} invocation={argv:?}\n",
+        wrapper.display(),
+        hash(&wrapper)?
+    ))
+}
+
+fn inside_checkout(path: &Path) -> bool {
+    let mut probe = path.to_path_buf();
+    while fs::symlink_metadata(&probe).is_err() {
+        if !probe.pop() {
+            return false;
+        }
+    }
+    Command::new("git")
+        .arg("-C")
+        .arg(&probe)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .stderr(Stdio::null())
+        .output()
+        .is_ok_and(|o| o.status.success() && o.stdout.starts_with(b"true"))
+}
+
+/// Refuse overlapping record and build roots, either direction, and build
+/// roots under evidence, any cargo slot or a Git checkout. Both are resolved
+/// through existing parents, so a symlinked parent cannot hide an overlap.
+fn check_roots(work: &Path, build: &Path, evidence: &Path, slots: &Path) -> Result<()> {
+    if work.starts_with(build) || build.starts_with(work) {
+        return Err("NEW_WORK and BUILD_ROOT overlap".into());
+    }
+    if build.starts_with(evidence) {
+        return Err("BUILD_ROOT is under the evidence directory".into());
+    }
+    if build.starts_with(slots) || work.starts_with(slots) {
+        return Err("a root is under the cargo slots".into());
+    }
+    if inside_checkout(build) {
+        return Err("BUILD_ROOT is inside a Git checkout".into());
+    }
+    Ok(())
+}
+
+/// Create the build root, or reuse one this runner marked.
+fn own_build_root(build: &Path) -> Result<()> {
+    if fs::symlink_metadata(build).is_ok() {
+        if fs::read_to_string(build.join(MARKER)).ok().as_deref() != Some(MARKER_TEXT) {
+            return Err("existing BUILD_ROOT is not marked as this runner's".into());
+        }
+        return Ok(());
+    }
+    fs::create_dir(build)?;
+    fs::set_permissions(build, fs::Permissions::from_mode(0o700))?;
+    fs::write(build.join(MARKER), MARKER_TEXT)?;
+    Ok(())
+}
+
+/// What a record directory may hold: regular files at the top and one level
+/// of case directories of regular files. Symlinks, other directories and
+/// executable or object files are violations. Size is not a criterion.
+fn record_violations(work: &Path) -> Result<Vec<String>> {
+    fn artifact(path: &Path) -> Result<bool> {
+        let mut head = [0u8; 8];
+        let read = fs::File::open(path)?.read(&mut head)?;
+        let name = path.extension().and_then(OsStr::to_str).unwrap_or("");
+        Ok(head[..read].starts_with(b"\x7fELF")
+            || head[..read].starts_with(b"!<arch>")
+            || ["rlib", "rmeta", "o", "so", "a", "d"].contains(&name)
+            || fs::metadata(path)?.mode() & 0o111 != 0)
+    }
+    let mut out = Vec::new();
+    for entry in fs::read_dir(work)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        let name = entry.file_name();
+        if kind.is_symlink() {
+            out.push(format!("symlink {}", name.to_string_lossy()));
+        } else if kind.is_file() {
+            if artifact(&entry.path())? {
+                out.push(format!("artifact {}", name.to_string_lossy()));
+            }
+        } else if name == "cases" && kind.is_dir() {
+            for case in fs::read_dir(entry.path())? {
+                let case = case?;
+                if !case.file_type()?.is_dir() {
+                    out.push(format!(
+                        "cases entry {}",
+                        case.file_name().to_string_lossy()
+                    ));
+                    continue;
+                }
+                for file in fs::read_dir(case.path())? {
+                    let file = file?;
+                    let rel = format!(
+                        "cases/{}/{}",
+                        case.file_name().to_string_lossy(),
+                        file.file_name().to_string_lossy()
+                    );
+                    if !file.file_type()?.is_file() {
+                        out.push(format!("not a file {rel}"));
+                    } else if artifact(&file.path())? {
+                        out.push(format!("artifact {rel}"));
+                    }
+                }
+            }
+        } else {
+            out.push(format!("directory {}", name.to_string_lossy()));
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
 fn checked(command: &mut Command) -> Result<String> {
     let out = command.output()?;
     if !out.status.success() {
@@ -161,6 +343,7 @@ fn log_step(work: &Path, name: &str, command: &mut Command) -> Result<()> {
 
 struct Run {
     work: PathBuf,
+    build: PathBuf,
     target: PathBuf,
     cargo: PathBuf,
 }
@@ -187,7 +370,7 @@ impl Run {
                 "--tmpfs",
                 "/run/user",
             ]);
-        for writable in [&self.work, &self.target, &self.cargo] {
+        for writable in [&self.work, &self.build, &self.target, &self.cargo] {
             cmd.arg("--bind").arg(writable).arg(writable);
         }
         cmd.arg("--chdir")
@@ -248,9 +431,13 @@ fn close_records(work: &Path) -> Result<()> {
             files.push(entry.path());
         }
     }
-    if work.join("cases").exists() {
+    if work.join("cases").is_dir() && !work.join("cases").is_symlink() {
         for case in fs::read_dir(work.join("cases"))? {
-            for entry in fs::read_dir(case?.path())? {
+            let case = case?;
+            if !case.file_type()?.is_dir() {
+                continue;
+            }
+            for entry in fs::read_dir(case.path())? {
                 let entry = entry?;
                 if entry.file_type()?.is_file() {
                     files.push(entry.path());
@@ -276,21 +463,42 @@ fn close_records(work: &Path) -> Result<()> {
     Ok(())
 }
 
+const USAGE: &str = "usage: cargo-slot sophia wm-lifecycle SOPHIA_CHECKOUT HAGIA_CHECKOUT NEW_WORK BUILD_ROOT CARGO_HOME\n       wm-lifecycle cleanup BUILD_ROOT NEW_CLEANUP_RECORD";
+
 fn run() -> Result<()> {
     let args: Vec<_> = env::args_os().skip(1).collect();
-    if args.len() != 5 {
-        return Err(
-            "usage: wm-lifecycle SOPHIA_CHECKOUT HAGIA_CHECKOUT NEW_WORK TARGET CARGO_HOME".into(),
+    if args.first().map(|a| a.as_os_str()) == Some(OsStr::new("cleanup")) {
+        if args.len() != 3 {
+            return Err(USAGE.into());
+        }
+        let home = home()?;
+        return cleanup(
+            &resolved(Path::new(&args[1]))?,
+            &resolved(Path::new(&args[2]))?,
+            &resolved(&home.join(EVIDENCE))?,
+            &resolved(&home.join(SLOTS))?,
         );
+    }
+    if args.len() != 5 {
+        return Err(USAGE.into());
     }
     let sophia = fs::canonicalize(&args[0])?;
     let hagia = fs::canonicalize(&args[1])?;
-    let work = PathBuf::from(&args[2]);
-    if !work.is_absolute() || work.exists() {
-        return Err("work must be a new absolute directory".into());
+    let work = resolved(Path::new(&args[2]))?;
+    if fs::symlink_metadata(&work).is_ok() {
+        return Err("NEW_WORK must not exist".into());
     }
-    let target = fs::canonicalize(&args[3])?;
+    let build = resolved(Path::new(&args[3]))?;
     let cargo = fs::canonicalize(&args[4])?;
+    let home = home()?;
+    let slots = resolved(&home.join(SLOTS))?;
+    check_roots(&work, &build, &resolved(&home.join(EVIDENCE))?, &slots)?;
+    let target = slot_target(
+        &slots.join("sophia"),
+        env::var_os("CARGO_SLOT_ROOT").is_some() || env::var_os("CARGO_SLOTS").is_some(),
+        env::var_os("CARGO_TARGET_DIR").as_deref(),
+    )?;
+    let wrapper = wrapper_record()?;
     if git(&sophia, &["rev-parse", "HEAD"])? != SOPHIA {
         return Err("unsupported Sophia source pin".into());
     }
@@ -317,6 +525,24 @@ fn run() -> Result<()> {
     fs::create_dir(&work)?;
     fs::set_permissions(&work, fs::Permissions::from_mode(0o700))?;
     let result = (|| -> Result<()> {
+        own_build_root(&build)?;
+        if fs::canonicalize(&work)? != work || fs::canonicalize(&build)? != build {
+            return Err("a root resolved differently after creation".into());
+        }
+        let run_name = work.file_name().ok_or("NEW_WORK has no name")?;
+        let products = build.join("runs").join(run_name);
+        fs::create_dir_all(build.join("runs"))?;
+        fs::create_dir(&products)?;
+        fs::write(
+            work.join("resources"),
+            format!(
+                "{wrapper}cargo_target_dir={} (cargo-slot path check only; the lease is the wrapper's lock, not verified here)\nbuild_root={}\nrun_products={}\ncargo_home={}\n",
+                target.display(),
+                build.display(),
+                products.display(),
+                cargo.display()
+            ),
+        )?;
         let fixture = hagia.join("tests/external/lifecycle.rs");
         let occupied = hagia.join("tests/external/occupied.rs");
         let operations = hagia.join("tests/external/operations.rs");
@@ -358,9 +584,14 @@ fn run() -> Result<()> {
         fs::copy(&operations, work.join("operations.rs"))?;
         fs::copy(&slow_peer, work.join("slow_peer.rs"))?;
         fs::copy(&presentation, work.join("presentation.rs"))?;
-        let overlay = work.join("sophia");
+        // One build workspace per slice: re-extracted at the same path so
+        // cargo reuses the slot's unchanged artifacts.
+        let overlay = build.join("sophia");
+        if fs::symlink_metadata(&overlay).is_ok() {
+            fs::remove_dir_all(&overlay)?;
+        }
         archive(&sophia, SOPHIA, &overlay)?;
-        let hagia_source = work.join("hagia-source");
+        let hagia_source = products.join("hagia-source");
         archive(&hagia, &git(&hagia, &["rev-parse", "HEAD"])?, &hagia_source)?;
         fs::copy(
             hagia_source.join("vendor/sophia-desktop-sdk/manifest.json"),
@@ -403,17 +634,18 @@ fn run() -> Result<()> {
             ),
         )?;
         let run = Run {
-            work: fs::canonicalize(&work)?,
+            work: work.clone(),
+            build: build.clone(),
             target,
             cargo,
         };
-        let binary = run.work.join("hagia");
+        let binary = products.join("hagia");
         let nim_args = vec![
             "c".into(),
             "--hints:off".into(),
             "--parallelBuild:1".into(),
             "-d:release".into(),
-            format!("--nimcache:{}", run.work.join("nimcache").display()),
+            format!("--nimcache:{}", products.join("nimcache").display()),
             format!("--out:{}", binary.display()),
             "src/hagia.nim".into(),
         ];
@@ -423,7 +655,14 @@ fn run() -> Result<()> {
             &mut run.isolated(&hagia_source, 300, "nim", &nim_args),
         )?;
         let digest = hash(&binary)?;
-        fs::write(work.join("hagia.sha256"), format!("{digest}  hagia\n"))?;
+        fs::write(
+            work.join("hagia.sha256"),
+            format!(
+                "{digest}  {}\nsize={}\n",
+                binary.display(),
+                fs::metadata(&binary)?.len()
+            ),
+        )?;
         let base = [
             "test",
             "--offline",
@@ -489,6 +728,13 @@ fn run() -> Result<()> {
         }
         Ok(())
     })();
+    let violations = record_violations(&work)?;
+    let result = match result {
+        Ok(()) if !violations.is_empty() => {
+            Err(format!("record policy: {}", violations.join("; ")).into())
+        }
+        other => other,
+    };
     fs::write(
         work.join("RESULT"),
         match &result {
@@ -501,6 +747,70 @@ fn run() -> Result<()> {
     )?;
     close_records(&work)?;
     result
+}
+
+/// Remove exactly one marked build root once its slice's runs, controls and
+/// checks have ended, recording what was removed in a new record directory.
+fn cleanup(build: &Path, record: &Path, evidence: &Path, slots: &Path) -> Result<()> {
+    if fs::symlink_metadata(record).is_ok() {
+        return Err("cleanup record must not exist".into());
+    }
+    if !build.is_dir() || fs::canonicalize(build)? != build {
+        return Err("BUILD_ROOT is not a canonical directory".into());
+    }
+    check_roots(record, build, evidence, slots)?;
+    if fs::read_to_string(build.join(MARKER)).ok().as_deref() != Some(MARKER_TEXT) {
+        return Err("BUILD_ROOT is not marked as this runner's".into());
+    }
+    // Read-only check that no process of ours still runs from or in the root.
+    let uid = fs::metadata("/proc/self")?.uid();
+    for entry in fs::read_dir("/proc")? {
+        let entry = entry?;
+        if !entry
+            .file_name()
+            .to_string_lossy()
+            .bytes()
+            .all(|b| b.is_ascii_digit())
+            || entry.metadata().map(|m| m.uid()).ok() != Some(uid)
+        {
+            continue;
+        }
+        for link in ["cwd", "exe"] {
+            if fs::read_link(entry.path().join(link)).is_ok_and(|p| p.starts_with(build)) {
+                return Err(format!(
+                    "process {} still uses BUILD_ROOT",
+                    entry.file_name().to_string_lossy()
+                )
+                .into());
+            }
+        }
+    }
+    let listing = checked(
+        Command::new("du")
+            .args(["--bytes", "--max-depth=2"])
+            .arg(build),
+    )?;
+    fs::create_dir(record)?;
+    fs::set_permissions(record, fs::Permissions::from_mode(0o700))?;
+    fs::write(
+        record.join("removed"),
+        format!("build_root={}\n{listing}", build.display()),
+    )?;
+    let removal = fs::remove_dir_all(build);
+    let gone = fs::symlink_metadata(build).is_err();
+    fs::write(
+        record.join("RESULT"),
+        match (&removal, gone) {
+            (Ok(()), true) => "PASS build root removed\n".to_owned(),
+            (removal, _) => format!("STOP removal {removal:?} gone={gone}\n"),
+        },
+    )?;
+    close_records(record)?;
+    removal?;
+    if !gone {
+        return Err("build root still present".into());
+    }
+    Ok(())
 }
 
 fn main() {
@@ -537,6 +847,135 @@ mod tests {
         assert!(span("start\nstart\nend\n", "start", "end").is_err());
         assert!(span("start\nb\n", "start", "end").is_err());
         assert!(span("b\nend\n", "start", "end").is_err());
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let root = env::temp_dir().join(format!("wm-lifecycle-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir(&root).unwrap();
+        fs::canonicalize(root).unwrap()
+    }
+
+    #[test]
+    fn only_a_numbered_default_sophia_slot_is_a_target() {
+        let root = scratch("slots");
+        let pool = root.join("sophia");
+        for dir in ["1", "x"] {
+            fs::create_dir_all(pool.join(dir)).unwrap();
+        }
+        let elsewhere = root.join("elsewhere");
+        fs::create_dir(&elsewhere).unwrap();
+        let one = pool.join("1");
+        assert_eq!(
+            slot_target(&pool, false, Some(one.as_os_str())).unwrap(),
+            one
+        );
+        assert!(slot_target(&pool, true, Some(one.as_os_str())).is_err());
+        assert!(slot_target(&pool, false, None).is_err());
+        assert!(slot_target(&pool, false, Some(pool.join("x").as_os_str())).is_err());
+        assert!(slot_target(&pool, false, Some(elsewhere.as_os_str())).is_err());
+        assert!(slot_target(&pool, false, Some(pool.as_os_str())).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn overlapping_or_misplaced_roots_refuse() {
+        let root = scratch("roots");
+        let evidence = root.join("evidence");
+        let slots = root.join("slots");
+        for dir in [&evidence, &slots] {
+            fs::create_dir(dir).unwrap();
+        }
+        let work = evidence.join("run");
+        let build = root.join("build");
+        assert!(check_roots(&work, &build, &evidence, &slots).is_ok());
+        assert!(check_roots(&work, &work.join("b"), &evidence, &slots).is_err());
+        assert!(check_roots(&build.join("w"), &build, &evidence, &slots).is_err());
+        assert!(check_roots(&work, &evidence.join("b"), &evidence, &slots).is_err());
+        assert!(check_roots(&work, &slots.join("sophia/1/b"), &evidence, &slots).is_err());
+        // A symlinked parent resolves to the directory it names.
+        fs::create_dir(&work).unwrap();
+        std::os::unix::fs::symlink(&work, root.join("link")).unwrap();
+        let hidden = resolved(&root.join("link").join("b")).unwrap();
+        assert_eq!(hidden, work.join("b"));
+        assert!(check_roots(&work, &hidden, &evidence, &slots).is_err());
+        // A tracked checkout cannot hold build products.
+        let checkout = root.join("checkout");
+        fs::create_dir(&checkout).unwrap();
+        assert!(
+            Command::new("git")
+                .arg("init")
+                .arg("-q")
+                .arg(&checkout)
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(check_roots(&work, &checkout.join("b"), &evidence, &slots).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn record_policy_flags_artifacts_not_size() {
+        let root = scratch("records");
+        fs::write(root.join("big.log"), "x".repeat(3 << 20)).unwrap();
+        fs::create_dir_all(root.join("cases/one")).unwrap();
+        fs::write(root.join("cases/one/observations.txt"), "ok\n").unwrap();
+        assert!(
+            record_violations(&root).unwrap().is_empty(),
+            "large text is a record"
+        );
+        fs::write(root.join("hagia"), b"\x7fELF\x02\x01\x01").unwrap();
+        fs::write(root.join("cases/one/lib.rlib"), "!<arch>\n").unwrap();
+        fs::write(root.join("run.sh"), "#!/bin/sh\n").unwrap();
+        fs::set_permissions(root.join("run.sh"), fs::Permissions::from_mode(0o755)).unwrap();
+        fs::create_dir(root.join("nimcache")).unwrap();
+        std::os::unix::fs::symlink("/etc/passwd", root.join("escape")).unwrap();
+        assert_eq!(
+            record_violations(&root).unwrap(),
+            [
+                "artifact cases/one/lib.rlib",
+                "artifact hagia",
+                "artifact run.sh",
+                "directory nimcache",
+                "symlink escape",
+            ]
+        );
+        // A violating directory still closes, so the STOP stays diagnosable.
+        close_records(&root).unwrap();
+        let manifest = fs::read_to_string(root.join("SHA256SUMS")).unwrap();
+        assert!(manifest.contains("big.log") && !manifest.contains("escape"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn only_a_marked_build_root_is_reused_or_removed() {
+        let root = scratch("cleanup");
+        let evidence = root.join("evidence");
+        let slots = root.join("slots");
+        for dir in [&evidence, &slots] {
+            fs::create_dir(dir).unwrap();
+        }
+        let foreign = root.join("foreign");
+        fs::create_dir(&foreign).unwrap();
+        assert!(own_build_root(&foreign).is_err());
+        assert!(cleanup(&foreign, &evidence.join("c0"), &evidence, &slots).is_err());
+        assert!(foreign.exists());
+        let build = root.join("build");
+        own_build_root(&build).unwrap();
+        own_build_root(&build).unwrap();
+        fs::create_dir_all(build.join("runs/one")).unwrap();
+        fs::write(build.join("runs/one/hagia"), b"\x7fELF").unwrap();
+        let record = evidence.join("cleanup-01");
+        cleanup(&build, &record, &evidence, &slots).unwrap();
+        assert!(!build.exists());
+        assert_eq!(
+            fs::read_to_string(record.join("RESULT")).unwrap(),
+            "PASS build root removed\n"
+        );
+        assert!(record_violations(&record).unwrap().is_empty());
+        assert!(cleanup(&build, &evidence.join("c2"), &evidence, &slots).is_err());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

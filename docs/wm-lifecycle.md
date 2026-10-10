@@ -12,11 +12,21 @@ rustc +1.96.1 --edition 2024 --test tools/wm_lifecycle.rs -o /tmp/wm-lifecycle-t
 rustc +1.96.1 --edition 2024 tools/wm_lifecycle.rs -o /tmp/wm-lifecycle
 ```
 
-Run with five explicit absolute paths:
+Run the whole command under one cargo-slot lease, with five explicit absolute
+paths:
 
 ```sh
-/tmp/wm-lifecycle SOPHIA_CHECKOUT HAGIA_CHECKOUT NEW_WORK TARGET CARGO_HOME
+cargo-slot sophia /tmp/wm-lifecycle SOPHIA_CHECKOUT HAGIA_CHECKOUT NEW_WORK BUILD_ROOT CARGO_HOME
 ```
+
+The wrapper holds its slot lock until the runner exits and gives it the slot as
+`CARGO_TARGET_DIR`. The runner refuses an unset target, a target that is not a
+numbered child of the default `~/.cache/cargo-slots/sophia` pool, pool
+overrides, and a parent process that is not `cargo-slot sophia`. It records the
+wrapper path, hash and invocation in `resources`. That check is about paths
+and the parent command; the lease itself is the wrapper's lock, which the
+runner does not inspect. Never export a slot path by hand or nest cargo-slot
+inside a leased run.
 
 The Sophia checkout must be clean at
 `f77244abe3063255c57c283a32eafe1666d6e684`. Updating this pin requires reviewing
@@ -26,16 +36,35 @@ Hagia source; dirty production inputs are refused. The runner records remaining
 working-tree changes, so development evidence stays distinguishable from a
 clean committed fixture run.
 
-`NEW_WORK` must not exist. `TARGET` and a provisioned offline `CARGO_HOME` must
-already exist and be reserved for this work. Reuse the target across development
-and controls; do not create a large fresh cache for every trial. Hagia builds
-serially, Rust uses four jobs, tests run serially, and both use nice 10.
+`NEW_WORK` holds records only and must not exist. `BUILD_ROOT` holds build
+products: the archived Sophia workspace, each run's Hagia source archive, Nim
+cache and binary under `runs/<NEW_WORK name>`. Both are resolved through their
+existing parents, so symlinks cannot hide an overlap. The runner refuses roots
+that overlap in either direction, a build root under the evidence directory,
+any cargo slot or a Git checkout, and an existing build root without its owner
+marker. Runs of one slice reuse one build root: the Sophia archive is
+re-extracted at the same path, so cargo reuses unchanged slot artifacts.
+Evidence records the binary's path, hash and size, never the binary.
+
+On closure the runner checks the record set: regular files at the top level and
+in `cases/<case>/`, with no symlinks, other directories, executables, ELF or
+archive objects. A violation turns the result into STOP and still closes the
+manifest, so the run remains diagnosable. Size is not a criterion; large logs
+are records.
+
+After a slice's runs, controls and checks have all ended, remove its build root
+with `wm-lifecycle cleanup BUILD_ROOT NEW_CLEANUP_RECORD`. It removes only that
+canonical, marked root, refuses while a process of the user still has its
+working directory or executable there, and records what it removed in its own
+closed record. Cargo slots and evidence are never removed. A provisioned offline
+`CARGO_HOME` must already exist. Hagia builds serially, Rust uses four jobs,
+tests run serially, and both use nice 10.
 
 The runner archives the sources, inserts exactly one test module into the
 Sophia archive, and records that overlay. It builds ordinary Hagia with its
 vendored SDK. Builds and tests run under bubblewrap with network, host devices,
 host PID visibility and user-runtime sockets hidden. The host filesystem is
-read-only except the work, target and Cargo cache directories. Every build/test
+read-only except the work, build, slot and Cargo cache directories. Every build/test
 has an outer timeout with five-second kill escalation. This is a development
 build, not the release dependency/toolchain gate.
 
