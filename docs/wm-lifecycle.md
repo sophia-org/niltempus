@@ -123,7 +123,14 @@ at the old-identity admission assertion, before any later cause filtering.
 The pin update from `8ce7c40ef` changes only documentation, test fixtures and
 test-only module wiring. Production WM owners and all five bound GLUE spans
 are unchanged; the t323 credit slice's isolated repository gate passes at this
-source. The nineteen-case paired run still requires its own evidence.
+source. The clean signed pair (Sophia `a8c5fdf29`, Hagia `b4d5702`, runner
+`6592846`) passes all nineteen cases in `t323-identity-01`. The archived
+index-only guard control in `t323-identity-control-01` fails first at
+`old surface identity must not target its numeric replacement`, with exit 101
+and one failed test. Source restoration, all fourteen modules and the Hagia
+binary hash verify; strict overlay clippy passes in `t323-identity-checks-01`.
+These closed records are under the development-evidence root above. They do
+not qualify Manage admission, physical focus or the remaining t249 exits.
 `operations.rs` adds accepted/refused typed intent, refused-action continuation,
 and disconnect with an unsettled projection or operation. No returned intent is
 executed. `slow_peer.rs` pauses only the fixture's own protected Hagia process
