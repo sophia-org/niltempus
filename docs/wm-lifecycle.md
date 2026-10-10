@@ -169,6 +169,16 @@ control replaces Manage with Relayout and must fail the named admission-request
 completion assertion, not an enum comparison.
 The two supplied completion-dispatch arms are reviewed against a fifth
 hash-bound production span in `owner_loop/session_control.rs`.
+`manage_pixels.rs` supplies a CPU backing snapshot with the new-window intent.
+It checks safe-extent reconciliation, staging of that retained candidate,
+admission through the same supplied ACKs, and release to the production CPU
+runtime. Both cycles check exact retained bytes and an interior pixel of the
+headless composed frame. A second frame must reach production without admission quarantine.
+The control omits the CPU branch's transition to Managed and must fail that
+second-frame assertion. A second control omits the safe recovery extent and
+must fail the reconciled-size assertion. This covers backing snapshots; Present admission and
+native retirement, backend presentation receipts and all-head consensus remain
+separate t249 joins.
 This is neither a performance result nor full t249/h006 acceptance.
 
 The first recorded run, `t249-sdk-lifecycle-01` under Sophia's development

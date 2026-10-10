@@ -28,7 +28,7 @@ const MARKER: &str = ".wm-lifecycle-build-root";
 const MARKER_HEADER: &str = "owner=niltempus tools/wm_lifecycle.rs";
 const EVIDENCE: &str = ".local/state/sophia/development-evidence";
 const SLOTS: &str = ".cache/cargo-slots";
-const CASES: [&str; 15] = [
+const CASES: [&str; 16] = [
     "sdk_lifecycle_startup",
     "sdk_lifecycle_profile_rollback",
     "sdk_lifecycle_restart",
@@ -36,6 +36,7 @@ const CASES: [&str; 15] = [
     "sdk_occupied_restart",
     "sdk_disconnect_aborts_pending_settlement",
     "sdk_occupied_manage_settles_admission",
+    "sdk_occupied_manage_admits_cpu_candidate",
     "sdk_operation_settlement",
     "sdk_operation_refused_action",
     "sdk_operation_disconnect",
@@ -759,6 +760,7 @@ fn run() -> Result<()> {
         let cancel = hagia.join("tests/external/presentation_cancel.rs");
         let abort = hagia.join("tests/external/abort_settlement.rs");
         let manage = hagia.join("tests/external/manage.rs");
+        let manage_pixels = hagia.join("tests/external/manage_pixels.rs");
         fs::write(
             work.join("runner.sha256"),
             hash(&env::current_exe()?)? + "\n",
@@ -800,6 +802,7 @@ fn run() -> Result<()> {
         fs::copy(&cancel, work.join("presentation_cancel.rs"))?;
         fs::copy(&abort, work.join("abort_settlement.rs"))?;
         fs::copy(&manage, work.join("manage.rs"))?;
+        fs::copy(&manage_pixels, work.join("manage_pixels.rs"))?;
         // One build workspace per slice: re-extracted at the same path so
         // cargo reuses the slot's unchanged artifacts.
         let overlay = build.join("sophia");
@@ -860,6 +863,11 @@ fn run() -> Result<()> {
             return Err("manage module would replace a pinned file".into());
         }
         fs::copy(&manage, &manage_module)?;
+        let manage_pixels_module = module.with_file_name("manage_pixels.rs");
+        if manage_pixels_module.exists() {
+            return Err("manage pixels module would replace a pinned file".into());
+        }
+        fs::copy(&manage_pixels, &manage_pixels_module)?;
         fs::write(work.join("glue.sha256"), check_glue(&overlay)?)?;
         let mount = overlay.join(MOUNT);
         let original = fs::read_to_string(&mount)?;
@@ -870,7 +878,7 @@ fn run() -> Result<()> {
         fs::write(
             work.join("overlay.sha256"),
             format!(
-                "{}  {MOUNT}\n{}  hagia_sdk_lifecycle.rs\n{}  occupied.rs\n{}  operations.rs\n{}  slow_peer.rs\n{}  presentation.rs\n{}  presentation_revocation.rs\n{}  presentation_disconnect.rs\n{}  presentation_cancel.rs\n{}  abort_settlement.rs\n{}  manage.rs\n",
+                "{}  {MOUNT}\n{}  hagia_sdk_lifecycle.rs\n{}  occupied.rs\n{}  operations.rs\n{}  slow_peer.rs\n{}  presentation.rs\n{}  presentation_revocation.rs\n{}  presentation_disconnect.rs\n{}  presentation_cancel.rs\n{}  abort_settlement.rs\n{}  manage.rs\n{}  manage_pixels.rs\n",
                 hash(&mount)?,
                 hash(&module)?,
                 hash(&occupied_module)?,
@@ -881,7 +889,8 @@ fn run() -> Result<()> {
                 hash(&disconnect_module)?,
                 hash(&cancel_module)?,
                 hash(&abort_module)?,
-                hash(&manage_module)?
+                hash(&manage_module)?,
+                hash(&manage_pixels_module)?
             ),
         )?;
         let run = Run {
@@ -979,6 +988,7 @@ fn run() -> Result<()> {
             || hash(&cancel)? != hash(&cancel_module)?
             || hash(&abort)? != hash(&abort_module)?
             || hash(&manage)? != hash(&manage_module)?
+            || hash(&manage_pixels)? != hash(&manage_pixels_module)?
             || hash(&binary)? != digest
         {
             return Err("input changed during run".into());
@@ -988,7 +998,7 @@ fn run() -> Result<()> {
     let result = finish(
         &work,
         result,
-        "PASS lifecycle=3 occupied=4 operations=3 slow_peer=1 presented=4 native=false\n",
+        "PASS lifecycle=3 occupied=5 operations=3 slow_peer=1 presented=4 native=false\n",
     );
     // Supervised steps have been waited for; the lease ends after closure.
     drop(lease);
