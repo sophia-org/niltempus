@@ -98,7 +98,7 @@ read-only except the work, build, slot and Cargo cache directories. Every build/
 has an outer timeout with five-second kill escalation. This is a development
 build, not the release dependency/toolchain gate.
 
-Fourteen tests must each appear exactly once in the ignored-test listing and then
+Fifteen tests must each appear exactly once in the ignored-test listing and then
 each report one passed test. Missing tests, zero tests, a failing command, or
 changed fixture/binary bytes refuse the run. `RESULT` and the self-excluding
 `SHA256SUMS` close the records on success or failure. The manifest covers the
@@ -110,7 +110,7 @@ never reused.
 The assertions cover protected startup, real profile rejection/rollback, and
 automatic/requested restart with checkpoint refresh on an empty headless
 scene, plus occupied settlement and restart in `tests/external/occupied.rs`.
-All nine external module hashes are bound. Occupied cases supply authority facts
+All ten external module hashes are bound. Occupied cases supply authority facts
 and layout completion, and compare committed policy focus and checkpoint state;
 they do not prove visual readiness or physical focus. See Hagia's external-test
 README for exact supplied and real boundaries.
@@ -160,6 +160,15 @@ acknowledgements, with a supplied long deadline and locally retained controls.
 Peer exit must force timeout settlement in the old epoch before replacement;
 controls omit forced expiry or bypass that barrier. Frontend delivery, rollback
 ACKs and native settlement remain outside the fixture.
+`manage.rs` introduces a new surface through a supplied authority presentation
+intent and the production Manage queue, staging and admission owners. It
+checks queued/in-flight deduplication, exact supplied admission/state ACKs,
+and settlement that ends the owner's management request. The surface remains
+AwaitingPixels: no frontend delivery, pixels or visibility is claimed. Its
+control replaces Manage with Relayout and must fail the named admission-request
+completion assertion, not an enum comparison.
+The two supplied completion-dispatch arms are reviewed against a fifth
+hash-bound production span in `owner_loop/session_control.rs`.
 This is neither a performance result nor full t249/h006 acceptance.
 
 The first recorded run, `t249-sdk-lifecycle-01` under Sophia's development

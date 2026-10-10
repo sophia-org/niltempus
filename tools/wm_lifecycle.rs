@@ -28,13 +28,14 @@ const MARKER: &str = ".wm-lifecycle-build-root";
 const MARKER_HEADER: &str = "owner=niltempus tools/wm_lifecycle.rs";
 const EVIDENCE: &str = ".local/state/sophia/development-evidence";
 const SLOTS: &str = ".cache/cargo-slots";
-const CASES: [&str; 14] = [
+const CASES: [&str; 15] = [
     "sdk_lifecycle_startup",
     "sdk_lifecycle_profile_rollback",
     "sdk_lifecycle_restart",
     "sdk_occupied_settlement",
     "sdk_occupied_restart",
     "sdk_disconnect_aborts_pending_settlement",
+    "sdk_occupied_manage_settles_admission",
     "sdk_operation_settlement",
     "sdk_operation_refused_action",
     "sdk_operation_disconnect",
@@ -44,10 +45,10 @@ const CASES: [&str; 14] = [
     "sdk_presented_disconnect_preserves_release_debt",
     "sdk_presented_cancel_preserves_focus",
 ];
-/// Production spans the presentation fixture mirrors or calls, found by
+/// Production spans the external fixtures mirror or call, found by
 /// semantic anchors in the archived pin. A changed hash refuses the run: the
 /// copied dispatch and routing glue must be compared again, by review.
-const GLUE: [(&str, &str, &str, &str); 4] = [
+const GLUE: [(&str, &str, &str, &str); 5] = [
     (
         "crates/sophia-session/src/live_session/owner_loop/policy_input_phase.rs",
         "macro_rules! dispatch_physical_policy_inputs",
@@ -71,6 +72,12 @@ const GLUE: [(&str, &str, &str, &str); 4] = [
         "fn service_presented_policy(",
         "fn preflight_staged_presentation(",
         "0d2b862c482ce624981887337bf321895e304d8741fd8651302d230797ac6292",
+    ),
+    (
+        "crates/sophia-session/src/live_session/owner_loop/session_control.rs",
+        "if completion.key.kind == XAuthorityControlKind::SetPresentationState",
+        "service_layout_progress!(\"control\");",
+        "244a9c1ab6d74142f86a3288be001cecf1452d8f5980b872140e619563e1ffe5",
     ),
 ];
 
@@ -751,6 +758,7 @@ fn run() -> Result<()> {
         let disconnect = hagia.join("tests/external/presentation_disconnect.rs");
         let cancel = hagia.join("tests/external/presentation_cancel.rs");
         let abort = hagia.join("tests/external/abort_settlement.rs");
+        let manage = hagia.join("tests/external/manage.rs");
         fs::write(
             work.join("runner.sha256"),
             hash(&env::current_exe()?)? + "\n",
@@ -791,6 +799,7 @@ fn run() -> Result<()> {
         fs::copy(&disconnect, work.join("presentation_disconnect.rs"))?;
         fs::copy(&cancel, work.join("presentation_cancel.rs"))?;
         fs::copy(&abort, work.join("abort_settlement.rs"))?;
+        fs::copy(&manage, work.join("manage.rs"))?;
         // One build workspace per slice: re-extracted at the same path so
         // cargo reuses the slot's unchanged artifacts.
         let overlay = build.join("sophia");
@@ -846,6 +855,11 @@ fn run() -> Result<()> {
             return Err("abort module would replace a pinned file".into());
         }
         fs::copy(&abort, &abort_module)?;
+        let manage_module = module.with_file_name("manage.rs");
+        if manage_module.exists() {
+            return Err("manage module would replace a pinned file".into());
+        }
+        fs::copy(&manage, &manage_module)?;
         fs::write(work.join("glue.sha256"), check_glue(&overlay)?)?;
         let mount = overlay.join(MOUNT);
         let original = fs::read_to_string(&mount)?;
@@ -856,7 +870,7 @@ fn run() -> Result<()> {
         fs::write(
             work.join("overlay.sha256"),
             format!(
-                "{}  {MOUNT}\n{}  hagia_sdk_lifecycle.rs\n{}  occupied.rs\n{}  operations.rs\n{}  slow_peer.rs\n{}  presentation.rs\n{}  presentation_revocation.rs\n{}  presentation_disconnect.rs\n{}  presentation_cancel.rs\n{}  abort_settlement.rs\n",
+                "{}  {MOUNT}\n{}  hagia_sdk_lifecycle.rs\n{}  occupied.rs\n{}  operations.rs\n{}  slow_peer.rs\n{}  presentation.rs\n{}  presentation_revocation.rs\n{}  presentation_disconnect.rs\n{}  presentation_cancel.rs\n{}  abort_settlement.rs\n{}  manage.rs\n",
                 hash(&mount)?,
                 hash(&module)?,
                 hash(&occupied_module)?,
@@ -866,7 +880,8 @@ fn run() -> Result<()> {
                 hash(&revocation_module)?,
                 hash(&disconnect_module)?,
                 hash(&cancel_module)?,
-                hash(&abort_module)?
+                hash(&abort_module)?,
+                hash(&manage_module)?
             ),
         )?;
         let run = Run {
@@ -963,6 +978,7 @@ fn run() -> Result<()> {
             || hash(&disconnect)? != hash(&disconnect_module)?
             || hash(&cancel)? != hash(&cancel_module)?
             || hash(&abort)? != hash(&abort_module)?
+            || hash(&manage)? != hash(&manage_module)?
             || hash(&binary)? != digest
         {
             return Err("input changed during run".into());
@@ -972,7 +988,7 @@ fn run() -> Result<()> {
     let result = finish(
         &work,
         result,
-        "PASS lifecycle=3 occupied=3 operations=3 slow_peer=1 presented=4 native=false\n",
+        "PASS lifecycle=3 occupied=4 operations=3 slow_peer=1 presented=4 native=false\n",
     );
     // Supervised steps have been waited for; the lease ends after closure.
     drop(lease);
