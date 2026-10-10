@@ -50,7 +50,7 @@ the test source. A failed run is kept and its path is never reused.
 The assertions cover protected startup, real profile rejection/rollback, and
 automatic/requested restart with checkpoint refresh on an empty headless
 scene, plus occupied settlement and restart in `tests/external/occupied.rs`.
-All three external module hashes are bound. Occupied cases supply authority facts
+All four external module hashes are bound. Occupied cases supply authority facts
 and layout completion, and compare committed policy focus and checkpoint state;
 they do not prove visual readiness or physical focus. See Hagia's external-test
 README for exact supplied and real boundaries.
@@ -108,3 +108,23 @@ The preserved first check manifest is
 `5c60c5999c026ed8fdd0f3cb55de9581ac5c1f84049b185ce452c71758a9e1e8`.
 Slow-peer/credit exhaustion, presentation/input and measurement remain outside
 this slice. No release or installed process changed.
+
+The stalled-peer successor `t249-slow-peer-01` passes all nine cases with Hagia
+`651763e2dff1102a0b7380b3347ce7fc19c44fea`, Sophia `65440ff5d` and runner
+`e441c7fb6b8cd4738ebc3d34fbc51df48d664b85`. Manifest:
+`537e570a65ce84623dbd00684f10ef304752a4bc1b25955a5cd7aabac961a390`.
+The live stopped fixture peer triggers the actual twelve-second response
+deadline. The new epoch clears pending authority, restores occupied state and
+answers a fresh action. Observed detection/replacement times are 12051/29 ms;
+they are not a latency qualification. `session-lines.txt` ends at detection,
+before restart. No installed process is signalled.
+
+`t249-slow-peer-controls-01` compiles ignored-transport-failure and
+retained-stalled-request mutations; each fails its own named assertion.
+Manifest `9172a63d50bb671fb8d3250e45898d7550122d261bc4e6c2eecf9935058ba4a3`.
+`t249-slow-peer-checks-01` verifies both mutated files were restored and passes
+strict overlay/runner clippy, two runner controls, formatting and Hagia layout;
+manifest `f35280c03cd458794dce6b5124dd4cd4513419bed6d27faa145d66774a2db098`.
+All manifests independently verify. AbortSettlement, peer-side ESTALE and
+receipt credit remain outside this case; the latter belongs with the upcoming
+presentation join. No production change, new release or full product gate.
