@@ -19,7 +19,7 @@ Run with five explicit absolute paths:
 ```
 
 The Sophia checkout must be clean at
-`9f52403be19346a49ad275481886de9a5d4015a3`. Updating this pin requires reviewing
+`ea64b1f027ace8b9064935d966697acfac37d004`. Updating this pin requires reviewing
 the test mount and owner APIs, not silently following master. The supplied
 Hagia checkout supplies the external fixture and the exact committed ordinary
 Hagia source; dirty production inputs are refused. The runner records remaining
@@ -39,7 +39,7 @@ read-only except the work, target and Cargo cache directories. Every build/test
 has an outer timeout with five-second kill escalation. This is a development
 build, not the release dependency/toolchain gate.
 
-Five tests must each appear exactly once in the ignored-test listing and then
+Eight tests must each appear exactly once in the ignored-test listing and then
 each report one passed test. Missing tests, zero tests, a failing command, or
 changed fixture/binary bytes refuse the run. `RESULT` and the self-excluding
 `SHA256SUMS` close the records on success or failure. The manifest covers the
@@ -50,10 +50,14 @@ the test source. A failed run is kept and its path is never reused.
 The assertions cover protected startup, real profile rejection/rollback, and
 automatic/requested restart with checkpoint refresh on an empty headless
 scene, plus occupied settlement and restart in `tests/external/occupied.rs`.
-Both external module hashes are bound. Occupied cases supply authority facts
+All three external module hashes are bound. Occupied cases supply authority facts
 and layout completion, and compare committed policy focus and checkpoint state;
 they do not prove visual readiness or physical focus. See Hagia's external-test
 README for exact supplied and real boundaries.
+`operations.rs` adds accepted/refused typed intent, refused-action continuation,
+and disconnect with an unsettled projection or operation. No returned intent is
+executed. The source-pin change from `9f52403be` is documentation only; the mount
+and production owner code are unchanged.
 No installed process, GPU, input device, display server or release is accessed.
 This is neither a performance result nor full t249/h006 acceptance.
 
