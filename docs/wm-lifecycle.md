@@ -83,3 +83,24 @@ runner controls; manifest
 `2855f118dd35575247f03425285c8fe1dfc1bca1395b79c973ac9a685beec5cb`.
 The earlier failed development fixtures are preserved, not qualification runs.
 No release pin or installed process changed.
+
+The operation successor `t249-operations-01` passes all eight cases with Hagia
+`67da6edfb2c5932b59f828b452ab9bf4e17236fe`, Sophia `ea64b1f02` and runner
+`7eff07b728a41a7813bd29fb850999f222eb5d09`. Manifest:
+`84e927141e8887cd9eb0ca66b7f317f9edf47aee0663110d5c139fca7dc83189`.
+`t249-operations-controls-01` compiles two server mutants: accepting a refused
+operation and retaining disconnected operation authority. Both fail the named
+assertion; manifest
+`b597e4e71aa96e00019713d12af0e50f6a92d6c3fb09ab5b1df409f49be6a78f`.
+The development and final fixtures/overlay hashes match, as do the production
+Hagia Git objects. No control invokes an executor.
+
+`t249-operations-checks-01` passes overlay clippy, then stops when Nimble cannot
+write metadata through the read-only sandbox, after layout itself passes.
+`t249-operations-checks-02` uses the direct layout script and passes it, runner
+clippy, two runner controls and formatting; manifest
+`d822a3c6639d8e92d32d479c1e5b25727fa7a36d1164b492ef9144680889abd3`.
+The preserved first check manifest is
+`5c60c5999c026ed8fdd0f3cb55de9581ac5c1f84049b185ce452c71758a9e1e8`.
+Slow-peer/credit exhaustion, presentation/input and measurement remain outside
+this slice. No release or installed process changed.
