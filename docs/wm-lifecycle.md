@@ -65,3 +65,17 @@ evidence directory, passes all three cases with Hagia `870bfc68b` and runner
 built no-checkpoint-restore mutant; the restart case fails as intended when the
 client no longer sends its restored-state refresh. The empty-scene limit still
 applies. Production sources, release pins and installed processes are unchanged.
+
+The occupied successor is `t249-occupied-01`: five cases pass on Hagia
+`0bbfe3cee3d1efa0b191098c70e64062ab8073b0`, Sophia `9f52403be` and runner
+`83023216817500f7595d5550f76d6b28016c99ba`. Manifest SHA256 is
+`7a340bac1e5b4dfc9cf4458162b6c5ab1fe4077afd8f1d31d5067dc0ce2946b7`.
+`t249-occupied-controls-01` binds that final fixture/executable: no checkpoint
+restore fails the occupied-layout assertion, and promoting/saving a refused
+candidate fails checkpoint preservation (one named failure each). Manifest:
+`6dcd65ec09d3bfffd2ef3c7cd9106eb0d7832bbfc8d2a13d0705180cc55eea60`.
+`t249-occupied-checks-02` records overlay/runner clippy, formatting and two
+runner controls; manifest
+`2855f118dd35575247f03425285c8fe1dfc1bca1395b79c973ac9a685beec5cb`.
+The earlier failed development fixtures are preserved, not qualification runs.
+No release pin or installed process changed.
