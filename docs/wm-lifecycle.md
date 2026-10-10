@@ -198,7 +198,10 @@ committed source generation while Session keeps the original Presented identity
 and starts no WM cycle. Retained CPU bytes are checked separately. The Sophia
 pin adds only a read-only retired-instance accessor to the existing generic
 backend test fixture; production sources and all five GLUE spans are unchanged
-from `f77244abe`. A control clamps the captured preview source generation to 1.
+from `f77244abe`. A control clamps the captured preview source generation to 1
+and requires the production composition-plan guard's `StaleInstanceSource`
+refusal at the repaint queue. A separately labelled compound control also
+bypasses that guard to test the retired-instance readback assertion.
 Recomposition is explicitly requested by the fixture, and device completions
 are simulated: production repaint scheduling and preview pixels remain separate.
 
