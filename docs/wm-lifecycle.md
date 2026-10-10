@@ -137,5 +137,27 @@ Manifest `9172a63d50bb671fb8d3250e45898d7550122d261bc4e6c2eecf9935058ba4a3`.
 strict overlay/runner clippy, two runner controls, formatting and Hagia layout;
 manifest `f35280c03cd458794dce6b5124dd4cd4513419bed6d27faa145d66774a2db098`.
 All manifests independently verify. AbortSettlement, peer-side ESTALE and
-receipt credit remain outside this case; the latter belongs with the upcoming
-presentation join. No production change, new release or full product gate.
+receipt credit remain outside this case; receipt exhaustion reachability needs
+a separate review. No production change, new release or full product gate.
+
+The presented-chord successor `t249-presented-01` passes all ten cases with
+Hagia `3960c837`, Sophia `f77244abe` and runner `beb125b7`; manifest
+`32e64d8b45db223c74f0a1a0d3f902070c666a8341177810d479bf1d6b11b623`.
+`t249-presented-controls-01` has two compiled named failures (missing completion,
+ignored Ended), manifest
+`836e6638d74f264bb0b4ad91f169a5529821e6e2d48208939f312f1e02e4ff79`.
+`t249-presented-checks-01` passes restored-source comparison, strict clippy,
+three runner tests, fmt and layout; manifest
+`a2ef23105d82f86fbb0ff03621b73655b1a0801bba485f0b9bd5593fca85fcfa`.
+All manifests independently verify. The initial dev01 receipt-drain assertion
+failure is preserved; bounded polling corrects fixture scheduling only. Final
+fixture/overlay/glue/runner hashes equal the control-bound dev02 ones. No
+bit-reproducibility claim follows from separate Nim builds of identical source.
+
+The new global build policy applies to future executions: use `cargo-slot
+sophia` to hold a pool slot for the whole runner and pass its assigned target;
+never allocate a per-task target or copy built binaries into evidence. This
+runner currently places its Hagia binary and Nim cache under NEW_WORK, so its
+build-product/record separation must be adapted before another evidence run.
+The frozen historical packages above remain intact. This integration runs no
+build, changes no release pin and does not close t249/h006.
