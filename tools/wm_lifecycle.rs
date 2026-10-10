@@ -28,7 +28,7 @@ const MARKER: &str = ".wm-lifecycle-build-root";
 const MARKER_HEADER: &str = "owner=niltempus tools/wm_lifecycle.rs";
 const EVIDENCE: &str = ".local/state/sophia/development-evidence";
 const SLOTS: &str = ".cache/cargo-slots";
-const CASES: [&str; 10] = [
+const CASES: [&str; 11] = [
     "sdk_lifecycle_startup",
     "sdk_lifecycle_profile_rollback",
     "sdk_lifecycle_restart",
@@ -39,6 +39,7 @@ const CASES: [&str; 10] = [
     "sdk_operation_disconnect",
     "sdk_slow_peer_response_deadline",
     "sdk_presented_chord_switcher",
+    "sdk_presented_revocation_closes_switcher",
 ];
 /// Production spans the presentation fixture mirrors or calls, found by
 /// semantic anchors in the archived pin. A changed hash refuses the run: the
@@ -743,6 +744,7 @@ fn run() -> Result<()> {
         let operations = hagia.join("tests/external/operations.rs");
         let slow_peer = hagia.join("tests/external/slow_peer.rs");
         let presentation = hagia.join("tests/external/presentation.rs");
+        let revocation = hagia.join("tests/external/presentation_revocation.rs");
         fs::write(
             work.join("runner.sha256"),
             hash(&env::current_exe()?)? + "\n",
@@ -779,6 +781,7 @@ fn run() -> Result<()> {
         fs::copy(&operations, work.join("operations.rs"))?;
         fs::copy(&slow_peer, work.join("slow_peer.rs"))?;
         fs::copy(&presentation, work.join("presentation.rs"))?;
+        fs::copy(&revocation, work.join("presentation_revocation.rs"))?;
         // One build workspace per slice: re-extracted at the same path so
         // cargo reuses the slot's unchanged artifacts.
         let overlay = build.join("sophia");
@@ -814,6 +817,11 @@ fn run() -> Result<()> {
             return Err("presentation module would replace a pinned file".into());
         }
         fs::copy(&presentation, &presentation_module)?;
+        let revocation_module = module.with_file_name("presentation_revocation.rs");
+        if revocation_module.exists() {
+            return Err("revocation module would replace a pinned file".into());
+        }
+        fs::copy(&revocation, &revocation_module)?;
         fs::write(work.join("glue.sha256"), check_glue(&overlay)?)?;
         let mount = overlay.join(MOUNT);
         let original = fs::read_to_string(&mount)?;
@@ -824,13 +832,14 @@ fn run() -> Result<()> {
         fs::write(
             work.join("overlay.sha256"),
             format!(
-                "{}  {MOUNT}\n{}  hagia_sdk_lifecycle.rs\n{}  occupied.rs\n{}  operations.rs\n{}  slow_peer.rs\n{}  presentation.rs\n",
+                "{}  {MOUNT}\n{}  hagia_sdk_lifecycle.rs\n{}  occupied.rs\n{}  operations.rs\n{}  slow_peer.rs\n{}  presentation.rs\n{}  presentation_revocation.rs\n",
                 hash(&mount)?,
                 hash(&module)?,
                 hash(&occupied_module)?,
                 hash(&operations_module)?,
                 hash(&slow_peer_module)?,
-                hash(&presentation_module)?
+                hash(&presentation_module)?,
+                hash(&revocation_module)?
             ),
         )?;
         let run = Run {
@@ -923,6 +932,7 @@ fn run() -> Result<()> {
             || hash(&operations)? != hash(&operations_module)?
             || hash(&slow_peer)? != hash(&slow_peer_module)?
             || hash(&presentation)? != hash(&presentation_module)?
+            || hash(&revocation)? != hash(&revocation_module)?
             || hash(&binary)? != digest
         {
             return Err("input changed during run".into());
@@ -932,7 +942,7 @@ fn run() -> Result<()> {
     let result = finish(
         &work,
         result,
-        "PASS lifecycle=3 occupied=2 operations=3 slow_peer=1 presented=1 native=false\n",
+        "PASS lifecycle=3 occupied=2 operations=3 slow_peer=1 presented=2 native=false\n",
     );
     // Supervised steps have been waited for; the lease ends after closure.
     drop(lease);

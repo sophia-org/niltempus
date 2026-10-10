@@ -98,7 +98,7 @@ read-only except the work, build, slot and Cargo cache directories. Every build/
 has an outer timeout with five-second kill escalation. This is a development
 build, not the release dependency/toolchain gate.
 
-Ten tests must each appear exactly once in the ignored-test listing and then
+Eleven tests must each appear exactly once in the ignored-test listing and then
 each report one passed test. Missing tests, zero tests, a failing command, or
 changed fixture/binary bytes refuse the run. `RESULT` and the self-excluding
 `SHA256SUMS` close the records on success or failure. The manifest covers the
@@ -110,7 +110,7 @@ never reused.
 The assertions cover protected startup, real profile rejection/rollback, and
 automatic/requested restart with checkpoint refresh on an empty headless
 scene, plus occupied settlement and restart in `tests/external/occupied.rs`.
-All five external module hashes are bound. Occupied cases supply authority facts
+All six external module hashes are bound. Occupied cases supply authority facts
 and layout completion, and compare committed policy focus and checkpoint state;
 they do not prove visual readiness or physical focus. See Hagia's external-test
 README for exact supplied and real boundaries.
@@ -133,6 +133,15 @@ Its copied dispatch arms and routing call mirror four pinned production spans,
 located by semantic anchors and hashed; a changed span refuses the run, and the
 glue must then be compared again by review. The source pin `f77244abe` differs
 from `65440ff5d` only in documentation, with the same mount file.
+Its child `presentation_revocation.rs` reuses the prefix through Held without
+a captured key or release debt. A completed frame missing its publication
+stamp must revoke the original identity. The first exact SceneChanged answer
+must close the switcher and preserve focus before a Withdrawn frame is supplied;
+Ended must return chord credit without selecting another window. A refused
+answer is distinguished from transport failure, but this staged-projection
+rejection exposes no refusal-reason record. Its precise cause remains a source
+inference. The control omits only Revoked delivery in the archived Session and
+must fail a named assertion on that first answer.
 No installed process, GPU, input device, display server or release is accessed.
 This is neither a performance result nor full t249/h006 acceptance.
 
