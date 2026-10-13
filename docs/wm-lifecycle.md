@@ -1,6 +1,28 @@
 # Offline WM lifecycle qualification
 
-The current suite has twenty-six cases and seventeen external modules.
+The current suite has twenty-seven cases and eighteen external modules.
+The application-capture case routes a focused application's press and release
+through Session, then proves Held capture resumes and the exact action reaches
+real Hagia. Initial Presented stamps come from both simulated mirror heads;
+application ingress remains local and closing replacement completion is supplied.
+It does not qualify frontend delivery, physical input or the remaining pointer,
+protected-action and lock/output-loss paths.
+
+Development `t249-capture-dev01` passes all 27 cases; manifest
+`571402a8041a1199e0fdacbd4e0c5af905f22a05b6c17c7d1d747df2ec26c4e7`.
+The archived `input/routing/key.rs` control disables the application-held-key
+term in `application_active`. It compiles and fails the first behavioral
+assertion, `held capture must leave an application-owned key sequence at its
+focused target`, with exit 101 and one failed test. The control restores the
+source and verifies all nineteen mounted inputs and the ordinary Hagia binary;
+`t249-capture-control01` manifest is
+`064d57901755e8f3e10a929da0e0ae5a48e8993a80fca5b68dc538cfa30f3c5c`.
+Restored strict Clippy, formatting, fourteen runner tests (one child fixture
+ignored) and Hagia layout pass in `t249-capture-checks01`; manifest
+`a7bbb8a7e84dad242e981957b56b05a527b06929cd39892de026618fc63b7ac9`.
+Sophia's pin and the five production glue spans are unchanged.
+
+The preceding twenty-six-case baseline follows.
 The `pointer_focus_sdk.rs` case selects a focus-follows-mouse profile without
 selecting native presentation. It checks negotiated admission, exact surface
 identity, correlated Hagia focus, refusal recovery and commit-only promotion.
@@ -353,7 +375,7 @@ never reused.
 The assertions cover protected startup, real profile rejection/rollback, and
 automatic/requested restart with checkpoint refresh on an empty headless
 scene, plus occupied settlement and restart in `tests/external/occupied.rs`.
-All seventeen external module hashes are bound. Occupied cases supply authority facts
+All eighteen external module hashes are bound. Occupied cases supply authority facts
 and layout completion, and compare committed policy focus and checkpoint state;
 they do not prove visual readiness or physical focus. See Hagia's external-test
 README for exact supplied and real boundaries.
