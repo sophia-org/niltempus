@@ -53,9 +53,41 @@ their controls have not been rerun here.
 Four of the five bound production spans remain byte-identical to `a8c5fdf29`.
 The presentation-service span now treats pending authentication and authenticated
 transport restart as stopping. Its hash was updated after reviewing that change.
-The external service helper still exercises revalidation, withdrawal settlement
-and observation directly; it does not qualify that stopping calculation or the
-native selection/install tail. Those remain separate t249 joins.
+The older external service helper exercises revalidation, withdrawal settlement
+and observation directly. The twenty-first case now calls the actual service
+owner for availability loss and withdrawal; the stopping calculation and
+native publication install remain separate t249 joins.
+
+`sdk_presented_service_withdraws_when_unavailable` starts from a backend-derived
+Presented receipt on two mirror heads. Supplied availability loss must make
+the production service revoke that identity and remove the runtime publication.
+The first real-peer answer closes the switcher with unchanged focus. Even after
+both heads retire the replacement, service must defer Withdrawn while unavailable
+and settle it once availability returns. Three archived single-site controls
+target those revocation, runtime-removal and settlement-gating assertions.
+The initial install/Presented prefix retains its existing supplied-head and
+abbreviated-service limits. No stopping, backend revocation, native install,
+device detection or scheduling qualification follows. All fifteen external
+modules are copied, hashed and compared; the suite has twenty-one cases.
+
+Development run `t249-service-dev01` passes all twenty-one; manifest SHA-256
+`a1daa9c0ffa871a8e6c469dc02590e1e258622166041c450523ef532d463a65c`.
+The three controls each compile and fail at the intended named assertion,
+exit 101 and one failure. Their self-excluding manifest identities are:
+
+- `t249-service-revoke-control01`:
+  `bcb88630e1a781051a9aa0f7d6360146f7e1e1f326f70320e92c4cd6c990284c`.
+- `t249-service-remove-control01`:
+  `6a9869175db99c7cea08529a780e01619410c6902173dc3d754f7cb14926f168`.
+- `t249-service-settle-control01`:
+  `c14478587818244cf74448794e5f03e82ca59c91ce978ea3d8d1e5a88be6e6ab`.
+
+All mutate only the archived production service under both leases, compare
+source to the pin before mutation, and verify restoration, all mounted inputs
+and the unchanged Hagia binary. `t249-service-checks01` passes restored-overlay
+strict Clippy, formatting, fourteen runner tests (one child fixture ignored),
+and Hagia layout; manifest
+`f3bf51ae41a3a1a384df626e8073daa1299a0d4399e034bdfa9e03d0dd1e5603`.
 
 The twentieth case, `sdk_occupied_manage_admits_software_present`, shares the
 CPU admission setup in `manage_pixels.rs`; the runner still mounts fourteen
@@ -176,7 +208,7 @@ never reused.
 The assertions cover protected startup, real profile rejection/rollback, and
 automatic/requested restart with checkpoint refresh on an empty headless
 scene, plus occupied settlement and restart in `tests/external/occupied.rs`.
-All fourteen external module hashes are bound. Occupied cases supply authority facts
+All fifteen external module hashes are bound. Occupied cases supply authority facts
 and layout completion, and compare committed policy focus and checkpoint state;
 they do not prove visual readiness or physical focus. See Hagia's external-test
 README for exact supplied and real boundaries.
