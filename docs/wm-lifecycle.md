@@ -44,8 +44,11 @@ is driven during restart waits; replacement publishes its new epoch only after
 that conversation finishes. Development run `t249-authenticated-dev01` passes
 all nineteen cases; its verified manifest SHA-256 is
 `e775ad10b50defd338b72f88771195eba86eca9134e4b855b9398a0e8e5df6ed`.
-A clean signed pair run follows. The older runs and controls below retain
-their original source identities; their controls have not been rerun here.
+The clean signed pair (Hagia `8e36eab`, runner `347d115`) also passes all
+nineteen cases in `t249-authenticated-01`; verified manifest SHA-256:
+`0370ecddf6e24cdd4d8a91553e546c19695e65c09c55e190d0bc6b83ae47c0c2`.
+The older runs and controls below retain their original source identities;
+their controls have not been rerun here.
 
 Four of the five bound production spans remain byte-identical to `a8c5fdf29`.
 The presentation-service span now treats pending authentication and authenticated
@@ -53,6 +56,31 @@ transport restart as stopping. Its hash was updated after reviewing that change.
 The external service helper still exercises revalidation, withdrawal settlement
 and observation directly; it does not qualify that stopping calculation or the
 native selection/install tail. Those remain separate t249 joins.
+
+The twentieth case, `sdk_occupied_manage_admits_software_present`, shares the
+CPU admission setup in `manage_pixels.rs`; the runner still mounts fourteen
+external modules. A supplied software-Present submission makes the candidate
+wait in AwaitingRetirement. The headless CPU backend generates the exact
+retirement record, and a direct Session retirement-owner call allows the next
+frame to escape quarantine. Frame identity and timing are zero in this copy
+path; no native completion is claimed. Controls omit Session admission
+completion or corrupt the backend candidate, respectively targeting the
+next-frame and exact-record assertions. Native service selection and scheduling
+remain outside this fixture.
+
+All twenty cases pass in `t249-present-admission-dev01` (manifest
+`6f9e72c71b6a0b18808a1924ad4eb53b487ae3179786d087006165ea7082c657`).
+Both compiled controls fail at the predicted assertion with exit 101 and one
+failed test: `t249-present-admission-session-control01` (manifest
+`8033e19f5da5cef572067e6ba49e1d52a3a508ae9790ba86f11fcba183fc83af`)
+and `t249-present-admission-backend-control01` (manifest
+`87ab2034b206c76f0df05b212fa82b88bfc15144cbafd6dd08176b5676f3e937`).
+Both source files are restored to the pin; mounted fixtures and the Hagia
+binary are unchanged. Restored-overlay strict clippy, formatting, thirteen
+runner tests and Hagia layout pass in `t249-present-admission-checks01`
+(manifest `6d0aca05b4bbdcbe916ee543aa07c9b56826dd6f99cc321882cf10e5fbc4d06d`).
+The clean signed pair run follows. All manifests verify; these results do not
+complete t249 or change an installed session.
 
 `NEW_WORK` holds records only and must not exist. `BUILD_ROOT` holds build
 products: the archived Sophia workspace, each run's Hagia source archive, Nim
