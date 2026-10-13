@@ -20,7 +20,7 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const SOPHIA: &str = "469371bf4ba6f9f87af5485d3967709d907426ee";
+const SOPHIA: &str = "337b18f3af3b3bf8156321169c4bbf4be2f4c83a";
 const MOUNT: &str = "crates/sophia-session/tests/support/desktop_launch_reload.rs";
 /// Written first into a build root this runner created; reuse and cleanup
 /// require it.
@@ -28,7 +28,7 @@ const MARKER: &str = ".wm-lifecycle-build-root";
 const MARKER_HEADER: &str = "owner=niltempus tools/wm_lifecycle.rs";
 const EVIDENCE: &str = ".local/state/sophia/development-evidence";
 const SLOTS: &str = ".cache/cargo-slots";
-const CASES: [&str; 42] = [
+const CASES: [&str; 43] = [
     "sdk_lifecycle_startup",
     "sdk_lifecycle_profile_rollback",
     "sdk_lifecycle_restart",
@@ -50,6 +50,7 @@ const CASES: [&str; 42] = [
     "sdk_occupied_manage_admits_cpu_candidate",
     "sdk_occupied_manage_admits_software_present",
     "sdk_occupied_manage_admits_native_software_present",
+    "sdk_occupied_manage_admits_native_dma_present",
     "sdk_operation_settlement",
     "sdk_operation_refused_action",
     "sdk_operation_disconnect",
@@ -801,6 +802,7 @@ fn run() -> Result<()> {
         let abort = hagia.join("tests/external/abort_settlement.rs");
         let manage = hagia.join("tests/external/manage.rs");
         let manage_pixels = hagia.join("tests/external/manage_pixels.rs");
+        let manage_dma = hagia.join("tests/external/manage_dma.rs");
         let consensus = hagia.join("tests/external/presentation_consensus.rs");
         let repaint = hagia.join("tests/external/presentation_repaint.rs");
         let service = hagia.join("tests/external/presentation_service.rs");
@@ -857,6 +859,7 @@ fn run() -> Result<()> {
         fs::copy(&abort, work.join("abort_settlement.rs"))?;
         fs::copy(&manage, work.join("manage.rs"))?;
         fs::copy(&manage_pixels, work.join("manage_pixels.rs"))?;
+        fs::copy(&manage_dma, work.join("manage_dma.rs"))?;
         fs::copy(&consensus, work.join("presentation_consensus.rs"))?;
         fs::copy(&repaint, work.join("presentation_repaint.rs"))?;
         fs::copy(&service, work.join("presentation_service.rs"))?;
@@ -958,6 +961,11 @@ fn run() -> Result<()> {
             return Err("manage pixels module would replace a pinned file".into());
         }
         fs::copy(&manage_pixels, &manage_pixels_module)?;
+        let manage_dma_module = module.with_file_name("manage_dma.rs");
+        if manage_dma_module.exists() {
+            return Err("manage DMA module would replace a pinned file".into());
+        }
+        fs::copy(&manage_dma, &manage_dma_module)?;
         let consensus_module = module.with_file_name("presentation_consensus.rs");
         if consensus_module.exists() {
             return Err("presentation consensus module would replace a pinned file".into());
@@ -1021,10 +1029,11 @@ fn run() -> Result<()> {
             fs::OpenOptions::new()
                 .append(true)
                 .open(work.join("overlay.sha256"))?,
-            "{}  policy_projection.rs\n{}  launch_outputs.rs\n{}  presentation_overview.rs",
+            "{}  policy_projection.rs\n{}  launch_outputs.rs\n{}  presentation_overview.rs\n{}  manage_dma.rs",
             hash(&projection_module)?,
             hash(&launch_outputs_module)?,
-            hash(&overview_module)?
+            hash(&overview_module)?,
+            hash(&manage_dma_module)?
         )?;
         let run = Run {
             work: work.clone(),
@@ -1142,7 +1151,7 @@ fn run() -> Result<()> {
     let result = finish(
         &work,
         result,
-        "PASS lifecycle=3 occupied=8 projection=3 launch_outputs=3 pointer=4 operations=3 slow_peer=1 presented=17 native=false\n",
+        "PASS lifecycle=3 occupied=9 projection=3 launch_outputs=3 pointer=4 operations=3 slow_peer=1 presented=17 native=false\n",
     );
     // Supervised steps have been waited for; the lease ends after closure.
     drop(lease);
