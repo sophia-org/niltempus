@@ -8,10 +8,18 @@ receipt. It supplies initialization and device completion. Native Present
 retirement and automatic source-only repaint scheduling remain separate.
 Sophia pin `27bce5c96` adds the shared target seam and its generic regression;
 the full device-hidden gate passes. All five mirrored production spans are
-unchanged. The complete signed pair still needs validation; the last completed
-28-case baseline follows.
+unchanged. The signed pair (Sophia `27bce5c96`, Hagia `9fb5e83`, runner `92e9337`)
+passes all 29 cases in `t249-native-install-pair01`; manifest
+`aeeea8030e128b9e9efa25ddb0613a8d498f9df0fb1e8aad9ef2506fc84c852a`.
+The external overlay passes strict Clippy; fixture formatting, Hagia layout and
+fourteen runner tests pass too. The audit binds the generic gate to the pin,
+checks 3,263 pinned and twenty mounted inputs, verifies signatures and requires
+all 29 exact results. `t249-native-install-pair-audit01` has manifest
+`59a988a1d9f6254361bfb3e6e333e2ca0573fec6bf9f415f12e060824923bd24`.
+Both completed build archives were removed under their leases. F's native
+Present retirement and automatic repaint joins remain open.
 
-The latest signed pair strengthens five of the existing 28 cases: routed hover,
+The preceding signed pair strengthened five of the existing 28 cases: routed hover,
 move/resize cancellation, protected terminal precedence and pointer release
 debt across revocation/reconnect. Hagia `76bc923`, niltempus `3a4de80` and Sophia
 `7697a9102` pass the complete suite in `t249-input-transitions-01`; manifest
