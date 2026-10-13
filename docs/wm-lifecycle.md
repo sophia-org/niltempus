@@ -1,6 +1,14 @@
 # Offline WM lifecycle qualification
 
-The current suite has twenty-five cases and sixteen external modules.
+The current suite has twenty-six cases and seventeen external modules.
+The `pointer_focus_sdk.rs` case selects a focus-follows-mouse profile without
+selecting native presentation. It checks negotiated admission, exact surface
+identity, correlated Hagia focus, refusal recovery and commit-only promotion.
+Hover observations and layout completion are supplied; physical routing and
+frontend focus delivery remain open. Two archived controls bypass the capability
+gate or compare only the surface index, and must fail the named refusal.
+
+The preceding twenty-five-case baseline follows.
 The two `pointer.rs` cases call Session's direct pointer-interaction owner with
 an authenticated real Hagia. They check Move/Resize queue replacement and
 settlement, and Cancel purging obsolete interaction work while retaining an
@@ -328,7 +336,7 @@ never reused.
 The assertions cover protected startup, real profile rejection/rollback, and
 automatic/requested restart with checkpoint refresh on an empty headless
 scene, plus occupied settlement and restart in `tests/external/occupied.rs`.
-All sixteen external module hashes are bound. Occupied cases supply authority facts
+All seventeen external module hashes are bound. Occupied cases supply authority facts
 and layout completion, and compare committed policy focus and checkpoint state;
 they do not prove visual readiness or physical focus. See Hagia's external-test
 README for exact supplied and real boundaries.
