@@ -30,6 +30,16 @@ manifest `5839cf093985ad9fbeb1e8be903bfaaf90dda67ec56fd6f25b99240975378426`.
 The pin and five bound owner spans are unchanged. No new production seam,
 device use or installed-session change; t249/h006 remain open.
 
+The clean signed pair, Hagia `0b1a1c1` and runner `990fe2a`, passes all
+twenty-three cases in `t249-backend-01`; manifest
+`1dee210a319d73db7c67555ac23478aafc8ea0ce762c7e3ea10fba7bb9e3bf72`.
+The integrity audit verifies 3,257 pinned crate/Cargo/vendor inputs, the mount
+and fifteen modules, matching development/control fixtures, exact passing
+results, signatures and six manifests including the retained STOP; manifest
+`ceb7b56d8f595a328b791e347c1e8b4c9f4ea29a6be7d045ebd40ab8d1cd1432`.
+Leased cleanup removes the marked build root; retained records contain paths
+and hashes only. No full product gate or installed-session change is claimed.
+
 The preceding
 `sdk_presented_service_revokes_before_requested_restart` calls actual requested
 restart admission on the authenticated WM, then services presentation before
