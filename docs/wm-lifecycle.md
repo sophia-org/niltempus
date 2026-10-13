@@ -29,12 +29,30 @@ runner does not inspect. Never export a slot path by hand or nest cargo-slot
 inside a leased run.
 
 The Sophia checkout must be clean at
-`a8c5fdf29c8932580b04b3de0f807327e0d0a34b`. Updating this pin requires reviewing
+`1b476dbdcc30215fe7ee5841e5a872f136ebb3a0`. Updating this pin requires reviewing
 the test mount and owner APIs, not silently following master. The supplied
 Hagia checkout supplies the external fixture and the exact committed ordinary
 Hagia source; dirty production inputs are refused. The runner records remaining
 working-tree changes, so development evidence stays distinguishable from a
 clean committed fixture run.
+
+This pin refresh follows mandatory WM launch authentication. The external
+fixture now uses Session's authenticated launch and replacement owners, with
+a generic test fixture supplying the trusted Session-to-Factotum channel.
+Hagia performs its ordinary launch-relay conversation. Authentication progress
+is driven during restart waits; replacement publishes its new epoch only after
+that conversation finishes. Development run `t249-authenticated-dev01` passes
+all nineteen cases; its verified manifest SHA-256 is
+`e775ad10b50defd338b72f88771195eba86eca9134e4b855b9398a0e8e5df6ed`.
+A clean signed pair run follows. The older runs and controls below retain
+their original source identities; their controls have not been rerun here.
+
+Four of the five bound production spans remain byte-identical to `a8c5fdf29`.
+The presentation-service span now treats pending authentication and authenticated
+transport restart as stopping. Its hash was updated after reviewing that change.
+The external service helper still exercises revalidation, withdrawal settlement
+and observation directly; it does not qualify that stopping calculation or the
+native selection/install tail. Those remain separate t249 joins.
 
 `NEW_WORK` holds records only and must not exist. `BUILD_ROOT` holds build
 products: the archived Sophia workspace, each run's Hagia source archive, Nim

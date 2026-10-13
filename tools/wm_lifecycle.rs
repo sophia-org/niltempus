@@ -20,7 +20,7 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const SOPHIA: &str = "a8c5fdf29c8932580b04b3de0f807327e0d0a34b";
+const SOPHIA: &str = "1b476dbdcc30215fe7ee5841e5a872f136ebb3a0";
 const MOUNT: &str = "crates/sophia-session/tests/support/desktop_launch_reload.rs";
 /// Written first into a build root this runner created; reuse and cleanup
 /// require it.
@@ -75,7 +75,7 @@ const GLUE: [(&str, &str, &str, &str); 5] = [
         "crates/sophia-session/src/live_session/wm/presentation.rs",
         "fn service_presented_policy(",
         "fn preflight_staged_presentation(",
-        "0d2b862c482ce624981887337bf321895e304d8741fd8651302d230797ac6292",
+        "756783ab90e37f4f48b977c5ea1a87df652c2a954dd38534ca405a6e68b448eb",
     ),
     (
         "crates/sophia-session/src/live_session/owner_loop/session_control.rs",
@@ -784,7 +784,7 @@ fn run() -> Result<()> {
         fs::write(
             work.join("identity"),
             format!(
-                "sophia={SOPHIA}\nhagia={}\nfixture_sha256={}\nmount_sha256={}\nscene=empty_and_supplied_occupied\nlayout_completion=supplied\nadmission=protected_supervisor\nautomatic_restart_trigger=terminate_fixture_child\nslow_peer_trigger=sigstop_fixture_peer_production_response_deadline\npresented_case=sdk_presented_chord_switcher native_ceiling=selected_without_device presentation_completion=supplied surface_content=supplied_cpu_intake heads=supplied router_time=supplied admission_visual_readiness=bypassed\nnative=false\n",
+                "sophia={SOPHIA}\nhagia={}\nfixture_sha256={}\nmount_sha256={}\nscene=empty_and_supplied_occupied\nlayout_completion=supplied\nadmission=protected_supervisor_launch_factotum\nfactotum_session_channel=supplied_trusted\nautomatic_restart_trigger=terminate_fixture_child\nslow_peer_trigger=sigstop_fixture_peer_production_response_deadline\npresented_case=sdk_presented_chord_switcher native_ceiling=selected_without_device presentation_completion=supplied surface_content=supplied_cpu_intake heads=supplied router_time=supplied admission_visual_readiness=bypassed\nnative=false\n",
                 git(&hagia, &["rev-parse", "HEAD"])?,
                 hash(&fixture)?,
                 hash(&sophia.join(MOUNT))?
