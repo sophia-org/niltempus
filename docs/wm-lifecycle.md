@@ -1,6 +1,30 @@
 # Offline WM lifecycle qualification
 
-The current suite has twenty-three cases and fifteen external modules.
+The current suite has twenty-five cases and sixteen external modules.
+The two `pointer.rs` cases call Session's direct pointer-interaction owner with
+an authenticated real Hagia. They check Move/Resize queue replacement and
+settlement, and Cancel purging obsolete interaction work while retaining an
+unrelated relayout. Motion, occupied surfaces, completion and interleaving are
+supplied. The per-offer JSON ledger records replacement/cancellation edges and
+correlated dispatched outcomes; it is a bounded accounting diagnostic, not
+scheduled-load or latency evidence. No production source or pin change.
+
+`t249-pointer-dev03` passes all twenty-five cases; manifest
+`a55daf8eac107293661630ac93905672b6c2ce999e47060001fed2548a04dd0f`.
+Development 01 and 02 remain STOP for fixture signed-dimension compilation
+and outer-versus-content geometry assumptions respectively. The update and
+cancel controls each compile, exit 101 and fail their exact named queue
+assertion. Manifests:
+`4604a1cdbecd39a2a00913180e7c2a65d2d3a23ba0c888326e9684a7eecd1a7c`
+and `6f13b4884036b1282694a31e7c678b4c13b4865f1f2cb3e108779c52c16984a7`.
+Both mutate only the pinned archive under the source/Cargo leases, then verify
+restoration, all seventeen mounted inputs and the unchanged ordinary binary.
+
+Restored-overlay strict Clippy, fixture/runner formatting, fourteen runner tests
+(one child fixture ignored) and Hagia layout pass in `t249-pointer-checks01`;
+manifest `ed11151051c38cdf637eddc2ea43aa930b939c62c6365f3bd0090b47d47d37e5`.
+
+The preceding twenty-three-case baseline:
 `sdk_presented_backend_revocation_precedes_withdrawal` removes a preview source
 through production authority intake and CPU composition, then retires the
 replacement through the existing mirrored target before calling Session's real
@@ -142,8 +166,8 @@ and settle it once availability returns. Three archived single-site controls
 target those revocation, runtime-removal and settlement-gating assertions.
 The initial install/Presented prefix retains its existing supplied-head and
 abbreviated-service limits. No stopping, backend revocation, native install,
-device detection or scheduling qualification follows. All fifteen external
-modules are copied, hashed and compared; the suite has twenty-one cases.
+device detection or scheduling qualification follows. That suite copied, hashed
+and compared fifteen external modules and ran twenty-one cases.
 
 Development run `t249-service-dev01` passes all twenty-one; manifest SHA-256
 `a1daa9c0ffa871a8e6c469dc02590e1e258622166041c450523ef532d463a65c`.
@@ -293,7 +317,7 @@ never reused.
 The assertions cover protected startup, real profile rejection/rollback, and
 automatic/requested restart with checkpoint refresh on an empty headless
 scene, plus occupied settlement and restart in `tests/external/occupied.rs`.
-All fifteen external module hashes are bound. Occupied cases supply authority facts
+All sixteen external module hashes are bound. Occupied cases supply authority facts
 and layout completion, and compare committed policy focus and checkpoint state;
 they do not prove visual readiness or physical focus. See Hagia's external-test
 README for exact supplied and real boundaries.
