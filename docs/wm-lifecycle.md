@@ -89,6 +89,16 @@ strict Clippy, formatting, fourteen runner tests (one child fixture ignored),
 and Hagia layout; manifest
 `f3bf51ae41a3a1a384df626e8073daa1299a0d4399e034bdfa9e03d0dd1e5603`.
 
+The clean signed pair (Hagia `351da95`, runner `cd22bed`, Sophia `1b476dbdc`)
+passes all twenty-one in `t249-service-01`; manifest
+`8b2041d439cd7c420a96fdd2c308fbee035b9488269e39f986c8ddd6ef7d49c0`.
+`t249-service-audit01` verifies 2,937 pinned crate/Cargo inputs, the mount and
+fifteen external modules, unchanged fixture bytes from development/controls,
+twenty-one exact passing results, both signatures and six package manifests.
+Audit manifest: `442f61af02ddb23cd1e888523250a293a84352371040c5464d640de120b2f1a7`.
+Leased cleanup removes the disposable build root; evidence retains executable
+paths and hashes only. No production or live-session update follows.
+
 The twentieth case, `sdk_occupied_manage_admits_software_present`, shares the
 CPU admission setup in `manage_pixels.rs`; the runner still mounts fourteen
 external modules. A supplied software-Present submission makes the candidate
