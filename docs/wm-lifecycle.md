@@ -4,10 +4,21 @@ The runner lists 37 cases, adding exact tab selection, correlated indicator
 activation and committed scrolling translations. It mounts and hashes
 `policy_projection.rs` alongside the existing external sources and refuses to
 overwrite a pinned module. The new cases and five omission/identity controls
-pass in development. The signed complete pair remains pending; the qualified
-baseline below is still 34 cases. Sophia pin `469371bf4` is unchanged.
+pass in development, as does Hagia's isolated local SDK and policy suite.
+The signed pair (Hagia `1e7e9ec`, runner `83669a7`, Sophia `469371bf4`) passes
+all 37 cases in `t249-policy-projection-pair01`, manifest
+`cd94a96dac30c09edf944edfa6ff75adf1acdad79bd9bb7f4798e3b695b631b7`.
+Strict external Clippy, formatting, Hagia layout and fourteen runner tests pass.
+The audit verifies signatures, 3,268 pinned inputs, twenty-one mounted inputs,
+all exact results and unchanged generic-gate inputs and production glue.
+`t249-policy-projection-pair-audit01` has manifest
+`55d24cdbf13603daa46e6296567cc223a279b09ab68e1d5ba51a158686d53480`.
+Both build archives and the clean source worktree are removed. Surface facts,
+settlement and shell snapshot epoch are supplied; shell UI, broker activation
+transport, frontend delivery and physical pixels are outside these cases.
+Sophia production code and pin `469371bf4` are unchanged.
 
-The runner now includes 34 cases. The three additions cover occupied presented
+The preceding 34-case pair added occupied presented
 reload/rollback, held-chord registry replacement and catalog revalidation.
 Development and four omission controls pass. The signed pair (Hagia `42f3fa7`,
 runner `45b2b68`, Sophia `469371bf4`) passes all 34 cases in
