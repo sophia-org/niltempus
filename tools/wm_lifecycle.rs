@@ -28,7 +28,7 @@ const MARKER: &str = ".wm-lifecycle-build-root";
 const MARKER_HEADER: &str = "owner=niltempus tools/wm_lifecycle.rs";
 const EVIDENCE: &str = ".local/state/sophia/development-evidence";
 const SLOTS: &str = ".cache/cargo-slots";
-const CASES: [&str; 40] = [
+const CASES: [&str; 42] = [
     "sdk_lifecycle_startup",
     "sdk_lifecycle_profile_rollback",
     "sdk_lifecycle_restart",
@@ -69,6 +69,8 @@ const CASES: [&str; 40] = [
     "sdk_presented_service_revokes_before_requested_restart",
     "sdk_presented_backend_revocation_precedes_withdrawal",
     "sdk_native_publication_installation_queues_frame",
+    "sdk_overview_pointer_commits_exact_target",
+    "sdk_overview_output_loss_preserves_release_debt",
 ];
 /// Production spans the external fixtures mirror or call, found by
 /// semantic anchors in the archived pin. A changed hash refuses the run: the
@@ -803,6 +805,7 @@ fn run() -> Result<()> {
         let repaint = hagia.join("tests/external/presentation_repaint.rs");
         let service = hagia.join("tests/external/presentation_service.rs");
         let installation = hagia.join("tests/external/presentation_installation.rs");
+        let overview = hagia.join("tests/external/presentation_overview.rs");
         fs::write(
             work.join("runner.sha256"),
             hash(&env::current_exe()?)? + "\n",
@@ -858,6 +861,7 @@ fn run() -> Result<()> {
         fs::copy(&repaint, work.join("presentation_repaint.rs"))?;
         fs::copy(&service, work.join("presentation_service.rs"))?;
         fs::copy(&installation, work.join("presentation_installation.rs"))?;
+        fs::copy(&overview, work.join("presentation_overview.rs"))?;
         // One build workspace per slice: re-extracted at the same path so
         // cargo reuses the slot's unchanged artifacts.
         let overlay = build.join("sophia");
@@ -974,6 +978,11 @@ fn run() -> Result<()> {
             return Err("presentation installation module would replace a pinned file".into());
         }
         fs::copy(&installation, &installation_module)?;
+        let overview_module = module.with_file_name("presentation_overview.rs");
+        if overview_module.exists() {
+            return Err("presentation overview module would replace a pinned file".into());
+        }
+        fs::copy(&overview, &overview_module)?;
         fs::write(work.join("glue.sha256"), check_glue(&overlay)?)?;
         let mount = overlay.join(MOUNT);
         let original = fs::read_to_string(&mount)?;
@@ -1012,9 +1021,10 @@ fn run() -> Result<()> {
             fs::OpenOptions::new()
                 .append(true)
                 .open(work.join("overlay.sha256"))?,
-            "{}  policy_projection.rs\n{}  launch_outputs.rs",
+            "{}  policy_projection.rs\n{}  launch_outputs.rs\n{}  presentation_overview.rs",
             hash(&projection_module)?,
-            hash(&launch_outputs_module)?
+            hash(&launch_outputs_module)?,
+            hash(&overview_module)?
         )?;
         let run = Run {
             work: work.clone(),
@@ -1122,6 +1132,7 @@ fn run() -> Result<()> {
             || hash(&repaint)? != hash(&repaint_module)?
             || hash(&service)? != hash(&service_module)?
             || hash(&installation)? != hash(&installation_module)?
+            || hash(&overview)? != hash(&overview_module)?
             || hash(&binary)? != digest
         {
             return Err("input changed during run".into());
@@ -1131,7 +1142,7 @@ fn run() -> Result<()> {
     let result = finish(
         &work,
         result,
-        "PASS lifecycle=3 occupied=8 projection=3 launch_outputs=3 pointer=4 operations=3 slow_peer=1 presented=15 native=false\n",
+        "PASS lifecycle=3 occupied=8 projection=3 launch_outputs=3 pointer=4 operations=3 slow_peer=1 presented=17 native=false\n",
     );
     // Supervised steps have been waited for; the lease ends after closure.
     drop(lease);
