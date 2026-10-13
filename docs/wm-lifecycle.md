@@ -1,6 +1,16 @@
 # Offline WM lifecycle qualification
 
-The runner now includes a thirtieth case for native software-Present admission.
+The current pin, Sophia `469371bf4`, exposes the submitted native frame to
+external tests. Hagia `0ec1498` strengthens the existing source-repaint case:
+the shared CPU cycle must schedule its native frame without a fixture queue
+call. Development and two behavioral controls pass; the full generic gate
+passes in `t249-native-repaint-gate01`, manifest
+`be9428622c5c602a178e166f98171b43f1710d236701ff8b2fcf6095deda34ad`.
+The suite still has 30 cases. The complete signed pair and audit are pending.
+Initialization, worker preparation and completion remain simulated; DMA
+retirement and physical pixels are not established by this case.
+
+The preceding runner added a thirtieth case for native software-Present admission.
 Real Hagia's Manage candidate traverses the shared CPU cycle's native framing,
 composition queue and retirement owner, then reaches Session admission progress.
 Three controls omit framing, backend settlement and admission retirement; each
