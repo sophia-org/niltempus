@@ -82,6 +82,17 @@ runner tests and Hagia layout pass in `t249-present-admission-checks01`
 The clean signed pair run follows. All manifests verify; these results do not
 complete t249 or change an installed session.
 
+The first signed attempt, `t249-present-admission-01`, is retained as STOP
+(manifest `4a9f9da4535f1ecd70445aaf755cb7450f74814b8baebf84a284f868761400f6`).
+It detected the backend candidate mutation despite restored source: Git archive
+timestamps let Cargo reuse the compiled mutant after re-extraction. The runner
+now extracts with `tar --touch`, preserving bytes while refreshing timestamps.
+`t249-archive-freshness-01` passes fourteen runner tests (one child fixture
+ignored); removing that option fails the new historical-archive timestamp
+assertion, one failure and exit 101. Verified manifest:
+`23e2435d8024ea925389664d9ec575a999e267583e442d192c26d7060e12f066`.
+A new clean run must pass with that repair; the STOP package is not rewritten.
+
 `NEW_WORK` holds records only and must not exist. `BUILD_ROOT` holds build
 products: the archived Sophia workspace, each run's Hagia source archive, Nim
 cache and binary under `runs/<NEW_WORK name>`. Both are resolved through their
@@ -91,8 +102,9 @@ and either root overlapping the cargo-slot pool, Cargo home, supplied checkouts
 or runner executable. A build root cannot contain HOME or lie inside a Git
 checkout. Existing build roots require the runner's owner marker, which records
 the creator's protected paths for cleanup. Runs of one slice reuse one build
-root: the Sophia archive is re-extracted at the same path, so cargo reuses
-unchanged slot artifacts.
+root. Extraction refreshes file modification times rather than restoring Git's
+historical times, so Cargo rechecks archived workspace inputs even after a
+compiled control is restored. Registry dependencies remain reusable in the slot.
 Evidence records the binary's path, hash and size, never the binary.
 
 The runner holds a separate, exclusive nonblocking build-root lock from before

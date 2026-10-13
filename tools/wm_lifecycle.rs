@@ -501,7 +501,15 @@ fn archive(root: &Path, revision: &str, destination: &Path, lease: &fs::File) ->
     checked(&mut command)?;
     fs::create_dir(destination)?;
     let mut command = Command::new("tar");
-    command.arg("-xf").arg(&tar).arg("-C").arg(destination);
+    // Git's historical mtimes can make a restored source look older than a
+    // compiled control mutant. Refresh mtimes on every extraction so Cargo
+    // must reconsider these workspace inputs before reusing slot artifacts.
+    command
+        .arg("--touch")
+        .arg("-xf")
+        .arg(&tar)
+        .arg("-C")
+        .arg(destination);
     inherit_lease(&mut command, lease);
     checked(&mut command)?;
     fs::remove_file(tar)?;
@@ -1123,6 +1131,50 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn archive_refreshes_source_times_after_a_control_build() {
+        use std::time::{Duration, SystemTime};
+        let root = scratch("archive-times");
+        let repo = root.join("repo");
+        checked(Command::new("git").args(["init", "--quiet"]).arg(&repo)).unwrap();
+        fs::write(repo.join("source.rs"), "restored source\n").unwrap();
+        git(&repo, &["add", "source.rs"]).unwrap();
+        let tree = git(&repo, &["write-tree"]).unwrap();
+        let revision = checked(
+            Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args([
+                    "-c",
+                    "commit.gpgsign=false",
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=fixture@invalid",
+                    "commit-tree",
+                    &tree,
+                    "-m",
+                    "historical archive fixture",
+                ])
+                .env("GIT_AUTHOR_DATE", "2000-01-01T00:00:00Z")
+                .env("GIT_COMMITTER_DATE", "2000-01-01T00:00:00Z"),
+        )
+        .unwrap();
+        let prior_build = SystemTime::now() - Duration::from_secs(2);
+        let destination = root.join("source");
+        let (lease, _) = lease_build_root(&root.join("build")).unwrap();
+        archive(&repo, revision.trim(), &destination, &lease).unwrap();
+        let source = destination.join("source.rs");
+        assert_eq!(fs::read_to_string(&source).unwrap(), "restored source\n");
+        assert!(
+            fs::metadata(&source).unwrap().modified().unwrap() > prior_build,
+            "archived sources must be newer than artifacts from a prior control"
+        );
+        drop(lease);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn missing_zero_or_duplicate_test_listing_refuses() {
         for value in [
