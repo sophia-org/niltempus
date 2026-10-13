@@ -1,6 +1,36 @@
 # Offline WM lifecycle qualification
 
-The current suite has twenty-two cases and fifteen external modules. The new
+The current suite has twenty-three cases and fifteen external modules.
+`sdk_presented_backend_revocation_precedes_withdrawal` removes a preview source
+through production authority intake and CPU composition, then retires the
+replacement through the existing mirrored target before calling Session's real
+service owner. The same call must queue Revoked then Withdrawn with the original
+identity. A discarded backend notification or wrong publication generation
+fails before the late headless fallback can conceal the ordering error. The
+correlated Hagia answer closes the switcher and removes the departed window.
+Removal, scheduling and device completion are supplied; no revocation record,
+receipt or frame stamp is supplied. Native scheduling/timing remain open.
+
+`t249-backend-dev02` passes all twenty-three cases at Sophia `1b476dbdc`;
+manifest `1cbf852146d3a8cb7560af768fe54ecf1839ea2d59f4d9e8789fff16215fd779`.
+The retained `t249-backend-dev01` is STOP: its fixture mistook ordinary CPU
+composition for policy retirement. Development 02 completes both mirror heads.
+The discarded-notification and wrong-generation controls each compile and
+fail the same-turn receipt assertion (exit 101, one failed test). Their manifests
+are `77bfe5278c03f42941c1de17e5f94d8ba20e1559511faff2c82b63c620eb1712`
+and `bc691ec69a69a0baf46d1e8519f6c7ca44b1393e95381b3cbdebc7b016760504`.
+The actual wrong result is Revoked alone; later fallback revocation remains
+possible. These controls establish notification correlation and ordering, not
+permanent loss of revocation. Both sources, all mounted inputs and the ordinary
+Hagia binary are checked after restoration under the source and Cargo leases.
+
+`t249-backend-checks01` passes restored-overlay strict Clippy, fixture/runner
+formatting, fourteen runner tests (one child fixture ignored) and Hagia layout;
+manifest `5839cf093985ad9fbeb1e8be903bfaaf90dda67ec56fd6f25b99240975378426`.
+The pin and five bound owner spans are unchanged. No new production seam,
+device use or installed-session change; t249/h006 remain open.
+
+The preceding
 `sdk_presented_service_revokes_before_requested_restart` calls actual requested
 restart admission on the authenticated WM, then services presentation before
 polling replacement. Availability stays true. Revocation must occur while the
