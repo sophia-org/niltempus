@@ -26,6 +26,15 @@ Restored-overlay strict Clippy, formatting, fourteen runner tests (one internal
 child fixture ignored) and Hagia layout pass in `t249-stop-checks01`; manifest
 `b16e0739562af850fb3e4e2208070ea85141fc88309578d5d10bf9d31ca27b39`.
 
+The clean signed pair (Hagia `cee1534`, runner `b92bc80`, Sophia `1b476dbdc`)
+passes all twenty-two in `t249-stop-01`; manifest
+`3c87489510d20ea3b3a3b932cf01a31e654a0f77ef9e8cd561f58bf8c223938c`.
+The read-only `t249-stop-audit01` checks 3,257 pinned crate/Cargo/vendor inputs,
+all mounted inputs, unchanged fixtures from development 02 and both controls,
+twenty-two passing results, signatures and six package manifests; manifest
+`f5d6bec8a28be815040f92d2a1ed7f59bab82b52ee22f3b5093b1c07ffed7b01`.
+Leased cleanup removes the build root. No installed component changes.
+
 `tools/wm_lifecycle.rs` runs the current SDK-based Hagia lifecycle assertions
 from Hagia's `tests/external/lifecycle.rs`. It is separate from the frozen
 pre-retirement pairing runner and from installed-session rehearsal.
