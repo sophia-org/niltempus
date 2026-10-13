@@ -1,5 +1,12 @@
 # Offline WM lifecycle qualification
 
+The runner lists 37 cases, adding exact tab selection, correlated indicator
+activation and committed scrolling translations. It mounts and hashes
+`policy_projection.rs` alongside the existing external sources and refuses to
+overwrite a pinned module. The new cases and five omission/identity controls
+pass in development. The signed complete pair remains pending; the qualified
+baseline below is still 34 cases. Sophia pin `469371bf4` is unchanged.
+
 The runner now includes 34 cases. The three additions cover occupied presented
 reload/rollback, held-chord registry replacement and catalog revalidation.
 Development and four omission controls pass. The signed pair (Hagia `42f3fa7`,

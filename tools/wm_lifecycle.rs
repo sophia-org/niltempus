@@ -28,11 +28,14 @@ const MARKER: &str = ".wm-lifecycle-build-root";
 const MARKER_HEADER: &str = "owner=niltempus tools/wm_lifecycle.rs";
 const EVIDENCE: &str = ".local/state/sophia/development-evidence";
 const SLOTS: &str = ".cache/cargo-slots";
-const CASES: [&str; 34] = [
+const CASES: [&str; 37] = [
     "sdk_lifecycle_startup",
     "sdk_lifecycle_profile_rollback",
     "sdk_lifecycle_restart",
     "sdk_occupied_settlement",
+    "sdk_policy_tabs_commit_exact_member",
+    "sdk_policy_indicator_activation_is_correlated",
+    "sdk_policy_translation_matches_checkpoint",
     "sdk_pointer_updates_coalesce_and_settle",
     "sdk_pointer_cancel_purges_queued_work",
     "sdk_pointer_routing_selects_exact_interactions",
@@ -778,6 +781,7 @@ fn run() -> Result<()> {
         )?;
         let fixture = hagia.join("tests/external/lifecycle.rs");
         let occupied = hagia.join("tests/external/occupied.rs");
+        let projection = hagia.join("tests/external/policy_projection.rs");
         let pointer = hagia.join("tests/external/pointer.rs");
         let pointer_focus = hagia.join("tests/external/pointer_focus_sdk.rs");
         let application_capture = hagia.join("tests/external/presentation_application_capture.rs");
@@ -828,6 +832,7 @@ fn run() -> Result<()> {
         )?;
         fs::copy(&fixture, work.join("lifecycle.rs"))?;
         fs::copy(&occupied, work.join("occupied.rs"))?;
+        fs::copy(&projection, work.join("policy_projection.rs"))?;
         fs::copy(&pointer, work.join("pointer.rs"))?;
         fs::copy(&pointer_focus, work.join("pointer_focus_sdk.rs"))?;
         fs::copy(
@@ -874,6 +879,11 @@ fn run() -> Result<()> {
         fs::copy(&fixture, &module)?;
         let occupied_module = module.with_file_name("occupied.rs");
         fs::copy(&occupied, &occupied_module)?;
+        let projection_module = module.with_file_name("policy_projection.rs");
+        if projection_module.exists() {
+            return Err("policy projection module would replace a pinned file".into());
+        }
+        fs::copy(&projection, &projection_module)?;
         let pointer_module = module.with_file_name("pointer.rs");
         if pointer_module.exists() {
             return Err("pointer module would replace a pinned file".into());
@@ -987,6 +997,14 @@ fn run() -> Result<()> {
                 hash(&installation_module)?
             ),
         )?;
+        use std::io::Write;
+        writeln!(
+            fs::OpenOptions::new()
+                .append(true)
+                .open(work.join("overlay.sha256"))?,
+            "{}  policy_projection.rs",
+            hash(&projection_module)?
+        )?;
         let run = Run {
             work: work.clone(),
             build: build.clone(),
@@ -1074,6 +1092,7 @@ fn run() -> Result<()> {
         }
         if hash(&fixture)? != hash(&module)?
             || hash(&occupied)? != hash(&occupied_module)?
+            || hash(&projection)? != hash(&projection_module)?
             || hash(&pointer)? != hash(&pointer_module)?
             || hash(&pointer_focus)? != hash(&pointer_focus_module)?
             || hash(&application_capture)? != hash(&application_capture_module)?
@@ -1100,7 +1119,7 @@ fn run() -> Result<()> {
     let result = finish(
         &work,
         result,
-        "PASS lifecycle=3 occupied=8 pointer=4 operations=3 slow_peer=1 presented=15 native=false\n",
+        "PASS lifecycle=3 occupied=8 projection=3 pointer=4 operations=3 slow_peer=1 presented=15 native=false\n",
     );
     // Supervised steps have been waited for; the lease ends after closure.
     drop(lease);
