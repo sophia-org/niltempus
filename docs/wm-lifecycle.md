@@ -1,6 +1,22 @@
 # Offline WM lifecycle qualification
 
-The current suite has twenty-eight cases and eighteen external modules.
+The latest signed pair strengthens five of the existing 28 cases: routed hover,
+move/resize cancellation, protected terminal precedence and pointer release
+debt across revocation/reconnect. Hagia `76bc923`, niltempus `3a4de80` and Sophia
+`7697a9102` pass the complete suite in `t249-input-transitions-01`; manifest
+`2bf72637a1e2aafe99fef61264aad924b39c8a63931d19cae778e9895ec67a8b`.
+The runner source and Sophia pin are unchanged. No launch or lock is executed;
+events, layers, cancellation triggers and completion remain supplied.
+
+Four mutations cause five named failures, and every restored case passes.
+The audit binds 3,262 pinned inputs, nineteen mounted inputs, exact fixture and
+control bytes, signed candidates, one-test results and the pointer ledgers.
+`t249-input-transitions-audit01` manifest is
+`ee4076485ca9b3667fa7c56b6fc3df2e776c253068b342591e793374d40c56b6`.
+The marked build root and clean detached source worktree are removed. B–F,
+shared security transitions and measurement keep t249 open.
+
+The preceding routed-pointer baseline has twenty-eight cases and eighteen external modules.
 The routed-pointer case checks exact move/resize selection, a stationary Begin,
 coalescing and release identity through Session and real Hagia. Its supplied
 renderable layer and events do not qualify physical input or frontend delivery.
