@@ -1,5 +1,31 @@
 # Offline WM lifecycle qualification
 
+The current suite has twenty-two cases and fifteen external modules. The new
+`sdk_presented_service_revokes_before_requested_restart` calls actual requested
+restart admission on the authenticated WM, then services presentation before
+polling replacement. Availability stays true. Revocation must occur while the
+old peer and epoch remain; the stopping owner settles Withdrawn after both
+simulated mirror heads retire. The authenticated successor then restores the
+committed scene without reopening the switcher. Two controls omit stopping-based
+revocation or forbid withdrawal settlement while stopping. The test chooses
+this interleaving and observes local receipts, not their delivery to the old peer.
+
+`t249-stop-dev02` passes twenty-two cases; manifest
+`0d8051f3068c15d6811321a78d079a217ff65cad2c28f3c54245fc77e2d0b736`.
+The initial `t249-stop-dev01` also passes, before the added final health check
+and redundant-borrow cleanup; manifest
+`d91a33818efadb361ec015bcb4a249c683c05df86e20370e0c0220e5829136b6`.
+`t249-stop-revoke-control01` and `t249-stop-settle-control01` each compile,
+exit 101 and fail one test at their respective named assertion. Their manifests
+are `07ef43b33f0db5eb8eec65d650fafbb5c808bcc637df4090df6f07290facf88e`
+and `1cf1079b9f16c3c38cd876a6b9fd3ac6632b61b899c6aff0eea7fa7a55810ea4`.
+The controls mutate only the pinned archive under both leases and verify
+restoration plus every mounted input and the unchanged Hagia binary.
+
+Restored-overlay strict Clippy, formatting, fourteen runner tests (one internal
+child fixture ignored) and Hagia layout pass in `t249-stop-checks01`; manifest
+`b16e0739562af850fb3e4e2208070ea85141fc88309578d5d10bf9d31ca27b39`.
+
 `tools/wm_lifecycle.rs` runs the current SDK-based Hagia lifecycle assertions
 from Hagia's `tests/external/lifecycle.rs`. It is separate from the frozen
 pre-retirement pairing runner and from installed-session rehearsal.

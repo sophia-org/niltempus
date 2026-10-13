@@ -28,7 +28,7 @@ const MARKER: &str = ".wm-lifecycle-build-root";
 const MARKER_HEADER: &str = "owner=niltempus tools/wm_lifecycle.rs";
 const EVIDENCE: &str = ".local/state/sophia/development-evidence";
 const SLOTS: &str = ".cache/cargo-slots";
-const CASES: [&str; 21] = [
+const CASES: [&str; 22] = [
     "sdk_lifecycle_startup",
     "sdk_lifecycle_profile_rollback",
     "sdk_lifecycle_restart",
@@ -50,6 +50,7 @@ const CASES: [&str; 21] = [
     "sdk_presented_receipts_require_all_heads",
     "sdk_presented_source_repaint_preserves_identity",
     "sdk_presented_service_withdraws_when_unavailable",
+    "sdk_presented_service_revokes_before_requested_restart",
 ];
 /// Production spans the external fixtures mirror or call, found by
 /// semantic anchors in the archived pin. A changed hash refuses the run: the
@@ -1047,7 +1048,7 @@ fn run() -> Result<()> {
     let result = finish(
         &work,
         result,
-        "PASS lifecycle=3 occupied=7 operations=3 slow_peer=1 presented=7 native=false\n",
+        "PASS lifecycle=3 occupied=7 operations=3 slow_peer=1 presented=8 native=false\n",
     );
     // Supervised steps have been waited for; the lease ends after closure.
     drop(lease);
