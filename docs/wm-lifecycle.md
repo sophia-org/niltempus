@@ -4,7 +4,15 @@ The runner now includes a thirty-first case for occupied lock reset. It calls
 the production keyboard-reset owner with supplied lock entry, requires the
 exact Cancelled terminal and returned credit, and rejects reuse of the old
 held modifier after routing resumes. The development case and omission control
-pass; the signed full pair remains pending. Sophia pin `469371bf4` is unchanged.
+pass. The signed pair (Hagia `19a9d04`, runner `18758c7`, Sophia `469371bf4`)
+passes all 31 cases in `t249-lock-reset-pair01`, manifest
+`a2ff07a09c3954682f57a1ee2b2745ccb1e723746c5302a328fe37de782a046b`.
+Strict external Clippy, formatting, Hagia layout and fourteen runner tests pass.
+The audit verifies 3,268 pinned inputs, twenty mounted inputs, signatures,
+exact results and unchanged generic-gate inputs and production glue.
+`t249-lock-reset-pair-audit01` has manifest
+`a07a37e66fdf20899a19b9da77df97f3e99caeafc4167ae0b7e81479d8b7ace5`.
+Both build archives and the clean detached source worktree are removed.
 No lock provider or live session is operated.
 
 The current pin, Sophia `469371bf4`, exposes the submitted native frame to
