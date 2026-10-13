@@ -20,7 +20,7 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const SOPHIA: &str = "27bce5c96adb0461e59c3a6de0284bac10a379a2";
+const SOPHIA: &str = "03600e1c218dcf2dc7a9b7f674319ed6866a39c6";
 const MOUNT: &str = "crates/sophia-session/tests/support/desktop_launch_reload.rs";
 /// Written first into a build root this runner created; reuse and cleanup
 /// require it.
@@ -28,7 +28,7 @@ const MARKER: &str = ".wm-lifecycle-build-root";
 const MARKER_HEADER: &str = "owner=niltempus tools/wm_lifecycle.rs";
 const EVIDENCE: &str = ".local/state/sophia/development-evidence";
 const SLOTS: &str = ".cache/cargo-slots";
-const CASES: [&str; 29] = [
+const CASES: [&str; 30] = [
     "sdk_lifecycle_startup",
     "sdk_lifecycle_profile_rollback",
     "sdk_lifecycle_restart",
@@ -43,6 +43,7 @@ const CASES: [&str; 29] = [
     "sdk_occupied_manage_settles_admission",
     "sdk_occupied_manage_admits_cpu_candidate",
     "sdk_occupied_manage_admits_software_present",
+    "sdk_occupied_manage_admits_native_software_present",
     "sdk_operation_settlement",
     "sdk_operation_refused_action",
     "sdk_operation_disconnect",
@@ -1095,7 +1096,7 @@ fn run() -> Result<()> {
     let result = finish(
         &work,
         result,
-        "PASS lifecycle=3 occupied=7 pointer=4 operations=3 slow_peer=1 presented=11 native=false\n",
+        "PASS lifecycle=3 occupied=8 pointer=4 operations=3 slow_peer=1 presented=11 native=false\n",
     );
     // Supervised steps have been waited for; the lease ends after closure.
     drop(lease);

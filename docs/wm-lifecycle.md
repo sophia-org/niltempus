@@ -1,6 +1,15 @@
 # Offline WM lifecycle qualification
 
-The runner now includes a twenty-ninth case for native publication
+The runner now includes a thirtieth case for native software-Present admission.
+Real Hagia's Manage candidate traverses the shared CPU cycle's native framing,
+composition queue and retirement owner, then reaches Session admission progress.
+Three controls omit framing, backend settlement and admission retirement; each
+fails its named assertion, and restoration passes. Sophia pin `03600e1c2` has
+passed the full device-hidden generic gate. The complete signed pair remains
+to be bound. Initialization, worker/device completion and authority input are
+supplied; DMA retirement and automatic preview repaint remain open.
+
+The preceding runner added a twenty-ninth case for native publication
 installation and mounts `presentation_installation.rs`. The case requires
 Session's shared installation operation to queue real Hagia's publication,
 then waits for both simulated mirror heads before accepting its Presented
