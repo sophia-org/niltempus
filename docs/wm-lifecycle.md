@@ -5,9 +5,18 @@ Real Hagia's Manage candidate traverses the shared CPU cycle's native framing,
 composition queue and retirement owner, then reaches Session admission progress.
 Three controls omit framing, backend settlement and admission retirement; each
 fails its named assertion, and restoration passes. Sophia pin `03600e1c2` has
-passed the full device-hidden generic gate. The complete signed pair remains
-to be bound. Initialization, worker/device completion and authority input are
-supplied; DMA retirement and automatic preview repaint remain open.
+passed the full device-hidden generic gate. The signed pair (Sophia `03600e1c2`,
+Hagia `f5e78d7`, runner `de567db`) passes all 30 cases in
+`t249-native-cycle-pair01`, manifest
+`df2c855b947ed89f3ecd219c99053096f13a363ff5302ac3be0a058297930ef5`.
+Strict external Clippy, fixture formatting, Hagia layout and fourteen runner
+tests pass. The audit binds the generic gate to the pin and verifies 3,268
+pinned inputs, twenty mounted inputs, signatures and every exact case result.
+`t249-native-cycle-pair-audit01` has manifest
+`367effa668d467a0d29c1d37f607d80e15c7902b835f6ddc3eda08c6086bc8b5`.
+Both completed build archives were removed under their leases. Initialization,
+worker/device completion and authority input are supplied; DMA retirement and
+automatic preview repaint remain open.
 
 The preceding runner added a twenty-ninth case for native publication
 installation and mounts `presentation_installation.rs`. The case requires
