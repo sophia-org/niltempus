@@ -24,6 +24,17 @@ Restored-overlay strict Clippy, fixture/runner formatting, fourteen runner tests
 (one child fixture ignored) and Hagia layout pass in `t249-pointer-checks01`;
 manifest `ed11151051c38cdf637eddc2ea43aa930b939c62c6365f3bd0090b47d47d37e5`.
 
+The clean signed Hagia `15fa04a` / runner `30b35cd` pair passes all 25 cases
+in `t249-pointer-01`; manifest
+`2510b5371e4563020eeb89fd5abb14203e777f54f99deb13d14b251d4dd12518`.
+The read-only audit checks 3,257 pinned Sophia inputs, seventeen mounted inputs
+and their signed fixture source, development/control equality, exact results,
+seven manifests and both offer ledgers. Its manifest is
+`dcfddd42fa4fdf5871e54d17261cdd66a65e6cfcee7cb4317446de7da9b305b9`.
+Leased cleanup removes the marked build root; no binaries are copied to
+evidence and no installed component changes. The remaining capability/backend
+joins and measurement gate keep t249/h006 open.
+
 The preceding twenty-three-case baseline:
 `sdk_presented_backend_revocation_precedes_withdrawal` removes a preview source
 through production authority intake and CPU composition, then retires the
