@@ -79,8 +79,8 @@ Both source files are restored to the pin; mounted fixtures and the Hagia
 binary are unchanged. Restored-overlay strict clippy, formatting, thirteen
 runner tests and Hagia layout pass in `t249-present-admission-checks01`
 (manifest `6d0aca05b4bbdcbe916ee543aa07c9b56826dd6f99cc321882cf10e5fbc4d06d`).
-The clean signed pair run follows. All manifests verify; these results do not
-complete t249 or change an installed session.
+These manifests verify; the final signed-pair result and runner correction
+follow below. These results do not complete t249 or change an installed session.
 
 The first signed attempt, `t249-present-admission-01`, is retained as STOP
 (manifest `4a9f9da4535f1ecd70445aaf755cb7450f74814b8baebf84a284f868761400f6`).
@@ -91,7 +91,15 @@ now extracts with `tar --touch`, preserving bytes while refreshing timestamps.
 ignored); removing that option fails the new historical-archive timestamp
 assertion, one failure and exit 101. Verified manifest:
 `23e2435d8024ea925389664d9ec575a999e267583e442d192c26d7060e12f066`.
-A new clean run must pass with that repair; the STOP package is not rewritten.
+The clean signed pair (Hagia `afcc1d1`, runner `0e82492`, Sophia `1b476dbdc`)
+passes all twenty cases in `t249-present-admission-02`; manifest
+`c846231e5b0f8a888124e4dc59b5f9fc8288df8ab32b835178e8fc3fe0bfe9bb`.
+The log rebuilds both backend and Session. Audit `t249-present-admission-audit01`
+matches 3,257 archive inputs to the pin, verifies all mounted inputs and every
+package manifest, and counts twenty exact passing results. Audit manifest:
+`6fcab87de72eb6dc37ecffb67ef47423d46d1c11c69d06798a48fda0bf62a0b4`.
+The STOP package is unchanged. Leased cleanup removes the marked build root;
+fixed Cargo slots and the stable build-root lock remain.
 
 `NEW_WORK` holds records only and must not exist. `BUILD_ROOT` holds build
 products: the archived Sophia workspace, each run's Hagia source archive, Nim
