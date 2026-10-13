@@ -1,5 +1,11 @@
 # Offline WM lifecycle qualification
 
+The runner now includes 34 cases. The three additions cover occupied presented
+reload/rollback, held-chord registry replacement and catalog revalidation.
+Development and four omission controls pass; the signed full pair remains
+pending. Sophia pin `469371bf4` is unchanged. Registry/catalog changes and
+device completion are supplied; no installed session is operated.
+
 The runner now includes a thirty-first case for occupied lock reset. It calls
 the production keyboard-reset owner with supplied lock entry, requires the
 exact Cancelled terminal and returned credit, and rejects reuse of the old

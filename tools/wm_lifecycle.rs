@@ -28,7 +28,7 @@ const MARKER: &str = ".wm-lifecycle-build-root";
 const MARKER_HEADER: &str = "owner=niltempus tools/wm_lifecycle.rs";
 const EVIDENCE: &str = ".local/state/sophia/development-evidence";
 const SLOTS: &str = ".cache/cargo-slots";
-const CASES: [&str; 31] = [
+const CASES: [&str; 34] = [
     "sdk_lifecycle_startup",
     "sdk_lifecycle_profile_rollback",
     "sdk_lifecycle_restart",
@@ -54,6 +54,9 @@ const CASES: [&str; 31] = [
     "sdk_presented_disconnect_preserves_release_debt",
     "sdk_presented_cancel_preserves_focus",
     "sdk_presented_lock_reset_preserves_focus",
+    "sdk_presented_registry_replacement_cancels_chord",
+    "sdk_presented_occupied_profile_rollback",
+    "sdk_presented_catalog_replacement_revokes_actions",
     "sdk_presented_receipts_require_all_heads",
     "sdk_presented_source_repaint_preserves_identity",
     "sdk_presented_service_withdraws_when_unavailable",
@@ -1097,7 +1100,7 @@ fn run() -> Result<()> {
     let result = finish(
         &work,
         result,
-        "PASS lifecycle=3 occupied=8 pointer=4 operations=3 slow_peer=1 presented=12 native=false\n",
+        "PASS lifecycle=3 occupied=8 pointer=4 operations=3 slow_peer=1 presented=15 native=false\n",
     );
     // Supervised steps have been waited for; the lease ends after closure.
     drop(lease);
