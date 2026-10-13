@@ -3,11 +3,22 @@
 The runner lists 40 cases, adding frozen launch origin, saved output context
 with pending Manage recovery, and occupied logical-output replacement. It
 mounts and hashes `launch_outputs.rs`, refusing a pinned-path collision.
-The development cases pass; the full signed pair and final source audit remain
-pending. The preceding qualified baseline is 37 cases. Sophia pin `469371bf4`
-is unchanged.
+The three development cases and four controls pass. The signed pair (Hagia
+`b86f181`, runner `46e08e4`, Sophia `469371bf4`) passes all 40 cases in
+`t249-launch-outputs-pair01`, manifest
+`2f3e1ae39851ecf39521d639d3d308c4eced84a105b4b309ef7986dcbe01d6c7`.
+Strict external Clippy, formatting, Hagia layout and fourteen runner tests pass.
+The audit verifies signatures, 3,268 pinned inputs, twenty-two mounted inputs,
+all exact results and unchanged generic-gate inputs and production glue.
+`t249-launch-outputs-pair-audit01` has manifest
+`02f7b21c18af8cbc3926a783e69f607c4bb2d46315c2b95fac55538beef1b6b8`.
+Both build archives and the clean source worktree are removed. Process/topology
+facts, catalog capture and completion are supplied; physical hotplug, process
+execution, frontend delivery and pixel admission are outside these cases.
+Output-loss capture/debt, overview targets, DMA retirement and measurement
+remain open. Sophia production code and pin `469371bf4` are unchanged.
 
-The runner lists 37 cases, adding exact tab selection, correlated indicator
+The preceding 37-case pair added exact tab selection, correlated indicator
 activation and committed scrolling translations. It mounts and hashes
 `policy_projection.rs` alongside the existing external sources and refuses to
 overwrite a pinned module. The new cases and five omission/identity controls
