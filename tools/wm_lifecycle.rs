@@ -20,7 +20,7 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const SOPHIA: &str = "7697a9102af6d9900e3de6acd7be78c55b97e94b";
+const SOPHIA: &str = "27bce5c96adb0461e59c3a6de0284bac10a379a2";
 const MOUNT: &str = "crates/sophia-session/tests/support/desktop_launch_reload.rs";
 /// Written first into a build root this runner created; reuse and cleanup
 /// require it.
@@ -28,7 +28,7 @@ const MARKER: &str = ".wm-lifecycle-build-root";
 const MARKER_HEADER: &str = "owner=niltempus tools/wm_lifecycle.rs";
 const EVIDENCE: &str = ".local/state/sophia/development-evidence";
 const SLOTS: &str = ".cache/cargo-slots";
-const CASES: [&str; 28] = [
+const CASES: [&str; 29] = [
     "sdk_lifecycle_startup",
     "sdk_lifecycle_profile_rollback",
     "sdk_lifecycle_restart",
@@ -57,6 +57,7 @@ const CASES: [&str; 28] = [
     "sdk_presented_service_withdraws_when_unavailable",
     "sdk_presented_service_revokes_before_requested_restart",
     "sdk_presented_backend_revocation_precedes_withdrawal",
+    "sdk_native_publication_installation_queues_frame",
 ];
 /// Production spans the external fixtures mirror or call, found by
 /// semantic anchors in the archived pin. A changed hash refuses the run: the
@@ -788,6 +789,7 @@ fn run() -> Result<()> {
         let consensus = hagia.join("tests/external/presentation_consensus.rs");
         let repaint = hagia.join("tests/external/presentation_repaint.rs");
         let service = hagia.join("tests/external/presentation_service.rs");
+        let installation = hagia.join("tests/external/presentation_installation.rs");
         fs::write(
             work.join("runner.sha256"),
             hash(&env::current_exe()?)? + "\n",
@@ -840,6 +842,7 @@ fn run() -> Result<()> {
         fs::copy(&consensus, work.join("presentation_consensus.rs"))?;
         fs::copy(&repaint, work.join("presentation_repaint.rs"))?;
         fs::copy(&service, work.join("presentation_service.rs"))?;
+        fs::copy(&installation, work.join("presentation_installation.rs"))?;
         // One build workspace per slice: re-extracted at the same path so
         // cargo reuses the slot's unchanged artifacts.
         let overlay = build.join("sophia");
@@ -941,6 +944,11 @@ fn run() -> Result<()> {
             return Err("presentation service module would replace a pinned file".into());
         }
         fs::copy(&service, &service_module)?;
+        let installation_module = module.with_file_name("presentation_installation.rs");
+        if installation_module.exists() {
+            return Err("presentation installation module would replace a pinned file".into());
+        }
+        fs::copy(&installation, &installation_module)?;
         fs::write(work.join("glue.sha256"), check_glue(&overlay)?)?;
         let mount = overlay.join(MOUNT);
         let original = fs::read_to_string(&mount)?;
@@ -951,7 +959,7 @@ fn run() -> Result<()> {
         fs::write(
             work.join("overlay.sha256"),
             format!(
-                "{}  {MOUNT}\n{}  hagia_sdk_lifecycle.rs\n{}  occupied.rs\n{}  pointer.rs\n{}  pointer_focus_sdk.rs\n{}  presentation_application_capture.rs\n{}  reused_identity.rs\n{}  operations.rs\n{}  slow_peer.rs\n{}  presentation.rs\n{}  presentation_revocation.rs\n{}  presentation_disconnect.rs\n{}  presentation_cancel.rs\n{}  abort_settlement.rs\n{}  manage.rs\n{}  manage_pixels.rs\n{}  presentation_consensus.rs\n{}  presentation_repaint.rs\n{}  presentation_service.rs\n",
+                "{}  {MOUNT}\n{}  hagia_sdk_lifecycle.rs\n{}  occupied.rs\n{}  pointer.rs\n{}  pointer_focus_sdk.rs\n{}  presentation_application_capture.rs\n{}  reused_identity.rs\n{}  operations.rs\n{}  slow_peer.rs\n{}  presentation.rs\n{}  presentation_revocation.rs\n{}  presentation_disconnect.rs\n{}  presentation_cancel.rs\n{}  abort_settlement.rs\n{}  manage.rs\n{}  manage_pixels.rs\n{}  presentation_consensus.rs\n{}  presentation_repaint.rs\n{}  presentation_service.rs\n{}  presentation_installation.rs\n",
                 hash(&mount)?,
                 hash(&module)?,
                 hash(&occupied_module)?,
@@ -970,7 +978,8 @@ fn run() -> Result<()> {
                 hash(&manage_pixels_module)?,
                 hash(&consensus_module)?,
                 hash(&repaint_module)?,
-                hash(&service_module)?
+                hash(&service_module)?,
+                hash(&installation_module)?
             ),
         )?;
         let run = Run {
@@ -1076,6 +1085,7 @@ fn run() -> Result<()> {
             || hash(&consensus)? != hash(&consensus_module)?
             || hash(&repaint)? != hash(&repaint_module)?
             || hash(&service)? != hash(&service_module)?
+            || hash(&installation)? != hash(&installation_module)?
             || hash(&binary)? != digest
         {
             return Err("input changed during run".into());
@@ -1085,7 +1095,7 @@ fn run() -> Result<()> {
     let result = finish(
         &work,
         result,
-        "PASS lifecycle=3 occupied=7 pointer=4 operations=3 slow_peer=1 presented=10 native=false\n",
+        "PASS lifecycle=3 occupied=7 pointer=4 operations=3 slow_peer=1 presented=11 native=false\n",
     );
     // Supervised steps have been waited for; the lease ends after closure.
     drop(lease);

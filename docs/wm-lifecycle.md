@@ -1,5 +1,16 @@
 # Offline WM lifecycle qualification
 
+The runner now includes a twenty-ninth case for native publication
+installation and mounts `presentation_installation.rs`. The case requires
+Session's shared installation operation to queue real Hagia's publication,
+then waits for both simulated mirror heads before accepting its Presented
+receipt. It supplies initialization and device completion. Native Present
+retirement and automatic source-only repaint scheduling remain separate.
+Sophia pin `27bce5c96` adds the shared target seam and its generic regression;
+the full device-hidden gate passes. All five mirrored production spans are
+unchanged. The complete signed pair still needs validation; the last completed
+28-case baseline follows.
+
 The latest signed pair strengthens five of the existing 28 cases: routed hover,
 move/resize cancellation, protected terminal precedence and pointer release
 debt across revocation/reconnect. Hagia `76bc923`, niltempus `3a4de80` and Sophia
