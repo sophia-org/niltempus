@@ -8,6 +8,23 @@ Hover observations and layout completion are supplied; physical routing and
 frontend focus delivery remain open. Two archived controls bypass the capability
 gate or compare only the surface index, and must fail the named refusal.
 
+The clean signed Hagia `883561e` / runner `bfd6096` pair passes all 26
+cases in `t249-focus-01`; manifest
+`bee178529fcc8a0523b47fbe69d21d97a2f0ae57055a6bbc167eb2cdaca222ee`.
+The gate and identity controls both compile and fail their intended named
+assertions (exit 101, one failed test); manifests
+`e3c5cf613a956eeec7c743b9487b2371888f3db69c6ea57ea04aa27f5ec36841`
+and `2753624dfffce5f990533ea2f242c53cd09b223a3498135441316cf8bbce61cf`.
+Restored-overlay strict Clippy, formatting, fourteen runner tests (one child
+fixture ignored) and Hagia layout pass in `t249-focus-checks01`; manifest
+`92e2c8ac06d7e62678188e95ff38b079aedc815404c3390d20241c8f53b1437d`.
+The read-only audit binds 3,257 pinned inputs, eighteen mounted inputs,
+signatures, exact results, six manifests and the retained interaction ledgers;
+manifest `a5b1ca479592305cba78356c6219d5107acbe7f2bf55b5662075ad255485c6cb`.
+Development 01 remains STOP for refusing an overlay filename collision;
+development 02 passes. The five owner-span hashes and Sophia pin are unchanged.
+Leased cleanup removes the marked build root. No installed component changes.
+
 The preceding twenty-five-case baseline follows.
 The two `pointer.rs` cases call Session's direct pointer-interaction owner with
 an authenticated real Hagia. They check Move/Resize queue replacement and
