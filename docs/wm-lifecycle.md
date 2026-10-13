@@ -1,5 +1,12 @@
 # Offline WM lifecycle qualification
 
+The runner now includes a thirty-first case for occupied lock reset. It calls
+the production keyboard-reset owner with supplied lock entry, requires the
+exact Cancelled terminal and returned credit, and rejects reuse of the old
+held modifier after routing resumes. The development case and omission control
+pass; the signed full pair remains pending. Sophia pin `469371bf4` is unchanged.
+No lock provider or live session is operated.
+
 The current pin, Sophia `469371bf4`, exposes the submitted native frame to
 external tests. Hagia `0ec1498` strengthens the existing source-repaint case:
 the shared CPU cycle must schedule its native frame without a fixture queue
