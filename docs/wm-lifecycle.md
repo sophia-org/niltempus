@@ -22,6 +22,16 @@ ignored) and Hagia layout pass in `t249-capture-checks01`; manifest
 `a7bbb8a7e84dad242e981957b56b05a527b06929cd39892de026618fc63b7ac9`.
 Sophia's pin and the five production glue spans are unchanged.
 
+The clean signed Hagia `10c4496` / runner `1e404aa` pair passes all 27 cases
+in `t249-capture-01`; manifest
+`b7b1430521c8f5e28088e034c617ab6b5e4e16a55424c3dbcc1b20ebea61d2b9`.
+The read-only audit binds 3,257 pinned inputs, nineteen mounted inputs,
+signatures, exact results, four manifests and the unchanged pointer ledgers;
+`t249-capture-audit01` manifest is
+`1866ae9536edf5def7aa4da4ebad185688ae455025690065d6439b76e1e1500c`.
+Leased cleanup removes the marked build root. No installed component changes;
+the remaining package A boundaries and packages B–F keep t249 open.
+
 The preceding twenty-six-case baseline follows.
 The `pointer_focus_sdk.rs` case selects a focus-follows-mouse profile without
 selecting native presentation. It checks negotiated admission, exact surface
