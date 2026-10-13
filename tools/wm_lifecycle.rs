@@ -20,7 +20,7 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const SOPHIA: &str = "337b18f3af3b3bf8156321169c4bbf4be2f4c83a";
+const SOPHIA: &str = "fbe1c9c849361eadfc7ac4acd67319b36f19beb7";
 const MOUNT: &str = "crates/sophia-session/tests/support/desktop_launch_reload.rs";
 /// Written first into a build root this runner created; reuse and cleanup
 /// require it.
