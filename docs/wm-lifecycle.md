@@ -7,7 +7,15 @@ renderable layer and events do not qualify physical input or frontend delivery.
 Sophia `7697a9102` fixes the content/outer conversion defect this case exposed.
 All five mirrored production spans are unchanged; the fixture calls the changed
 admission method directly. The complete development suite passes on that pin.
-Clean signed-pair qualification remains a separate run.
+The clean signed pair passes all 28 cases in `t249-routing-01`: Hagia `bc0b192`,
+runner `4857e9b`, Sophia `7697a9102`. Its manifest is
+`2020dc3354fd7aa1df13bd53a883cb474c128276936b0e0d0e8f2efe57269eda`.
+The read-only audit verifies 3,262 pinned inputs, nineteen mounted inputs, the
+exact mount addition, signed candidates, exact results and all three pointer
+ledgers. `t249-routing-audit01` has manifest
+`e2fbabde48587a436a83769a92aec99d996bad7dfdfe9f6238ba6eb036f231be`.
+Leased cleanup removed the marked build root; the clean detached source
+worktree was removed too. Remaining A–F joins and measurement keep t249 open.
 
 Development `t249-routing-dev04` has manifest
 `bda5f90f3eda9973a00f87ae68d747a873fbc9ec84ba01623467c54f35ca4653`.
