@@ -1,5 +1,12 @@
 # Offline WM lifecycle qualification
 
+The runner lists 40 cases, adding frozen launch origin, saved output context
+with pending Manage recovery, and occupied logical-output replacement. It
+mounts and hashes `launch_outputs.rs`, refusing a pinned-path collision.
+The development cases pass; the full signed pair and final source audit remain
+pending. The preceding qualified baseline is 37 cases. Sophia pin `469371bf4`
+is unchanged.
+
 The runner lists 37 cases, adding exact tab selection, correlated indicator
 activation and committed scrolling translations. It mounts and hashes
 `policy_projection.rs` alongside the existing external sources and refuses to
