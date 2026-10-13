@@ -1,6 +1,24 @@
 # Offline WM lifecycle qualification
 
-The current suite has twenty-seven cases and eighteen external modules.
+The current suite has twenty-eight cases and eighteen external modules.
+The routed-pointer case checks exact move/resize selection, a stationary Begin,
+coalescing and release identity through Session and real Hagia. Its supplied
+renderable layer and events do not qualify physical input or frontend delivery.
+Sophia `7697a9102` fixes the content/outer conversion defect this case exposed.
+All five mirrored production spans are unchanged; the fixture calls the changed
+admission method directly. The complete development suite passes on that pin.
+Clean signed-pair qualification remains a separate run.
+
+Development `t249-routing-dev04` has manifest
+`bda5f90f3eda9973a00f87ae68d747a873fbc9ec84ba01623467c54f35ca4653`.
+The wrong-button control fails the named unbound-middle-button assertion, then
+the restored case passes in `t249-routing-control02`; manifest
+`ed96ec7ba35f8a32c8968e6ef93e9904bf6e4f0254af242501a1b542d60e87f0`.
+Restored-overlay strict Clippy, fixture formatting, fourteen serial runner tests
+and Hagia layout pass in `t249-routing-checks01`; manifest
+`c5a686a54370c38c317fb5b770106100370486843a1a3cbc6c5f406f9e5d7498`.
+
+The preceding 27-case baseline follows.
 The application-capture case routes a focused application's press and release
 through Session, then proves Held capture resumes and the exact action reaches
 real Hagia. Initial Presented stamps come from both simulated mirror heads;
@@ -196,14 +214,14 @@ runner does not inspect. Never export a slot path by hand or nest cargo-slot
 inside a leased run.
 
 The Sophia checkout must be clean at
-`1b476dbdcc30215fe7ee5841e5a872f136ebb3a0`. Updating this pin requires reviewing
+`7697a9102af6d9900e3de6acd7be78c55b97e94b`. Updating this pin requires reviewing
 the test mount and owner APIs, not silently following master. The supplied
 Hagia checkout supplies the external fixture and the exact committed ordinary
 Hagia source; dirty production inputs are refused. The runner records remaining
 working-tree changes, so development evidence stays distinguishable from a
 clean committed fixture run.
 
-This pin refresh follows mandatory WM launch authentication. The external
+The previous pin refresh followed mandatory WM launch authentication. The external
 fixture now uses Session's authenticated launch and replacement owners, with
 a generic test fixture supplying the trusted Session-to-Factotum channel.
 Hagia performs its ordinary launch-relay conversation. Authentication progress
