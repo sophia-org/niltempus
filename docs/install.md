@@ -110,6 +110,26 @@ automatically with the `min-free` and `max-free` settings in
 
 ## Working on a component
 
+### Keep authenticated clients in the release
+
+When updating Sophia, verify the locked revisions of every supervised client,
+not just Hagia. Profile validation checks configuration but does not exercise
+each client's authenticated connection.
+
+On 2026-10-14, release `niltempus-a986fef4f64b032edc11` paired authenticated
+Sophia with pre-authentication Lom, Bemenu and kleis pins. The attended session
+`00000001791981800712-f988d0e9-b6e5-4136-8422-852544cd789d` recorded repeated
+shell negotiation failures and lock-provider reconnects; the operator reported
+the missing bar. Do not use that release as a rollback target.
+
+Release `niltempus-e8818395183f05263ccc`, integration commit `38b5b6d`, pins
+Lom `dc65f56`, Bemenu `6e2efd9` and kleis `7927c69`. All three packaged
+executables match the preceding working release
+`niltempus-7b8051ace95f8581d57e` byte for byte. Its build, profile preflight
+and checksum verification pass. Installation requires sudo; attended recovery
+has not yet been observed. Keep the working release available: installing the
+correction makes the faulty release the installer's immediate `previous`.
+
 To build the desktop with work in progress, override that input:
 
 ```sh
