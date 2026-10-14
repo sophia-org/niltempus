@@ -93,11 +93,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791631443,
-        "narHash": "sha256-3TwjKz0kCaaibotKoC+UuG9ZQeaQTGkxrakdmOBDrUc=",
+        "lastModified": 1791930048,
+        "narHash": "sha256-WMYIsK2vE1udYDrnhSO67GfZ0jQVvjZkLBoYYb3e4Ns=",
         "owner": "sophia-org",
         "repo": "hagia",
-        "rev": "ed2f30060a09c5796f80f779ff8f8ebf2033c516",
+        "rev": "2ba92d984d0317ced163c1137d9641fddfce226d",
         "type": "github"
       },
       "original": {
@@ -288,11 +288,11 @@
         "rust-overlay": "rust-overlay_3"
       },
       "locked": {
-        "lastModified": 1791633284,
-        "narHash": "sha256-IUsEQ7/NkK9CVpzVdmsTQtJ156FBLJt56aE6lwt6VFU=",
+        "lastModified": 1791980854,
+        "narHash": "sha256-D1xQqlz3o0vuN+fOw/+lE0kL7QTR1Mz+RfpIVzVO+v4=",
         "owner": "sophia-org",
         "repo": "sophia",
-        "rev": "6fd66325ba4ca87d7cf1f4f5c29393e6864c6325",
+        "rev": "d5938f2ada2741a9ffc51bf322e3901ecc6f0152",
         "type": "github"
       },
       "original": {
