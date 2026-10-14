@@ -126,8 +126,12 @@ Release `niltempus-e8818395183f05263ccc`, integration commit `38b5b6d`, pins
 Lom `dc65f56`, Bemenu `6e2efd9` and kleis `7927c69`. All three packaged
 executables match the preceding working release
 `niltempus-7b8051ace95f8581d57e` byte for byte. Its build, profile preflight
-and checksum verification pass. Installation requires sudo; attended recovery
-has not yet been observed. Keep the working release available: installing the
+and checksum verification pass. After installing the correction and logging in
+again on 2026-10-14, niltempus confirmed that the desktop looks normal and that
+Lom, the application launcher, overview, workspaces, Alt-Tab and screen
+lock/unlock work. These are attended operator observations, not completion of
+the remaining t250 latency and recovery gates.
+Keep the working release available: installing the
 correction makes the faulty release the installer's immediate `previous`.
 
 To build the desktop with work in progress, override that input:
