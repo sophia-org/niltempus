@@ -40,6 +40,7 @@ sophia-conformance = { git = "https://github.com/sophia-org/sophia.git", rev = "
 sophia-config = { git = "https://github.com/sophia-org/sophia.git", rev = "58a481ebc756b50fe97a890b968a6c9b70863496" }
 sophia-protocol = { git = "https://github.com/sophia-org/sophia.git", rev = "58a481ebc756b50fe97a890b968a6c9b70863496" }
 sophia-runtime = { git = "https://github.com/sophia-org/sophia.git", rev = "58a481ebc756b50fe97a890b968a6c9b70863496" }
+sophia-session = { git = "https://github.com/sophia-org/sophia.git", rev = "58a481ebc756b50fe97a890b968a6c9b70863496" }
 # The Rust desktop SDK's shell client, as vendored by Sophia at the same pin:
 # the neighbour bar in the live Bemenu gate (9P).
 sophia-shell-client = { git = "https://github.com/sophia-org/sophia.git", rev = "58a481ebc756b50fe97a890b968a6c9b70863496" }

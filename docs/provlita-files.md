@@ -139,3 +139,46 @@ Evidence remains in `t252-authenticated-20261015/`: `desktop-pair-final-build.lo
 This proves packaging and isolated release switching, not a working native dock
 or attended rollback. GPU/content lifetime, three-client isolation, exact input,
 B9 measurements and attended acceptance remain required.
+
+## Render-node content and revocation
+
+`crates/live-tests/tests/provlita_gpu.rs` is a separate ignored hardware gate.
+It requires the same binary/configuration paths and hashes as the device-free
+gate, plus `SOPHIA_DOCK_GPU_ARM=1`, an exact `SOPHIA_DOCK_RENDER_NODE` and its
+expected `SOPHIA_DOCK_PCI_BUS_ID`. It snapshots only that node and uses Sophia's
+public `ShellComponentLaunch` to revalidate identity and build the protected GPU
+grant. It refuses KMS nodes and mismatched PCI identities before launch.
+
+Run the test with `cargo-slot niltempus`, the provisioned Cargo home, and the
+device-hidden wrapper above, adding only
+`--dev-bind /dev/dri/renderD129 /dev/dri/renderD129` for the explicitly selected
+node. Select `--test provlita_gpu -- --ignored --nocapture`. The node number is
+host-specific; the October 15 run explicitly selected PCI `0000:16:00.0`, the
+development GPU excluded from the live desktop. Do not expose the whole `/dev`
+or infer permission from a node found by discovery. Configuration must be outside
+the store because the production launch owner binds that exact private file.
+
+The packaged Provlita identified above passes at fresh epochs 71 and 72. Its
+renderer reports Vulkan on RADV, device 226:129, with only `renderD129` visible.
+The actual client requests its bottom allocation, rasterizes, uploads immutable
+pixels and submits a catalog-bound candidate with an authorized terminal target.
+The second process uploads while the first revoked process's pixels remain held
+and readable. The old completion owner refuses the live replacement's grant.
+Explicit failed-render completion settles each unpresented submission; bytes
+remain until the consumer drops its lease, then all accounting becomes quiescent.
+
+The first run omitted submission completion and correctly retained an epoch even
+after its pixel lease was dropped. The corrected gate checks both obligations;
+it does not label an invented completion as native presentation. Wrong PCI
+identity fails before any client GPU admission; an unarmed invocation fails
+before device lookup. Device-hidden workspace tests,
+strict Clippy and provisioning/pin checks also pass. The added public Session
+dependency uses the existing Sophia revision; the pin fixture now includes it.
+
+Evidence: `dock-gpu-final.log`, `dock-gpu-wrong-device.log`, `dock-gpu-unarmed-negative.log`,
+`dock-gpu-workspace-final.log`, `dock-gpu-clippy.log`,
+`dock-gpu-clippy-final.log` and `dock-gpu-provision-final.log` in the existing
+October 15 evidence directory. This proves real GPU raster/upload and resource
+custody across replacement. Geometry and catalog decisions are supplied, admission
+uses supervisor evidence, and no Presented event is issued. It does not prove
+native frame retirement, physical input, three-client coexistence or B9 bounds.
