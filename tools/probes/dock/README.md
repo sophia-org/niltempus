@@ -22,8 +22,9 @@ changed.
 
 The generated profile admits three independent processes: Lom bar (revision 6,
 direct GPU, top 24), Bemenu launcher (revision 7, GPU denied), and Provlita dock
-(revision 8, direct GPU, bottom 64). It preserves the selected WM's policy and
-keybindings, requires its application-launcher binding, and starts no application
+(revision 8, direct GPU, bottom 64). All three explicitly select `9p2000.L`,
+checked through the actual profile parser. The profile preserves the selected
+WM's policy and keybindings, requires its application-launcher binding, and starts no application
 automatically. The explicit test catalog includes `registered:terminal`; example
 Browser/Files tiles remain unavailable when their identities are absent.
 
