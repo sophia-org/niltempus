@@ -173,6 +173,35 @@ fn changed_files_and_workload_cannot_pass_a_prepared_identity() {
 }
 
 #[test]
+fn helper_in_private_user_directory_is_refused_even_with_matching_hash() {
+    let mut f = Fixture::new("helper-custody", "files");
+    f.put("pam-helper", b"must not execute", true);
+    assert!(
+        xtask::shell_timing_native::validate_pam_helper(&f.request.artifacts["pam-helper"].path)
+            .unwrap_err()
+            .contains("root-owned, protected")
+    );
+    let link = f.root.join("helper-link");
+    std::os::unix::fs::symlink(&f.request.artifacts["pam-helper"].path, &link).unwrap();
+    f.request.artifacts.get_mut("pam-helper").unwrap().path = link;
+    assert!(
+        xtask::shell_timing_native::validate_pam_helper(&f.request.artifacts["pam-helper"].path)
+            .unwrap_err()
+            .contains("root-owned, protected")
+    );
+    let input = f.root.join("request.json");
+    fs::write(&input, serde_json::to_vec(&f.request).unwrap()).unwrap();
+    let output = f.root.join("plan.json");
+    let result = xtask::shell_timing_native::run(&[
+        "prepare-native".into(),
+        input.display().to_string(),
+        output.display().to_string(),
+    ]);
+    assert!(result.unwrap_err().contains("root-owned, protected"));
+    assert!(!output.exists());
+}
+
+#[test]
 fn profile_indirection_extra_clients_and_startup_are_refused() {
     let mut f = Fixture::new("profiles", "files");
     let profile = fs::read_to_string(&f.request.artifacts["profile"].path).unwrap();

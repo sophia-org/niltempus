@@ -5,7 +5,7 @@ use std::{
     collections::BTreeMap,
     fs,
     io::{Read, Write},
-    os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
+    os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -319,6 +319,23 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
     ])
 }
 
+/// Match Factotum's helper custody rule before an attended launch. A Nix store
+/// file can be immutable while an ancestor is group-writable; hashes alone
+/// cannot establish the root-owned path that Factotum requires.
+pub fn validate_pam_helper(path: &Path) -> Result<(), String> {
+    let canonical = path.canonicalize().map_err(|e| e.to_string())?;
+    for entry in canonical.ancestors() {
+        let metadata = fs::metadata(entry).map_err(|e| e.to_string())?;
+        if metadata.uid() != 0 || metadata.mode() & 0o022 != 0 {
+            return Err(format!(
+                "PAM helper requires root-owned, protected file and ancestors: {}",
+                entry.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     fs::OpenOptions::new()
         .write(true)
@@ -366,6 +383,7 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
             let request: Request = serde_json::from_slice(&bounded(Path::new(input), MAX_INPUT)?)
                 .map_err(|e| e.to_string())?;
             let argv = validate(&request)?;
+            validate_pam_helper(&request.artifacts["pam-helper"].path)?;
             source(&request.sophia_source)?;
             source(&request.integration_source)?;
             let bytes = serde_json::to_vec_pretty(&Plan {
@@ -392,6 +410,7 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
                 return Err("plan arguments differ".into());
             }
             process::attended_with(&plan.request.tty, "SOPHIA_SHELL_TIMING_ARM")?;
+            validate_pam_helper(&plan.request.artifacts["pam-helper"].path)?;
             source(&plan.request.sophia_source)?;
             source(&plan.request.integration_source)?;
             git(

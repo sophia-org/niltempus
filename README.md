@@ -138,6 +138,11 @@ starts no session. The request is a JSON object with these fields:
 | `wire`, `output`, `mode_millihz` | `files` or `ipc`, positive output ID, and exactly 60,000 or 120,000 mHz. |
 | `instrumentation` | `none` for latency, or `rust-global` with a 60,000 ms run and both binaries built with the isolated `comparator-allocation-counting` feature. Sophia also requires `native-session`. |
 
+The PAM helper and every ancestor of its canonical path must be root-owned
+and not writable by group or others, matching Factotum's startup check. An
+immutable file under a group-writable Nix store is not sufficient; select a
+verified installed helper with the same bytes.
+
 The flattened desktop profile must select exactly one bar component with the
 prepared peer/config paths, denied GPU access, an explicit transport and empty
 startup. Use `9p2000.L` for files or `comparison-ipc` in the isolated comparator.
