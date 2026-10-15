@@ -1,7 +1,13 @@
 { pkgs, craneLib, source, vulkanLoader }:
 let
   common = {
-    src = craneLib.cleanCargoSource source;
+    src = pkgs.lib.cleanSourceWith {
+      src = source;
+      # The renderer embeds this font at compile time.
+      filter = path: type:
+        craneLib.filterCargoSources path type
+        || pkgs.lib.hasPrefix "${source}/assets/fonts/" path;
+    };
     strictDeps = true;
     nativeBuildInputs = [ pkgs.pkg-config ];
     buildInputs = [ pkgs.fontconfig ];
