@@ -95,6 +95,22 @@ build `--offline --locked`, so run `cargo fetch --locked` in the product
 repository first. Their verifier
 self-tests are part of the offline gate (`crates/xtask/tests/verifier_self_tests.rs`).
 
+The read-only timing join is available separately:
+
+    cargo xtask shell-timing join HOST_LOG CLIENT_JSON MODE_MILLIHZ EXPECTED_OFFERS
+
+`HOST_LOG` contains captured `sophia_shell_native_binding` and
+`sophia_shell_native_completion` records. `CLIENT_JSON` is an array of every
+offered candidate, with integer `connection_epoch`, `content_grant_epoch`,
+`output`, `candidate_generation`, `submitted_monotonic_usec`, and string
+`outcome`. This paced workload requires every outcome to be `presented`.
+The explicit mode must be exactly `60000` or `120000` mHz; the expected offer
+count must match. The checker requires complete head bindings and kernel
+timestamps, preserves repeated redraws, and reports the first exact completion.
+Its `joined_only` result proves sample provenance, not B9 acceptance, artifact
+identity or the completeness of the client recorder. The campaign must bind
+those inputs and compare the paired distributions separately.
+
 ## Provisioning
 
     sh tools/provision.sh --cargo-home ABSOLUTE-DIR [--source ABSOLUTE-SOPHIA-REPO] \

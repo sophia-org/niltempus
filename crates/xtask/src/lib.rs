@@ -23,6 +23,7 @@ pub mod records;
 pub mod release;
 pub mod session;
 pub mod session_preflight;
+pub mod shell_timing;
 pub mod verify_archives;
 
 pub(crate) fn hex(value: &str, length: usize) -> bool {

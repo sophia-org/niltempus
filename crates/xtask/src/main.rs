@@ -19,6 +19,7 @@ const USAGE: &str = "usage:
   xtask check-provision
   xtask dock profile LOM LOM_CONFIG BEMENU PROVLITA DOCK_CONFIG
   xtask dock verify HOST_LOG
+  xtask shell-timing join HOST_LOG CLIENT_JSON MODE_MILLIHZ EXPECTED_OFFERS
   xtask panel --probe --renderer=software --quickshell=/ABS --wm=/ABS --sophia=/ABS [--display=:N] [--output=/ABS/NEW]
   xtask panel [--renderer=gpu|software] [--quickshell=/ABS] [--output=/ABS/NEW]   (operator-only: attaches to the current session)
   xtask panel verify SESSION_LOG
@@ -52,6 +53,9 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
     // build checkout this binary came from does not exist.
     if arguments.first().map(String::as_str) == Some("assemble-nix") {
         return xtask::nix_assembly::run(&arguments[1..]);
+    }
+    if arguments.first().map(String::as_str) == Some("shell-timing") {
+        return xtask::shell_timing::run(&arguments[1..]);
     }
     // Product builders take explicit signed sources and private build inputs,
     // and need no build checkout.
