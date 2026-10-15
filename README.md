@@ -134,8 +134,9 @@ starts no session. The request is a JSON object with these fields:
 | `sophia_source`, `integration_source` | Objects with an absolute repository `path` and full signed `commit`; both checkouts must be clean. |
 | `artifacts` | Exactly `sophia`, `peer`, `wm`, `preflight`, `runner`, `core`, `profile`, `peer-config`; each has an absolute `path` and lowercase `sha256`. The first five must be executable. |
 | `tty`, `display`, `input_seat` | Explicit console `/dev/tty1`–`/dev/tty63`, private display number 90–99, and seat name. |
-| `runtime_ms`, `frames` | 60,000–600,000 milliseconds and 1–10,000 offered frames, within the peer's resource budget. |
+| `runtime_ms`, `frames` | 60,000–600,000 milliseconds and 1–10,000 offered frames. The peer reuses two resource IDs with fresh generations after retirement. |
 | `wire`, `output`, `mode_millihz` | `files` or `ipc`, positive output ID, and exactly 60,000 or 120,000 mHz. |
+| `instrumentation` | `none` for latency, or `rust-global` with a 60,000 ms run and both binaries built with the isolated `comparator-allocation-counting` feature. Sophia also requires `native-session`. |
 
 The flattened desktop profile must select exactly one bar component with the
 prepared peer/config paths, denied GPU access, an explicit transport and empty
@@ -160,8 +161,26 @@ The source commits and executable digests are separate assertions: preparation
 does not prove how an executable was built. Retain build commands and source
 evidence. The expected refresh rate is checked against native completion
 bindings; it does not change the monitor mode. The campaign still needs a
-reviewed hardware/output selection, accounting instrumentation and frozen
+reviewed hardware/output selection, accounting scope and frozen
 sample, warmup, load and comparison rules.
+
+Allocation runs retain separate Session and peer counters. The peer records
+before pixel preparation/upload and after presentation plus retirement; Session
+samples cumulative Rust global-allocation and process-CPU counters every two
+milliseconds, subject to scheduling. Each snapshot carries clock bounds. The
+report brackets each peer frame with enclosing and enclosed host snapshots,
+giving upper and lower counts without interpolation. It also brackets the full
+workload once, preserving the between-frame work. Missing samples, process
+changes, backward counters or incomplete windows fail verification. Allocation
+operations include allocations and reallocations; foreign allocators and other
+processes are outside this scope. The instrumentation's own work is included.
+
+    cargo xtask shell-timing costs HOST_COUNTERS PEER_COUNTERS CLIENT_JSON
+
+This command checks recording independently of native presentation. The native
+runner requires both checks and rejects instrumented data in a latency-only run.
+Counter bounds alone do not freeze the B9 accounting scope or warmup/aggregation
+rules, and a diagnostic run cannot qualify the native path.
 
 ## Provisioning
 

@@ -31,6 +31,7 @@ impl Fixture {
                 output: 1,
                 frames: 3,
                 mode_millihz: 60_000,
+                instrumentation: "none".into(),
             },
         };
         // These fixtures are hashed only. None may be executed by validation.

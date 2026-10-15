@@ -24,6 +24,7 @@ pub mod release;
 pub mod session;
 pub mod session_preflight;
 pub mod shell_timing;
+pub mod shell_timing_cost;
 pub mod shell_timing_native;
 pub mod verify_archives;
 
