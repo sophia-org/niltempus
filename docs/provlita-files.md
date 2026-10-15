@@ -101,3 +101,41 @@ sandbox because that sandbox hides `/tmp`; the first attempt without that bind
 ran no client. All successful authentication checks hide display devices and
 sockets. Authentication and cleanup do not establish catalog actions, content,
 GPU work, native presentation or B9 performance.
+
+## Packaged pair, October 15
+
+Integration `77c8e96` builds both selections with Sophia `58a481ebc`,
+authenticated Narthex `11eb0332` and Provlita `da4a15ad`:
+
+- Three components: `niltempus-ad35e88b86b247648c71`, store path
+  `/nix/store/89qm2775hicw4bmmxxsd4pl315vjcigh-niltempus-desktop-niltempus-ad35e88b86b247648c71`.
+- Bar and launcher: `niltempus-339765fe1cc1dd8166f5`, store path
+  `/nix/store/93wyap1f0lr3m3njlvnvc6vi8wfrfg16-niltempus-desktop-niltempus-339765fe1cc1dd8166f5`.
+
+The first build omitted Provlita's embedded font; the package source filter now
+includes it. A subsequent protected launch exposed an invalid configuration
+mount under the Nix store. The profile now names the configuration included in
+the installed release. The store remains read-only; no sandbox rule was relaxed.
+The supplied-export fixture also avoids redundant mounts inside the already
+visible store, allowing it to test the packaged executable directly.
+
+Both builds pass configuration and session-profile preflight. Their complete
+release checksums pass after installation into a private Bubblewrap `/opt`.
+Installing the baseline, installing the dock candidate, rolling back and
+returning to the dock candidate all pass. The live `/opt` was never changed.
+The installer's existing corruption, locking and pruning checks also pass.
+
+Packaged Provlita passes the supplied-export gate at epochs 61 and 62. Its
+SHA-256 is `3c12afe3fbf2c5e2d942658b6c0c5a3cc3bb06c24870e8725d1372508c462103`.
+It also passes the authenticated two-launch check from the private installed
+path with its installed configuration. Packaged Narthex passes authentication
+and revocation recovery. These checks hide devices and display sockets; Provlita
+still stops at the required missing-GPU boundary.
+
+Evidence remains in `t252-authenticated-20261015/`: `desktop-pair-final-build.log`,
+`release-pair-rollback.log`, `desktop-tool-check.log`,
+`provlita-packaged-export-final.log`, `provlita-isolated-installed-auth.log` and
+`narthex-packaged-auth.log`. The failed attempts are retained separately.
+This proves packaging and isolated release switching, not a working native dock
+or attended rollback. GPU/content lifetime, three-client isolation, exact input,
+B9 measurements and attended acceptance remain required.

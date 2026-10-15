@@ -65,14 +65,18 @@ fn protected_dock_negotiates_files_then_refuses_missing_gpu_grant() {
             rustix::process::geteuid().as_raw(),
         )
         .unwrap();
-        let domain = ProtectionDomainSpec::bubblewrap([ProtectionDomainRole::MetadataShell])
+        let mut domain = ProtectionDomainSpec::bubblewrap([ProtectionDomainRole::MetadataShell])
             .unwrap()
             .inherited_fds([])
-            .unwrap()
-            .path(ProtectionPath::read_only(binary.parent().unwrap()))
-            .unwrap()
-            .path(ProtectionPath::read_only(config.parent().unwrap()))
-            .unwrap()
+            .unwrap();
+        // The protected launch already exposes the store read-only and refuses
+        // overlapping grants. Non-store artifacts still need explicit paths.
+        for path in [binary.parent().unwrap(), config.parent().unwrap()] {
+            if !path.starts_with("/nix/store") {
+                domain = domain.path(ProtectionPath::read_only(path)).unwrap();
+            }
+        }
+        let domain = domain
             .path(ProtectionPath::read_only(
                 owner.socket_path().parent().unwrap(),
             ))
