@@ -1,4 +1,80 @@
-use xtask::shell_timing::collect;
+use xtask::shell_timing::{collect, collect_metrics};
+
+fn upload_journal() -> String {
+    journal().replace("\"schema\":1", "\"schema\":2").replace(
+        "{\"schema\":2,\"event\":\"permit\"",
+        concat!(
+            "{\"schema\":2,\"event\":\"upload_offer\",\"upload\":{\"connection_epoch\":1,\"content_grant_epoch\":2,\"output\":3,\"candidate_generation\":1,\"resource_id\":1,\"resource_generation\":1,\"width\":1920,\"height\":24,\"total_bytes\":184320,\"begin_usec\":10}}\n",
+            "{\"schema\":2,\"event\":\"upload_accepted\",\"resource_id\":1,\"resource_generation\":1,\"accepted_usec\":70}\n",
+            "{\"schema\":2,\"event\":\"permit\""
+        )
+    )
+}
+
+#[test]
+fn upload_and_permit_metrics_preserve_bytes_and_boundaries() {
+    for wire in ["files", "ipc"] {
+        let metrics = collect_metrics(&upload_journal().replace("files", wire), 1).unwrap();
+        assert_eq!(metrics.schema, 2);
+        assert_eq!(metrics.uploads.len(), 1);
+        assert_eq!(metrics.uploads[0].upload.total_bytes, 180 * 1024);
+        assert_eq!(metrics.uploads[0].upload.begin_usec, 10);
+        assert_eq!(metrics.uploads[0].accepted_usec, 70);
+        assert_eq!(metrics.permits[0].demand_usec, 80);
+        assert_eq!(metrics.permits[0].received_usec, 90);
+    }
+    let old = collect_metrics(&journal(), 1).unwrap();
+    assert_eq!(old.schema, 1);
+    assert!(old.uploads.is_empty());
+    assert_eq!(old.permits.len(), 1);
+    // Preserve slow uploads for the budget verdict instead of exporting only fast ones.
+    let slow = upload_journal()
+        .replace("\"begin_usec\":10", "\"begin_usec\":1")
+        .replace("\"accepted_usec\":70", "\"accepted_usec\":2000001")
+        .replace("\"demand_usec\":80", "\"demand_usec\":2000002")
+        .replace("\"received_usec\":90", "\"received_usec\":2000003")
+        .replace(
+            "\"submitted_monotonic_usec\":100",
+            "\"submitted_monotonic_usec\":2000004",
+        )
+        .replace(
+            "\"observed_monotonic_usec\":150",
+            "\"observed_monotonic_usec\":2000005",
+        );
+    assert!(collect_metrics(&slow, 1).is_ok());
+}
+
+#[test]
+fn incomplete_or_misattributed_uploads_invalidate_the_whole_journal() {
+    let original = upload_journal();
+    let lines: Vec<_> = original.lines().collect();
+    for i in 0..lines.len() {
+        let mut missing = lines.clone();
+        missing.remove(i);
+        assert!(collect(&(missing.join("\n") + "\n"), 1).is_err());
+        let mut duplicate = lines.clone();
+        duplicate.insert(i, lines[i]);
+        assert!(collect(&(duplicate.join("\n") + "\n"), 1).is_err());
+    }
+    for bad in [
+        original.replacen("\"schema\":2", "\"schema\":1", 1),
+        original.replace("\"total_bytes\":184320", "\"total_bytes\":184321"),
+        original.replace("\"width\":1920", "\"width\":0"),
+        original.replace("\"resource_id\":1", "\"resource_id\":2"),
+        original.replacen("\"resource_generation\":1", "\"resource_generation\":2", 1),
+        original.replacen("\"connection_epoch\":1", "\"connection_epoch\":9", 1),
+        original.replace("\"accepted_usec\":70", "\"accepted_usec\":9"),
+        original.replace("\"accepted_usec\":70", "\"accepted_usec\":81"),
+        original.replace("\"begin_usec\":10", "\"begin_usec\":0"),
+        original.replace(
+            "\"total_bytes\":184320",
+            "\"total_bytes\":184320,\"unknown\":1",
+        ),
+        original.trim_end().to_owned(),
+    ] {
+        assert!(collect_metrics(&bad, 1).is_err(), "accepted {bad}");
+    }
+}
 
 fn journal() -> String {
     [
@@ -83,5 +159,21 @@ fn collector_cli_exports_join_input_outside_checkout() {
     );
     let offers: Vec<xtask::shell_timing::Offer> = serde_json::from_slice(&result.stdout).unwrap();
     assert_eq!(offers.len(), 1);
+    std::fs::write(&path, upload_journal()).unwrap();
+    let result = std::process::Command::new(env!("CARGO_BIN_EXE_xtask"))
+        .current_dir(&root)
+        .args(["shell-timing", "metrics"])
+        .arg(&path)
+        .arg("1")
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let metrics: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(metrics["schema"], 2);
+    assert_eq!(metrics["uploads"][0]["upload"]["total_bytes"], 184320);
     std::fs::remove_dir_all(root).unwrap();
 }

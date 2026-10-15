@@ -469,19 +469,20 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
                 split_capture(std::str::from_utf8(&capture).map_err(|e| e.to_string())?)?;
             write(&stage.join("client.ndjson"), client.as_bytes())?;
             write(&stage.join("native.log"), host.as_bytes())?;
-            let offers = crate::shell_timing::collect(&client, plan.request.frames)?;
+            let metrics = crate::shell_timing::collect_metrics(&client, plan.request.frames)?;
+            let offers = &metrics.offers;
             let samples = crate::shell_timing::join(
                 &host,
-                &offers,
+                offers,
                 plan.request.mode_millihz,
                 plan.request.frames,
             )?;
             let costs = crate::shell_timing_cost::for_mode(
                 &plan.request.instrumentation,
                 std::str::from_utf8(&capture).map_err(|e| e.to_string())?,
-                &offers,
+                offers,
             )?;
-            let report = serde_json::json!({"schema":1,"verdict":"joined_only","instrumentation":plan.request.instrumentation,"offered":offers.len(),"samples":samples,"costs":costs});
+            let report = serde_json::json!({"schema":2,"verdict":"joined_only","instrumentation":plan.request.instrumentation,"offered":offers.len(),"samples":samples,"costs":costs,"journal":metrics});
             write(
                 &stage.join("native-samples.json"),
                 &serde_json::to_vec_pretty(&report).map_err(|e| e.to_string())?,

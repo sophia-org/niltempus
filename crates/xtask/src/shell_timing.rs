@@ -6,7 +6,7 @@ use std::io::Read;
 use serde::{Deserialize, Serialize};
 
 mod journal;
-pub use journal::collect;
+pub use journal::{collect, collect_metrics};
 
 const MAX_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RECORDS: usize = 100_000;
@@ -315,14 +315,19 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
         ]);
     }
     if let [command, client, expected] = args
-        && command == "collect"
+        && matches!(command.as_str(), "collect" | "metrics")
     {
-        let offers = collect(
+        let metrics = collect_metrics(
             &bounded(client)?,
             expected.parse().map_err(|_| "invalid count")?,
         )?;
         return Ok(vec![
-            serde_json::to_string(&offers).map_err(|e| e.to_string())?,
+            if command == "collect" {
+                serde_json::to_string(&metrics.offers)
+            } else {
+                serde_json::to_string(&metrics)
+            }
+            .map_err(|e| e.to_string())?,
         ]);
     }
     let [command, host, client, mode, expected] = args else {

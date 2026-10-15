@@ -98,6 +98,7 @@ self-tests are part of the offline gate (`crates/xtask/tests/verifier_self_tests
 The read-only timing join is available separately:
 
     cargo xtask shell-timing collect CLIENT_NDJSON EXPECTED_OFFERS > CLIENT_JSON
+    cargo xtask shell-timing metrics CLIENT_NDJSON EXPECTED_OFFERS
     cargo xtask shell-timing join HOST_LOG CLIENT_JSON MODE_MILLIHZ EXPECTED_OFFERS
 
 `collect` reads the generic comparison peer's complete, paced journal. It
@@ -108,6 +109,17 @@ Keep the original journal: it also contains demand-to-permit times. Collection
 validates the recorded sequence; it does not attest how the journal was captured.
 The peer timestamps each offer before flushing its record and submitting it,
 so the measured interval includes that logging cost on both wires.
+
+Schema 2 also requires an upload offer and matching acceptance before each
+permit. It binds the resource identity, dimensions and RGBA byte count to that
+candidate. Upload time starts before flushing the offer record and sending
+ResourceBegin, and ends after decoding Accepted; pixel preparation is excluded.
+`metrics` exports these timestamps and demand-to-permit timestamps alongside
+the candidate offers. It retains slow samples, including uploads over 2000 ms;
+budget assessment is separate. Missing acceptance invalidates the whole journal.
+Schema 1 remains readable for old diagnostics and has no upload measurements.
+The native runner includes these metrics in its schema 2 report. Neither format
+establishes CPU/MiB accounting or the full B9 verdict by itself.
 
 `HOST_LOG` contains captured `sophia_shell_native_binding` and
 `sophia_shell_native_completion` records. `CLIENT_JSON` is an array of every
