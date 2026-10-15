@@ -202,6 +202,18 @@ fn helper_in_private_user_directory_is_refused_even_with_matching_hash() {
 }
 
 #[test]
+fn probe_configuration_is_bounded_and_bound_to_the_plan() {
+    for wire in ["files", "ipc"] {
+        let mut f = Fixture::new(&format!("probe-{wire}"), wire);
+        for bytes in [0, 4194304, 1, 4194305] {
+            let config = serde_json::json!({"wire":wire,"output":1,"frames":3,"height":24,"hold_msec":60000,"probe_bytes":bytes});
+            f.put("peer-config", config.to_string().as_bytes(), false);
+            assert_eq!(validate(&f.request).is_ok(), matches!(bytes, 0 | 4194304));
+        }
+    }
+}
+
+#[test]
 fn profile_indirection_extra_clients_and_startup_are_refused() {
     let mut f = Fixture::new("profiles", "files");
     let profile = fs::read_to_string(&f.request.artifacts["profile"].path).unwrap();

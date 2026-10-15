@@ -121,6 +121,17 @@ Schema 1 remains readable for old diagnostics and has no upload measurements.
 The native runner includes these metrics in its schema 2 report. Neither format
 establishes CPU/MiB accounting or the full B9 verdict by itself.
 
+The peer configuration may set `probe_bytes` to `4194304`; absent or zero keeps
+the original workload. Each frame then uploads a separate 1024×1024 RGBA
+resource, waits for Accepted, retires it and waits for Released before uploading
+the ordinary bar. This measures the 4 MiB transfer bound without changing bar
+geometry or pretending those pixels were displayed. Metrics label the probe
+`transfer_probe` and the bar `presentation`; the probe's release is required.
+The prepared configuration hash binds this choice, and capture rejects a
+different declared probe size. Run latency-only bar measurements with the probe
+disabled. A probe-enabled process counter interval includes both uploads and
+their preparation and retirement; it is not a pure transfer CPU measurement.
+
 `HOST_LOG` contains captured `sophia_shell_native_binding` and
 `sophia_shell_native_completion` records. `CLIENT_JSON` is an array of every
 offered candidate, with integer `connection_epoch`, `content_grant_epoch`,

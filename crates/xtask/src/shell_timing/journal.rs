@@ -19,8 +19,10 @@ pub struct Upload {
 
 #[derive(Serialize)]
 pub struct AcceptedUpload {
+    pub purpose: &'static str,
     pub upload: Upload,
     pub accepted_usec: u64,
+    pub released_usec: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -33,6 +35,7 @@ pub struct PermitTiming {
 #[derive(Serialize)]
 pub struct Journal {
     pub schema: u64,
+    pub probe_bytes: u64,
     pub offers: Vec<Offer>,
     pub uploads: Vec<AcceptedUpload>,
     pub permits: Vec<PermitTiming>,
@@ -44,6 +47,8 @@ enum Event {
     Start {
         frames: usize,
         wire: String,
+        #[serde(default)]
+        probe_bytes: u64,
     },
     UploadOffer {
         upload: Upload,
@@ -52,6 +57,11 @@ enum Event {
         resource_id: u64,
         resource_generation: u64,
         accepted_usec: u64,
+    },
+    ProbeReleased {
+        resource_id: u64,
+        resource_generation: u64,
+        released_usec: u64,
     },
     Permit {
         generation: u64,
@@ -112,58 +122,109 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
     let schema = serde_json::from_str::<Record>(start)
         .map_err(|e| e.to_string())?
         .schema;
-    match event(start, schema)? {
-        Event::Start { frames, wire }
-            if frames == expected && matches!(wire.as_str(), "files" | "ipc") => {}
+    let probe_bytes = match event(start, schema)? {
+        Event::Start {
+            frames,
+            wire,
+            probe_bytes,
+        } if frames == expected
+            && matches!(wire.as_str(), "files" | "ipc")
+            && matches!(probe_bytes, 0 | 4194304)
+            && (schema == 2 || probe_bytes == 0) =>
+        {
+            probe_bytes
+        }
         _ => return Err("wrong start count or wire".into()),
-    }
+    };
     let mut offers = Vec::with_capacity(expected);
     let mut uploads = Vec::new();
     let mut permits = Vec::with_capacity(expected);
     let mut last = 0;
     let mut identity = None;
     for generation in 1..=expected as u64 {
-        let upload = if schema == 2 {
-            let upload = match event(lines.next().ok_or("missing upload offer")?, schema)? {
-                Event::UploadOffer { upload }
-                    if upload.candidate_generation == generation
-                        && upload.resource_id == (generation - 1) % 2 + 1
-                        && upload.resource_generation == (generation - 1) / 2 + 1
-                        && upload.width > 0
-                        && upload.height > 0
-                        && u64::from(upload.width)
-                            .checked_mul(u64::from(upload.height))
-                            .and_then(|n| n.checked_mul(4))
-                            == Some(upload.total_bytes)
-                        && upload.begin_usec > 0
-                        && upload.begin_usec >= last =>
-                {
-                    upload
+        let first_upload = uploads.len();
+        if schema == 2 {
+            for probe in [true, false] {
+                if probe && probe_bytes == 0 {
+                    continue;
                 }
-                _ => return Err("missing or invalid upload offer".into()),
-            };
-            let accepted_usec =
-                match event(lines.next().ok_or("missing upload acceptance")?, schema)? {
-                    Event::UploadAccepted {
-                        resource_id,
-                        resource_generation,
-                        accepted_usec,
-                    } if resource_id == upload.resource_id
-                        && resource_generation == upload.resource_generation
-                        && accepted_usec >= upload.begin_usec =>
+                let upload = match event(lines.next().ok_or("missing upload offer")?, schema)? {
+                    Event::UploadOffer { upload }
+                        if upload.candidate_generation == generation
+                            && upload.resource_id
+                                == if probe {
+                                    1
+                                } else {
+                                    (generation - 1) % 2 + 1 + u64::from(probe_bytes != 0)
+                                }
+                            && upload.resource_generation
+                                == if probe {
+                                    generation
+                                } else {
+                                    (generation - 1) / 2 + 1
+                                }
+                            && (!probe
+                                || (upload.width == 1024
+                                    && upload.height == 1024
+                                    && upload.total_bytes == probe_bytes))
+                            && upload.width > 0
+                            && upload.height > 0
+                            && u64::from(upload.width)
+                                .checked_mul(u64::from(upload.height))
+                                .and_then(|n| n.checked_mul(4))
+                                == Some(upload.total_bytes)
+                            && upload.begin_usec > 0
+                            && upload.begin_usec >= last =>
                     {
-                        accepted_usec
+                        upload
                     }
-                    _ => return Err("missing or misattributed upload acceptance".into()),
+                    _ => return Err("missing or invalid upload offer".into()),
                 };
-            last = accepted_usec;
-            Some(AcceptedUpload {
-                upload,
-                accepted_usec,
-            })
-        } else {
-            None
-        };
+                let accepted_usec =
+                    match event(lines.next().ok_or("missing upload acceptance")?, schema)? {
+                        Event::UploadAccepted {
+                            resource_id,
+                            resource_generation,
+                            accepted_usec,
+                        } if resource_id == upload.resource_id
+                            && resource_generation == upload.resource_generation
+                            && accepted_usec >= upload.begin_usec =>
+                        {
+                            accepted_usec
+                        }
+                        _ => return Err("missing or misattributed upload acceptance".into()),
+                    };
+                last = accepted_usec;
+                let released_usec = if probe {
+                    match event(lines.next().ok_or("missing probe release")?, schema)? {
+                        Event::ProbeReleased {
+                            resource_id,
+                            resource_generation,
+                            released_usec,
+                        } if resource_id == upload.resource_id
+                            && resource_generation == upload.resource_generation
+                            && released_usec >= accepted_usec =>
+                        {
+                            last = released_usec;
+                            Some(released_usec)
+                        }
+                        _ => return Err("missing or invalid probe release".into()),
+                    }
+                } else {
+                    None
+                };
+                uploads.push(AcceptedUpload {
+                    purpose: if probe {
+                        "transfer_probe"
+                    } else {
+                        "presentation"
+                    },
+                    upload,
+                    accepted_usec,
+                    released_usec,
+                });
+            }
+        }
         let received = match event(lines.next().ok_or("missing permit")?, schema)? {
             Event::Permit {
                 generation: g,
@@ -213,7 +274,7 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
         if identity.replace(current).is_some_and(|old| old != current) {
             return Err("grant or output changed during workload".into());
         }
-        if let Some(upload) = upload {
+        for upload in &uploads[first_upload..] {
             if (
                 upload.upload.connection_epoch,
                 upload.upload.content_grant_epoch,
@@ -223,7 +284,6 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
             {
                 return Err("upload does not belong to candidate".into());
             }
-            uploads.push(upload);
         }
         match event(lines.next().ok_or("missing terminal")?, schema)? {
             Event::Terminal {
@@ -261,6 +321,7 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
     }
     Ok(Journal {
         schema,
+        probe_bytes,
         offers,
         uploads,
         permits,

@@ -71,6 +71,8 @@ struct PeerConfig {
     frames: usize,
     height: u64,
     hold_msec: u64,
+    #[serde(default)]
+    probe_bytes: u64,
 }
 
 fn bounded(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
@@ -232,6 +234,7 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
         || peer.output != request.output
         || peer.frames != request.frames
         || !(1..=128).contains(&peer.height)
+        || !matches!(peer.probe_bytes, 0 | 4194304)
         || peer.hold_msec != request.runtime_ms
     {
         return Err(
@@ -470,6 +473,14 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
             write(&stage.join("client.ndjson"), client.as_bytes())?;
             write(&stage.join("native.log"), host.as_bytes())?;
             let metrics = crate::shell_timing::collect_metrics(&client, plan.request.frames)?;
+            let peer: PeerConfig = serde_json::from_slice(&bounded(
+                &plan.request.artifacts["peer-config"].path,
+                MAX_INPUT,
+            )?)
+            .map_err(|e| e.to_string())?;
+            if metrics.probe_bytes != peer.probe_bytes {
+                return Err("captured upload workload differs from prepared configuration".into());
+            }
             let offers = &metrics.offers;
             let samples = crate::shell_timing::join(
                 &host,

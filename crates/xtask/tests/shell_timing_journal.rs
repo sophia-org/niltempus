@@ -88,6 +88,65 @@ fn journal() -> String {
 }
 
 #[test]
+fn bulk_probe_requires_exact_bytes_and_release_before_bar_upload() {
+    let mut lines: Vec<serde_json::Value> = upload_journal()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    lines[0]["probe_bytes"] = 4194304.into();
+    let mut offer = lines[1].clone();
+    for (key, value) in [
+        ("resource_id", 1),
+        ("width", 1024),
+        ("height", 1024),
+        ("total_bytes", 4194304),
+        ("begin_usec", 1),
+    ] {
+        offer["upload"][key] = value.into();
+    }
+    lines[1]["upload"]["resource_id"] = 2.into();
+    lines[2]["resource_id"] = 2.into();
+    lines.splice(1..1, [offer,
+        serde_json::json!({"schema":2,"event":"upload_accepted","resource_id":1,"resource_generation":1,"accepted_usec":5}),
+        serde_json::json!({"schema":2,"event":"probe_released","resource_id":1,"resource_generation":1,"released_usec":8})]);
+    let encode = |lines: &[serde_json::Value]| {
+        lines
+            .iter()
+            .map(|v| v.to_string() + "\n")
+            .collect::<String>()
+    };
+    let good = encode(&lines);
+    let result = collect_metrics(&good, 1).unwrap();
+    assert_eq!(result.uploads.len(), 2);
+    assert_eq!(result.uploads[0].purpose, "transfer_probe");
+    assert_eq!(result.uploads[0].released_usec, Some(8));
+    assert_eq!(result.uploads[1].purpose, "presentation");
+    for (index, key, value) in [
+        (3, "released_usec", 11),
+        (3, "resource_id", 2),
+        (2, "resource_generation", 2),
+        (0, "probe_bytes", 0),
+        (0, "probe_bytes", 4194303),
+    ] {
+        let mut bad = lines.clone();
+        bad[index][key] = value.into();
+        assert!(collect_metrics(&encode(&bad), 1).is_err());
+    }
+    for index in 1..=3 {
+        let mut bad = lines.clone();
+        bad.remove(index);
+        assert!(collect_metrics(&encode(&bad), 1).is_err());
+    }
+    assert!(
+        collect_metrics(
+            &good.replace("\"total_bytes\":4194304", "\"total_bytes\":4194300"),
+            1
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn complete_journal_preserves_candidate_and_submission_time() {
     for wire in ["files", "ipc"] {
         let offers = collect(&journal().replace("files", wire), 1).unwrap();
