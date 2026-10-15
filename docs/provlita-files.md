@@ -229,3 +229,24 @@ admission, geometry, completion and launcher input. Logs saying `presented`
 reflect those supplied receipts, not a physical display. Post-revocation client
 connection errors are expected during teardown. Native lifetime, exact physical
 input/reservations, the separate baseline, B9 and attended acceptance remain.
+
+## Separate two-component baseline
+
+`two_component_baseline_keeps_bar_progress_during_menu_replacement` in
+`shell_trio.rs` runs separately with the Lom and Bemenu binaries from baseline
+release `niltempus-339765fe1cc1dd8166f5`. It selects the two-role registry capacity
+and Session's two-role byte envelopes; it does not reuse the dock's reduced
+launcher allowance. The explicit artifact/hash variables are the same as above,
+but Provlita inputs are unnecessary. Filter this test by `two_component_baseline`.
+
+The October 15 run passes: both clients upload, a supplied text edit produces
+another menu candidate, and Lom continues across menu revocation and replacement
+without changing its grant. The replacement uploads while the old menu's pixels
+remain readable. Releasing those pixels reclaims the old epoch; final teardown
+is quiescent. `baseline-run.log` records the exact package paths and hashes.
+The three-component case passes again after sharing the envelope selection
+helper (`trio-after-baseline.log`), as do strict Clippy and formatting.
+
+This supplies separate baseline content/lifecycle evidence. Its completion and
+input are simulated just as in the trio gate; physical baseline acceptance and
+the measured B9 comparison remain open.

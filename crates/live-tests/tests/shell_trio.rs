@@ -19,6 +19,10 @@ fn artifact(name: &str) -> PathBuf {
     assert!(path.is_absolute());
     let hash = format!("{:x}", Sha256::digest(std::fs::read(&path).unwrap()));
     assert_eq!(hash, required(&format!("{name}_SHA256")));
+    println!(
+        "shell_artifact name={name} path={} sha256={hash}",
+        path.display()
+    );
     path
 }
 struct Scratch(PathBuf);
@@ -65,9 +69,7 @@ fn turn(peers: &mut [&mut Peer], registry: &mut ContentEpochRegistry, start: Ins
     std::thread::sleep(Duration::from_millis(2));
 }
 
-#[test]
-#[ignore = "explicit three-client artifacts, hashes and exact render-node arm required"]
-fn bar_and_launcher_progress_through_stalled_dock_and_replacement() {
+fn device() -> LiveRenderDeviceIdentitySnapshot {
     assert_eq!(required("SOPHIA_TRIO_GPU_ARM"), "1");
     let node = PathBuf::from(required("SOPHIA_TRIO_RENDER_NODE"))
         .canonicalize()
@@ -93,17 +95,22 @@ fn bar_and_launcher_progress_through_stalled_dock_and_replacement() {
         physical_device: physical,
     };
     assert!(identity.is_render_node());
+    identity
+}
+
+#[test]
+#[ignore = "explicit three-client artifacts, hashes and exact render-node arm required"]
+fn bar_and_launcher_progress_through_stalled_dock_and_replacement() {
+    let identity = device();
     let bar_selection = selection("LOM", ShellComponentRole::Bar);
     let menu_selection = selection("BEMENU", ShellComponentRole::ApplicationLauncher);
     let dock_selection = selection("PROVLITA", ShellComponentRole::Dock);
-    let root = Scratch(std::env::temp_dir().join(format!(
-            "shell-trio-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        )));
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root =
+        Scratch(std::env::temp_dir().join(format!("shell-trio-{}-{stamp}", std::process::id())));
     std::fs::create_dir(&root.0).unwrap();
     let mut registry = ContentEpochRegistry::with_active_capacity(64 * 1024 * 1024, 3).unwrap();
     let mut bar = Peer::launch(
@@ -206,4 +213,95 @@ fn bar_and_launcher_progress_through_stalled_dock_and_replacement() {
     ] {
         assert!(Path::new(&artifact(name)).is_file());
     }
+}
+
+#[test]
+#[ignore = "explicit baseline bar/menu artifacts, hashes and exact render-node arm required"]
+fn two_component_baseline_keeps_bar_progress_during_menu_replacement() {
+    let identity = device();
+    let bar_selection = selection("LOM", ShellComponentRole::Bar);
+    let menu_selection = selection("BEMENU", ShellComponentRole::ApplicationLauncher);
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = Scratch(
+        std::env::temp_dir().join(format!("shell-baseline-{}-{stamp}", std::process::id())),
+    );
+    std::fs::create_dir(&root.0).unwrap();
+    let mut registry = ContentEpochRegistry::with_active_capacity(64 * 1024 * 1024, 2).unwrap();
+    let mut bar = Peer::launch_baseline(
+        bar_selection,
+        &identity,
+        &root.0.join("bar"),
+        &mut registry,
+        91,
+    );
+    let mut menu = Peer::launch_baseline(
+        menu_selection.clone(),
+        &identity,
+        &root.0.join("menu"),
+        &mut registry,
+        92,
+    );
+    let start = Instant::now();
+    while bar.frames == 0 || menu.frames == 0 {
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
+            "baseline content deadline"
+        );
+        turn(&mut [&mut bar, &mut menu], &mut registry, start);
+    }
+    let before = (bar.frames, menu.frames);
+    menu.edit(&mut registry, "t");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while bar.frames <= before.0 || menu.frames <= before.1 {
+        assert!(Instant::now() < deadline, "baseline edit deadline");
+        turn(&mut [&mut bar, &mut menu], &mut registry, start);
+    }
+    menu.revoke(&mut registry);
+    assert_eq!(registry.accounting().retired_epochs, 1);
+    let before = bar.frames;
+    let grant = bar.grant;
+    let mut replacement = Peer::launch_baseline(
+        menu_selection,
+        &identity,
+        &root.0.join("replacement"),
+        &mut registry,
+        93,
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while bar.frames <= before || replacement.frames == 0 {
+        assert!(Instant::now() < deadline, "baseline replacement deadline");
+        turn(&mut [&mut bar, &mut replacement], &mut registry, start);
+    }
+    assert_eq!(bar.grant, grant);
+    assert_ne!(menu.grant, replacement.grant);
+    let old = menu.held.take().unwrap();
+    for placement in &old.placements {
+        assert!(!old.resource(placement.resource).unwrap().bytes().is_empty());
+    }
+    drop(old);
+    registry.collect();
+    assert_eq!(registry.accounting().retired_epochs, 0);
+    println!(
+        "baseline_content bar_frames={} menu_frames={} replacement_frames={} native=false",
+        bar.frames, menu.frames, replacement.frames
+    );
+    for peer in [&mut bar, &mut replacement] {
+        peer.revoke(&mut registry);
+        peer.held.take();
+    }
+    registry.collect();
+    assert!(registry.accounting().quiescent());
+    for name in [
+        "SOPHIA_TRIO_LOM_BINARY",
+        "SOPHIA_TRIO_LOM_CONFIG",
+        "SOPHIA_TRIO_BEMENU_BINARY",
+    ] {
+        artifact(name);
+    }
+    println!(
+        "baseline_content reclaimed=true admission=supplied presentation=supplied native=false"
+    );
 }

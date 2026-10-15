@@ -37,6 +37,27 @@ impl Peer {
         registry: &mut ContentEpochRegistry,
         epoch: u64,
     ) -> Self {
+        Self::launch_inventory(selection, identity, directory, registry, epoch, true)
+    }
+
+    pub fn launch_baseline(
+        selection: ShellComponentConfig,
+        identity: &LiveRenderDeviceIdentitySnapshot,
+        directory: &Path,
+        registry: &mut ContentEpochRegistry,
+        epoch: u64,
+    ) -> Self {
+        Self::launch_inventory(selection, identity, directory, registry, epoch, false)
+    }
+
+    fn launch_inventory(
+        selection: ShellComponentConfig,
+        identity: &LiveRenderDeviceIdentitySnapshot,
+        directory: &Path,
+        registry: &mut ContentEpochRegistry,
+        epoch: u64,
+        has_dock: bool,
+    ) -> Self {
         let role = selection.role;
         let profile = match role {
             ShellComponentRole::Bar => ContentStoreProfile::Legacy,
@@ -51,14 +72,20 @@ impl Peer {
         // Session's three-role envelopes at the pinned revision. The public
         // reconnect selector reduces only the replacing role's allowance.
         let mut nominal = ContentLimits::prototype(grant);
-        nominal.max_staging_bytes = 4 * 1024 * 1024;
-        nominal.max_resident_bytes = if role == ShellComponentRole::Bar {
-            12
-        } else {
-            8
-        } * 1024
-            * 1024;
-        nominal.max_retiring_bytes = 8 * 1024 * 1024;
+        if has_dock {
+            nominal.max_staging_bytes = 4 * 1024 * 1024;
+            nominal.max_resident_bytes = if role == ShellComponentRole::Bar {
+                12
+            } else {
+                8
+            } * 1024
+                * 1024;
+            nominal.max_retiring_bytes = 8 * 1024 * 1024;
+        } else if role == ShellComponentRole::ApplicationLauncher {
+            nominal.max_staging_bytes = 4 * 1024 * 1024;
+            nominal.max_resident_bytes = 12 * 1024 * 1024;
+            nominal.max_retiring_bytes = 8 * 1024 * 1024;
+        }
         let limits = select_reconnect_limits(&nominal, registry.reconnect_budget(profile)).unwrap();
         std::fs::create_dir(directory).unwrap();
         let mut transport = ShellComponentTransport::bind_for_supervised_uid(
