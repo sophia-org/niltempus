@@ -5,12 +5,15 @@ use std::io::Read;
 
 use serde::{Deserialize, Serialize};
 
+mod journal;
+pub use journal::collect;
+
 const MAX_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RECORDS: usize = 100_000;
 type Candidate = (u64, u64, u64, u64);
 type Frame = (u64, u64, u64);
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Offer {
     pub connection_epoch: u64,
@@ -301,6 +304,17 @@ fn bounded(path: &str) -> Result<String, String> {
 }
 
 pub fn run(args: &[String]) -> Result<Vec<String>, String> {
+    if let [command, client, expected] = args
+        && command == "collect"
+    {
+        let offers = collect(
+            &bounded(client)?,
+            expected.parse().map_err(|_| "invalid count")?,
+        )?;
+        return Ok(vec![
+            serde_json::to_string(&offers).map_err(|e| e.to_string())?,
+        ]);
+    }
     let [command, host, client, mode, expected] = args else {
         return Err("expected shell-timing join HOST CLIENT MODE EXPECTED".into());
     };

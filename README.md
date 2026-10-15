@@ -97,7 +97,17 @@ self-tests are part of the offline gate (`crates/xtask/tests/verifier_self_tests
 
 The read-only timing join is available separately:
 
+    cargo xtask shell-timing collect CLIENT_NDJSON EXPECTED_OFFERS > CLIENT_JSON
     cargo xtask shell-timing join HOST_LOG CLIENT_JSON MODE_MILLIHZ EXPECTED_OFFERS
+
+`collect` reads the generic comparison peer's complete, paced journal. It
+requires a start, a permit/offer/terminal sequence for every declared frame,
+and matching final counts. Truncation, repeated records, changed identities,
+backward clocks, rejection and records after the end all fail the command.
+Keep the original journal: it also contains demand-to-permit times. Collection
+validates the recorded sequence; it does not attest how the journal was captured.
+The peer timestamps each offer before flushing its record and submitting it,
+so the measured interval includes that logging cost on both wires.
 
 `HOST_LOG` contains captured `sophia_shell_native_binding` and
 `sophia_shell_native_completion` records. `CLIENT_JSON` is an array of every

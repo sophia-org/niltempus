@@ -19,6 +19,7 @@ const USAGE: &str = "usage:
   xtask check-provision
   xtask dock profile LOM LOM_CONFIG BEMENU PROVLITA DOCK_CONFIG
   xtask dock verify HOST_LOG
+  xtask shell-timing collect CLIENT_NDJSON EXPECTED_OFFERS
   xtask shell-timing join HOST_LOG CLIENT_JSON MODE_MILLIHZ EXPECTED_OFFERS
   xtask panel --probe --renderer=software --quickshell=/ABS --wm=/ABS --sophia=/ABS [--display=:N] [--output=/ABS/NEW]
   xtask panel [--renderer=gpu|software] [--quickshell=/ABS] [--output=/ABS/NEW]   (operator-only: attaches to the current session)
