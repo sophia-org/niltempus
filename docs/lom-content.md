@@ -19,7 +19,8 @@ Sophia at `740c52551b4a667ffefc2b388eb58e5e4611ca1c` supports the selected
 single-shell Session path. The panel runner passes
 `--shell-transport=9p2000.L`; the GPU proof passes `--transport=9p2000.L`.
 Independent Lom and Bemenu components explicitly select the same wire in
-profiles. Provlita is outside this conversion and retains its existing wire.
+profiles. Provlita now also uses 9P; its separate
+[protected export check](provlita-files.md) records the exact pair and limits.
 
 The verifier requires one 9P transport record before GPU admission and render
 records, with its epoch matching Sophia's grant. Mutations cover a missing,

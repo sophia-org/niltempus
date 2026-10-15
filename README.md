@@ -35,6 +35,8 @@ shell components from the desktop profile.
 - [Narthex reference sheets](docs/narthex-reference-sheets.md).
 - [Same-hardware desktop comparison](docs/desktop-comparison.md).
 - [Lom content](docs/lom-content.md) (9P transport and scoped proof coverage).
+- [Provlita's protected file-export join](docs/provlita-files.md) (device-free
+  negotiation and the separate GPU boundary).
 - [Quickshell](docs/quickshell.md): the X11 trace probe and panel probe, with
   the old coverage map.
 - [E1 descriptor hosts](docs/E1-descriptor-hosts.md): retained coverage of the
