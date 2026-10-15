@@ -114,7 +114,7 @@
         kleis = "${installed}/kleis";
       } // lib.optionalAttrs withDock {
         provlita = "${installed}/provlita";
-        inherit dockConfig;
+        dockConfig = "/opt/sophia-niltempus-desktop/releases/${releaseId}/share/sophia-niltempus-desktop/provlita.kdl";
       });
       components = {
         lom = "${lom.packages.${system}.default}/bin/lom";
