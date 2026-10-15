@@ -21,6 +21,26 @@ evidence verifiers `verify_live_session_{persistent,two_xterm,milestone3,milesto
 `verify_sophia_native_composition_pixels.sh`,
 `report_sophia_input_latency.sh`, `check_bounded_xterm_geometry.sh`).
 
+## Shell timing evidence replay
+
+`cargo xtask shell-timing latency HOST_LOG CLIENT_NDJSON MODE_MILLIHZ EXPECTED_OFFERS`
+reads existing evidence without opening devices or starting a session. It
+validates the complete client journal and joins every candidate to its exact
+kernel-backed presentation before reporting nearest-rank p50, p95, p99 and
+maximum latency. Use `60000` or `120000` for the exact refresh rate.
+
+The report includes candidate-to-native-presentation, demand-to-permit and,
+when recorded, separate presentation and probe upload-to-acceptance timings.
+It retains all samples and lists every accepted upload that reached the
+2,000,000 µs transfer bound. Missing upload measurements in older journals
+are `null`, not zero. Rejected or missing outcomes invalidate the entire
+report; they are never dropped to produce a successful subset.
+
+This command summarizes all offered frames with no warmup exclusion. It does
+not compare a pair, validate campaign conditions or decide B9 acceptance.
+Keep the raw logs, including failed runs, alongside the report. CPU and
+allocation accounting remain separate in `shell-timing cost-metrics`.
+
 ## What every runner requires
 
 No runner builds anything. Binaries and the pinned Sophia tree come from

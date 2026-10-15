@@ -6,7 +6,9 @@ use std::io::Read;
 use serde::{Deserialize, Serialize};
 
 mod journal;
+mod latency;
 pub use journal::{collect, collect_metrics};
+pub use latency::{Distribution, latency_report};
 
 const MAX_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RECORDS: usize = 100_000;
@@ -304,6 +306,19 @@ fn bounded(path: &str) -> Result<String, String> {
 }
 
 pub fn run(args: &[String]) -> Result<Vec<String>, String> {
+    if let [command, host, client, mode, expected] = args
+        && command == "latency"
+    {
+        return Ok(vec![
+            latency_report(
+                &bounded(host)?,
+                &bounded(client)?,
+                mode.parse().map_err(|_| "invalid mode")?,
+                expected.parse().map_err(|_| "invalid count")?,
+            )?
+            .to_string(),
+        ]);
+    }
     if let [command, host, peer, journal, expected] = args
         && command == "cost-metrics"
     {

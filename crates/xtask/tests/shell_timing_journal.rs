@@ -1,5 +1,88 @@
 use xtask::shell_timing::{collect, collect_metrics};
 
+#[test]
+fn nearest_rank_preserves_tail_and_distinguishes_missing_measurements() {
+    use xtask::shell_timing::Distribution;
+    assert!(Distribution::from_samples(&[]).is_none());
+    let samples: Vec<_> = (1..=100).rev().collect();
+    let result = Distribution::from_samples(&samples).unwrap();
+    assert_eq!(
+        (
+            result.count,
+            result.p50_usec,
+            result.p95_usec,
+            result.p99_usec,
+            result.max_usec
+        ),
+        (100, 50, 95, 99, 100)
+    );
+    assert_eq!(Distribution::from_samples(&[0]).unwrap().p99_usec, 0);
+}
+
+fn native_host(time: u64) -> String {
+    format!(
+        "sophia_shell_native_binding schema=1 connection_epoch=1 content_grant_epoch=2 output=3 candidate_generation=1 native_owner=5 native_frame=6 head=7 target_generation=8 heads=1 mode_refresh_millihz=60000\nsophia_shell_native_completion schema=1 output=3 native_owner=5 native_frame=6 heads=1 monotonic_usec={time} timestamp_source=kernel missing_kernel_timestamp=0\n"
+    )
+}
+
+#[test]
+fn latency_report_requires_complete_native_evidence_and_retains_all_metrics() {
+    use xtask::shell_timing::latency_report;
+    let result = latency_report(&native_host(140), &upload_journal(), 60000, 1).unwrap();
+    assert_eq!(result["candidate_to_native_presented"]["p99_usec"], 40);
+    assert_eq!(result["presentation_upload_to_accepted"]["p95_usec"], 60);
+    assert_eq!(result["demand_to_permit"]["p50_usec"], 10);
+    assert!(result["probe_upload_to_accepted"].is_null());
+    assert_eq!(result["native_samples"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        result["journal_metrics"]["uploads"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(latency_report("", &upload_journal(), 60000, 1).is_err());
+    assert!(latency_report(&native_host(140), &upload_journal(), 120000, 1).is_err());
+    assert!(
+        latency_report(
+            &native_host(140),
+            &upload_journal().replace("presented", "superseded"),
+            60000,
+            1
+        )
+        .is_err()
+    );
+    let old = latency_report(&native_host(140), &journal(), 60000, 1).unwrap();
+    assert!(old["presentation_upload_to_accepted"].is_null());
+}
+
+#[test]
+fn latency_report_keeps_uploads_that_reach_the_transfer_deadline() {
+    let slow = upload_journal()
+        .replace("\"begin_usec\":10", "\"begin_usec\":1")
+        .replace("\"accepted_usec\":70", "\"accepted_usec\":2000001")
+        .replace("\"demand_usec\":80", "\"demand_usec\":2000002")
+        .replace("\"received_usec\":90", "\"received_usec\":2000003")
+        .replace(
+            "\"submitted_monotonic_usec\":100",
+            "\"submitted_monotonic_usec\":2000004",
+        )
+        .replace(
+            "\"observed_monotonic_usec\":150",
+            "\"observed_monotonic_usec\":2000006",
+        );
+    let result =
+        xtask::shell_timing::latency_report(&native_host(2000005), &slow, 60000, 1).unwrap();
+    assert_eq!(
+        result["transfer_bound_reached"].as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(
+        result["presentation_upload_to_accepted"]["max_usec"],
+        2000000
+    );
+}
+
 fn upload_journal() -> String {
     journal().replace("\"schema\":1", "\"schema\":2").replace(
         "{\"schema\":2,\"event\":\"permit\"",
