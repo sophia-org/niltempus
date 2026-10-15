@@ -62,3 +62,42 @@ Session startup, GPU rendering, upload, Presented, input, native retirement,
 three-component coexistence or performance. It also does not qualify the newer
 Sophia t330 repair or change the installed release. Those remain separate
 t252 checks before dock rollout.
+
+## Authenticated pair, October 15
+
+The external Cargo pin now selects signed Sophia
+`58a481ebc756b50fe97a890b968a6c9b70863496`, including t330. The C SDK manifest
+and all sixteen contract bindings are refreshed from that tree; the two added
+bindings cover namespace discovery and launch authentication. Pin audit,
+provisioning, device-hidden workspace tests and strict workspace Clippy pass.
+The supplied-admission Provlita gate also passes against the updated pin.
+The desktop flake and installed release are separate selections and have not
+been changed by this Cargo update.
+
+Sophia's existing generic `supplied_component_client_authenticates_across_launches`
+test now also passes with the actual Provlita executable above, installed Lom
+and installed Bemenu. This uses the real Factotum owner and authenticated
+protected launch path. Provlita and Lom negotiate and then refuse the missing
+GPU grant; Bemenu remains alive until explicit revocation. Each runs twice with
+fresh component epochs and launch registrations, and each process is reaped
+before replacement. A Provlita launch provisioned for the bar role fails with
+authentication refusal 13 before shell negotiation.
+
+The packaged Narthex `56d513fa` fails authenticated startup: it predates the
+authentication implementation. Signed Narthex
+`11eb0332859ed0e0b9244dd3ddafcea70c2b1b6e`, built from a clean tree, passes
+`supplied_descriptor_client_authenticates_and_recovers` on the same Sophia.
+It negotiates descriptor revision 8, survives the idle observation, and recovers
+after revocation at two fresh epochs. Its binary SHA-256 is
+`699505779b729084de04f25fc8752b417cd40671048258cd9b35a5d89d43e536`.
+Select this authenticated revision for the next fallback package; the old
+installed package is not evidence of compatibility with the new server.
+
+Logs and input hashes are under
+`~/.local/state/sophia/development-evidence/t252-authenticated-20261015/`.
+The original Narthex failure and wrong-role negative control are retained.
+The new Narthex build needed an explicit read-only bind into the outer test
+sandbox because that sandbox hides `/tmp`; the first attempt without that bind
+ran no client. All successful authentication checks hide display devices and
+sockets. Authentication and cleanup do not establish catalog actions, content,
+GPU work, native presentation or B9 performance.

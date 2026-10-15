@@ -12,7 +12,7 @@ use std::process::Command;
 use std::time::Duration;
 
 pub const SOPHIA_URL: &str = "https://github.com/sophia-org/sophia.git";
-pub const SOPHIA_REV: &str = "316d969507cdeb6ef061ea2d9645758113c53db6";
+pub const SOPHIA_REV: &str = "58a481ebc756b50fe97a890b968a6c9b70863496";
 /// The Sophia crates this repository names directly.
 pub const SOPHIA_CRATES: [&str; 8] = [
     "sophia-backend-live",
@@ -29,7 +29,7 @@ pub const FONT: &str = "assets/fonts/JetBrainsMonoNL-Regular.ttf";
 pub const FONT_SHA256: &str = "fb3b2575d7b0657359707993288f12a7360344d39387bb26050e276d61f6bd2a";
 pub const SDK_MANIFEST: &str = "pins/c-desktop-sdk/manifest.json";
 pub const SDK_MANIFEST_SHA256: &str =
-    "3339afc578a324b3a6cf936fd52db259d44159b799e83b0615d239ec8e23e4b2";
+    "72bef583dfc5b85e6e7d71dc396f5c73d4c6fb1193b06160e6c5ffd6058293df";
 const SOPHIA_PIN: &str = "pins/sophia.toml";
 const CONTRACTS: &str = "pins/contracts.sha256";
 const MANIFESTS: [&str; 6] = [
@@ -63,10 +63,15 @@ const COPIES: [(&str, &str, &str); 3] = [
 
 /// Every contract binding the C SDK snapshot must carry unchanged:
 /// (path in the SDK snapshot source, authoritative path in Sophia). The
-/// digests live in pins/contracts.sha256; this list keeps any of the fourteen
+/// digests live in pins/contracts.sha256; this list keeps any of the sixteen
 /// from being dropped silently. It is Sophia's own list at the pinned
 /// revision (crates/xtask/src/c_desktop_sdk.rs), in the same order.
-const BINDINGS: [(&str, &str); 14] = [
+const BINDINGS: [(&str, &str); 16] = [
+    ("spec/namespace-discovery.md", "docs/namespace-discovery.md"),
+    (
+        "spec/factotum-launch-authentication.md",
+        "docs/factotum-launch-authentication.md",
+    ),
     (
         "spec/sophia-shell-descriptors.md",
         "docs/sophia-shell-descriptors.md",
@@ -115,7 +120,7 @@ pub struct Contract {
     pub authoritative: String,
 }
 
-/// The fourteen contract digests, in BINDINGS order, fail closed.
+/// The sixteen contract digests, in BINDINGS order, fail closed.
 pub fn contracts(repo: &Path) -> Result<Vec<Contract>, String> {
     parse_contracts(&String::from_utf8(read(&repo.join(CONTRACTS))?).map_err(|e| e.to_string())?)
 }
@@ -138,7 +143,7 @@ pub fn parse_contracts(text: &str) -> Result<Vec<Contract>, String> {
         .collect::<Vec<_>>();
     if pairs != BINDINGS {
         return Err(format!(
-            "{CONTRACTS}: bindings differ from the fourteen required contract paths"
+            "{CONTRACTS}: bindings differ from the sixteen required contract paths"
         ));
     }
     for contract in &contracts {
@@ -162,7 +167,7 @@ pub fn check(repo: &Path) -> Result<Vec<String>, String> {
             return Err(format!("{path} differs from its pinned digest"));
         }
     }
-    // The pinned SDK manifest must itself carry the fourteen contract digests.
+    // The pinned SDK manifest must itself carry the sixteen contract digests.
     let manifest: serde_json::Value =
         serde_json::from_slice(&read(&repo.join(SDK_MANIFEST))?).map_err(|e| e.to_string())?;
     let contracts = contracts(repo)?;

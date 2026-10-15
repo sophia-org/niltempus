@@ -170,7 +170,7 @@ fn lock_revision_or_source_drift_is_refused() {
 #[test]
 fn contract_bindings_cannot_be_dropped_or_rebound() {
     let good = text("pins/contracts.sha256");
-    assert_eq!(parse_contracts(&good).unwrap().len(), 14);
+    assert_eq!(parse_contracts(&good).unwrap().len(), 16);
     let dropped = good.lines().skip(1).collect::<Vec<_>>().join("\n");
     // The lock provider's three bindings (t295) are required like the rest.
     let dropped_lock = good
@@ -178,7 +178,7 @@ fn contract_bindings_cannot_be_dropped_or_rebound() {
         .filter(|line| !line.ends_with(" protocol/sophia-lock-files-v1.kdl"))
         .collect::<Vec<_>>()
         .join("\n");
-    assert_eq!(dropped_lock.lines().count(), 13);
+    assert_eq!(dropped_lock.lines().count(), 15);
     let rebound = good.replacen(
         "protocol/sophia-wm-files-v1.kdl",
         "protocol/sophia-shell-files-v1.kdl",
