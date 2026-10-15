@@ -158,11 +158,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791081628,
-        "narHash": "sha256-Q+zEPRGwTSLdKBRaOQdtgZ5O9tkFEon/e2/FDVDip8c=",
+        "lastModified": 1791780538,
+        "narHash": "sha256-MRMhiB6y5X+9YemgfO09omr1hsvqlZX794UOizHTVwY=",
         "owner": "sophia-org",
         "repo": "narthex",
-        "rev": "56d513faede5c5127c7d3cd1241f44661568d806",
+        "rev": "11eb0332859ed0e0b9244dd3ddafcea70c2b1b6e",
         "type": "github"
       },
       "original": {
@@ -204,6 +204,23 @@
         "type": "github"
       }
     },
+    "provlita": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791780972,
+        "narHash": "sha256-8UlF8V43KBl5HNrE/l5obew3hQPZPBZIdHUMnixcMYA=",
+        "owner": "sophia-org",
+        "repo": "provlita",
+        "rev": "da4a15adb9a6555441653a9dd9ec0e4d69f3d6af",
+        "type": "github"
+      },
+      "original": {
+        "owner": "sophia-org",
+        "repo": "provlita",
+        "rev": "da4a15adb9a6555441653a9dd9ec0e4d69f3d6af",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "bemenu": "bemenu",
@@ -213,6 +230,7 @@
         "lom": "lom",
         "narthex": "narthex",
         "nixpkgs": "nixpkgs",
+        "provlita": "provlita",
         "rust-overlay": "rust-overlay_2",
         "sophia": "sophia"
       }
@@ -288,11 +306,11 @@
         "rust-overlay": "rust-overlay_3"
       },
       "locked": {
-        "lastModified": 1792029426,
-        "narHash": "sha256-/PeCytd+PYk4HNREF723VZZw+RkDCbsmZy9iVOYii7s=",
+        "lastModified": 1792063249,
+        "narHash": "sha256-86HKULkeK7yWKsruC2KJh6z8Xc/FQlRX5fO7RSJg9Ac=",
         "owner": "sophia-org",
         "repo": "sophia",
-        "rev": "ed0caa4f254438925038872aaf08f959a3ab7551",
+        "rev": "58a481ebc756b50fe97a890b968a6c9b70863496",
         "type": "github"
       },
       "original": {

@@ -35,9 +35,13 @@
       url = "github:sophia-org/kleis/master";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    provlita = {
+      url = "github:sophia-org/provlita/da4a15adb9a6555441653a9dd9ec0e4d69f3d6af";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, crane, rust-overlay, sophia, hagia, narthex, lom, bemenu, kleis }:
+  outputs = { self, nixpkgs, crane, rust-overlay, sophia, hagia, narthex, lom, bemenu, kleis, provlita }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs {
@@ -72,6 +76,11 @@
       sophiaPackage = sophia.packages.${system}.sophia;
       hagiaPackage = hagia.packages.${system}.default;
       narthexPackage = narthex.packages.${system}.default;
+      provlitaPackage = import ./nix/provlita.nix {
+        inherit pkgs craneLib;
+        source = provlita;
+        vulkanLoader = lom.packages.${system}.vulkan-loader;
+      };
       sdk = "${hagia}/vendor/sophia-desktop-sdk";
       sdkRevision = (builtins.fromJSON (builtins.readFile "${sdk}/manifest.json")).revision;
       revision = input: input.rev or (throw "${input} has uncommitted changes; commit them to build the desktop");
@@ -80,21 +89,38 @@
       # which the manifest records: one name is always one release, and any
       # change, even a new commit of the same tree, names a new one. The
       # profile names the components by their installed paths under it.
+      desktopFor = withDock: let
       releaseId = "niltempus-" + builtins.substring 0 20 (builtins.hashString "sha256"
         (lib.concatMapStringsSep "\n" (input: "${input.narHash} ${revision input}")
-          [ self sophia hagia narthex lom bemenu kleis ]));
+          ([ self sophia hagia narthex lom bemenu kleis ] ++ lib.optional withDock provlita)));
       installed = "/opt/sophia-niltempus-desktop/releases/${releaseId}/target/release";
-      profile = pkgs.replaceVars ./profiles/desktop.kdl {
+      profileTemplate = if withDock then pkgs.writeText "desktop-dock.kdl"
+        (builtins.replaceStrings [ "    application-catalog \"installed\"" ] [ ''
+            shell-component "dock" "dock" {
+                executable "@provlita@"
+                transport "9p2000.L"
+                config "@dockConfig@"
+                gpu "direct"
+                reservation "bottom" 64
+            }
+            application-catalog "installed"
+        '' ] (builtins.readFile ./profiles/desktop.kdl)) else ./profiles/desktop.kdl;
+      dockConfig = pkgs.writeText "provlita-config.kdl" (builtins.readFile ./profiles/provlita.kdl);
+      dockSource = pkgs.writeText "provlita-source" "${revision provlita}\n";
+      profile = pkgs.replaceVars profileTemplate ({
         hagia = "${installed}/hagia";
         lom = "${installed}/lom";
         bemenu = "${installed}/bemenu-sophia";
         kleis = "${installed}/kleis";
-      };
+      } // lib.optionalAttrs withDock {
+        provlita = "${installed}/provlita";
+        inherit dockConfig;
+      });
       components = {
         lom = "${lom.packages.${system}.default}/bin/lom";
         bemenu-sophia = "${bemenu.packages.${system}.bemenu-sophia}/bin/bemenu-sophia";
         kleis = "${kleis.packages.${system}.default}/bin/kleis";
-      };
+      } // lib.optionalAttrs withDock { provlita = "${provlitaPackage}/bin/provlita"; };
 
       # The release as the session runs it. The build time is the newest
       # input's commit time, so the same lock builds the same release.
@@ -104,7 +130,7 @@
       # binaries instead of the installed paths, and an empty file for each
       # component's private config: those live in the user's home, which the
       # build cannot read, and only their presence is checked here.
-      desktop = pkgs.runCommand "niltempus-desktop-${releaseId}" {
+      in pkgs.runCommand "niltempus-desktop-${releaseId}" {
         # git hashes the vendored C SDK snapshot to check its revision.
         nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.gnused pkgs.gawk pkgs.gnugrep pkgs.git ];
         passthru = { inherit releaseId; };
@@ -116,6 +142,7 @@
         contract=$($hagia config check-environment-contract)
         test -n "$expected" && test "$contract" = "$expected" \
           || { echo "Hagia does not confirm the WM environment contract: $contract" >&2; exit 1; }
+        ${lib.optionalString withDock ''${components.provlita} check --config ${dockConfig}''}
 
         mkdir check
         : > check/private-config
@@ -126,6 +153,7 @@
           -e "s|${installed}/lom|${components.lom}|" \
           -e "s|${installed}/bemenu-sophia|${components.bemenu-sophia}|" \
           -e "s|${installed}/kleis|${components.kleis}|g" \
+          ${lib.optionalString withDock ''-e "s|${installed}/provlita|${components.provlita}|g"''} \
           -e "s|^([[:space:]]*config )\"[^\"]*\"|\1\"$PWD/check/private-config\"|" \
           ${profile} > check/desktop.kdl
         if grep -q "${installed}" check/desktop.kdl; then
@@ -155,12 +183,18 @@
           --file=target/release/lom=${components.lom} \
           --file=target/release/bemenu-sophia=${components.bemenu-sophia} \
           --file=target/release/kleis=${components.kleis} \
+          ${lib.optionalString withDock ''--file=target/release/provlita=${components.provlita}''} \
+          ${lib.optionalString withDock ''--file=share/sophia-niltempus-desktop/provlita-source=${dockSource}''} \
+          ${lib.optionalString withDock ''--file=share/sophia-niltempus-desktop/provlita.kdl=${dockConfig}''} \
           --file=share/sophia-niltempus-desktop/desktop.kdl=${profile}
       '';
+      desktop = desktopFor false;
+      desktop-dock = desktopFor true;
     in
     {
       packages.${system} = {
-        inherit xtask desktop;
+        inherit xtask desktop desktop-dock;
+        provlita = provlitaPackage;
         default = desktop;
       };
     };

@@ -17,6 +17,23 @@ ten seconds.
 
 ## What a release contains
 
+The `desktop-dock` candidate adds Provlita to the bar and launcher:
+
+```sh
+nix build .#desktop-dock
+```
+
+It uses `profiles/provlita.kdl`, a bottom reservation of 64 pixels on each
+active output, and the same pinned Vulkan loader as Lom. The package checks
+Provlita's configuration and the combined desktop profile before assembly.
+Its release identity includes Provlita's exact source, which is also recorded
+in `share/sophia-niltempus-desktop/provlita-source`. Unavailable catalog pins
+remain unavailable; the dock cannot turn a configured label into launch authority.
+
+This is the t252 acceptance candidate. Building it does not install it or
+establish GPU, native input, performance or attended acceptance. `desktop`
+retains the two-component baseline while those gates run.
+
 The release holds the Sophia session binaries, Hagia and narthex, Lom,
 Bemenu, kleis, the session tools and the desktop profile. It is laid out by
 `cargo xtask assemble-nix` and sealed with `SHA256SUMS`. Its `manifest`

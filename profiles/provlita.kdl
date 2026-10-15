@@ -1,0 +1,11 @@
+schema 1
+dock {
+    outputs "all"
+    edge "bottom"
+    align "center"
+    tile-size 48
+    spacing 6
+    pin "registered:terminal" label="Terminal" icon="terminal"
+    pin "desktop:brave-origin.desktop" label="Browser" icon="browser"
+    pin "desktop:thunar.desktop" label="Files" icon="files"
+}
