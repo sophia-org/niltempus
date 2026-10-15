@@ -35,7 +35,15 @@ impl Fixture {
             },
         };
         // These fixtures are hashed only. None may be executed by validation.
-        for key in ["sophia", "peer", "wm", "preflight", "runner"] {
+        for key in [
+            "sophia",
+            "peer",
+            "wm",
+            "factotum",
+            "pam-helper",
+            "preflight",
+            "runner",
+        ] {
             this.put(key, b"must not execute", true);
         }
         this.put("core", b"schema 2\n", false);
@@ -112,13 +120,22 @@ fn both_wires_bind_exact_workload_without_executing_artifacts() {
     for wire in ["files", "ipc"] {
         let f = Fixture::new(wire, wire);
         let args = validate(&f.request).unwrap();
-        assert_eq!(args.len(), 11);
+        assert_eq!(args.len(), 13);
         assert_eq!(
             args[0],
             f.request.artifacts["sophia"].path.to_str().unwrap()
         );
         assert!(args.contains(&"--max-runtime-ms=60000".into()));
         assert!(args.contains(&"--input-seat=seat0".into()));
+        for (key, flag) in [
+            ("factotum", "factotum-agent"),
+            ("pam-helper", "factotum-pam-helper"),
+        ] {
+            assert!(args.contains(&format!(
+                "--{flag}={}",
+                f.request.artifacts[key].path.display()
+            )));
+        }
     }
 }
 
@@ -142,6 +159,16 @@ fn changed_files_and_workload_cannot_pass_a_prepared_identity() {
     assert!(validate(&f.request).is_err());
     f.request.runtime_ms = 60_000;
     f.request.input_seat = "seat0 --extra".into();
+    assert!(validate(&f.request).is_err());
+    f.request.input_seat = "seat0".into();
+    let helper = f.request.artifacts.remove("pam-helper").unwrap();
+    assert!(validate(&f.request).is_err());
+    f.request.artifacts.insert("pam-helper".into(), helper);
+    fs::set_permissions(
+        &f.request.artifacts["factotum"].path,
+        fs::Permissions::from_mode(0o600),
+    )
+    .unwrap();
     assert!(validate(&f.request).is_err());
 }
 

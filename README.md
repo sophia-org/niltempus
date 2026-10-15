@@ -132,7 +132,7 @@ starts no session. The request is a JSON object with these fields:
 | Field | Required value |
 | --- | --- |
 | `sophia_source`, `integration_source` | Objects with an absolute repository `path` and full signed `commit`; both checkouts must be clean. |
-| `artifacts` | Exactly `sophia`, `peer`, `wm`, `preflight`, `runner`, `core`, `profile`, `peer-config`; each has an absolute `path` and lowercase `sha256`. The first five must be executable. |
+| `artifacts` | Exactly `sophia`, `peer`, `wm`, `factotum`, `pam-helper`, `preflight`, `runner`, `core`, `profile`, `peer-config`; each has an absolute `path` and lowercase `sha256`. The first seven must be executable. The authenticator is required for both wires. |
 | `tty`, `display`, `input_seat` | Explicit console `/dev/tty1`–`/dev/tty63`, private display number 90–99, and seat name. |
 | `runtime_ms`, `frames` | 60,000–600,000 milliseconds and 1–10,000 offered frames. The peer reuses two resource IDs with fresh generations after retirement. |
 | `wire`, `output`, `mode_millihz` | `files` or `ipc`, positive output ID, and exactly 60,000 or 120,000 mHz. |

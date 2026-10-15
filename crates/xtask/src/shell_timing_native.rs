@@ -15,6 +15,8 @@ const KEYS: &[&str] = &[
     "sophia",
     "peer",
     "wm",
+    "factotum",
+    "pam-helper",
     "preflight",
     "runner",
     "core",
@@ -170,7 +172,7 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
         || KEYS.iter().any(|k| !request.artifacts.contains_key(*k))
     {
         return Err(
-            "expected sophia, peer, wm, preflight, runner, core, profile and peer-config artifacts"
+            "expected sophia, peer, wm, factotum, pam-helper, preflight, runner, core, profile and peer-config artifacts"
                 .into(),
         );
     }
@@ -206,7 +208,7 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
         }
         let executable = matches!(
             key.as_str(),
-            "sophia" | "peer" | "wm" | "preflight" | "runner"
+            "sophia" | "peer" | "wm" | "factotum" | "pam-helper" | "preflight" | "runner"
         );
         let metadata = fs::metadata(&artifact.path).map_err(|e| e.to_string())?;
         if !metadata.is_file() || (executable && metadata.permissions().mode() & 0o111 == 0) {
@@ -306,6 +308,14 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
             absolute(&request.artifacts["profile"].path)?
         ),
         format!("--wm-process={}", absolute(&request.artifacts["wm"].path)?),
+        format!(
+            "--factotum-agent={}",
+            absolute(&request.artifacts["factotum"].path)?
+        ),
+        format!(
+            "--factotum-pam-helper={}",
+            absolute(&request.artifacts["pam-helper"].path)?
+        ),
     ])
 }
 
