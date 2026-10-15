@@ -12,7 +12,7 @@ use crate::output_file_native::{self as proof, Bound, Layout, RunManifest, Stage
 use crate::{hex, read, sha256};
 
 #[path = "output_file_native_run/process.rs"]
-mod process;
+pub(crate) mod process;
 
 /// Validate the generic wrapper's recorded console restoration without devices.
 pub fn check_recovery(text: &str) -> Result<(), String> {

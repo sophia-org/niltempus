@@ -14,8 +14,14 @@ use rustix::process::{Pid, Signal, WaitId, WaitIdOptions, WaitIdStatus};
 const LOG_CAP: u64 = 64 << 20;
 
 pub(super) fn attended(tty: &str) -> Result<String, String> {
-    if std::env::var("SOPHIA_FRAME_FED_OUTPUT_ARM").as_deref() != Ok("1") {
-        return Err("physical execution requires SOPHIA_FRAME_FED_OUTPUT_ARM=1 and an authorized attended window".into());
+    attended_with(tty, "SOPHIA_FRAME_FED_OUTPUT_ARM")
+}
+
+pub(crate) fn attended_with(tty: &str, arm: &str) -> Result<String, String> {
+    if std::env::var(arm).as_deref() != Ok("1") {
+        return Err(format!(
+            "physical execution requires {arm}=1 and an authorized attended window"
+        ));
     }
     if !std::io::stdin().is_terminal()
         || fs::read_link("/proc/self/fd/0").map_err(|e| e.to_string())? != Path::new(tty)
@@ -116,18 +122,52 @@ pub(super) fn session(
     argv: &[String],
     stage: &Path,
 ) -> Result<(), String> {
-    let active = attended(&values["tty"])?;
-    let record = serde_json::json!({"schema":1,"planned_tty":values["tty"],"active_tty":format!("/dev/{active}"),"status":"matched"});
+    let wrapper = Path::new(&values["inputs"]).join("sophia-tree/tools/run_sophia_session.sh");
+    run_bound(
+        &BoundSession {
+            wrapper: &wrapper,
+            argv,
+            preflight: &values["preflight"],
+            tty: &values["tty"],
+            runtime: super::number(&values["runtime-ms"])?,
+            label: "output-file-native",
+            arm: "SOPHIA_FRAME_FED_OUTPUT_ARM",
+            environment: &[
+                ("SOPHIA_FRAME_FED_OUTPUT_ARM", "1"),
+                ("SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE", "1"),
+            ],
+        },
+        stage,
+    )
+}
+
+pub(crate) struct BoundSession<'a> {
+    pub wrapper: &'a Path,
+    pub argv: &'a [String],
+    pub preflight: &'a str,
+    pub tty: &'a str,
+    pub runtime: u64,
+    pub label: &'a str,
+    pub arm: &'a str,
+    pub environment: &'a [(&'a str, &'a str)],
+}
+
+pub(crate) fn run_bound(plan: &BoundSession<'_>, stage: &Path) -> Result<(), String> {
+    let active = attended_with(plan.tty, plan.arm)?;
+    let record = serde_json::json!({"schema":1,"planned_tty":plan.tty,"active_tty":format!("/dev/{active}"),"status":"matched"});
     new_log(&stage.join("foreground-console.json"))?
         .write_all(&serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
-    let wrapper = Path::new(&values["inputs"]).join("sophia-tree/tools/run_sophia_session.sh");
-    let runtime = super::number(&values["runtime-ms"])?;
+    let runtime = plan.runtime;
     let state = stage.join("state");
-    let logs = state.join("sophia/output-file-native-session");
+    let logs = state.join(format!("sophia/{}-session", plan.label));
     let log = new_log(&stage.join("wrapper.log"))?;
     let mut command = Command::new("/bin/bash");
-    command.arg(wrapper).arg("--").args(&argv[1..]).env_clear();
+    command
+        .arg(plan.wrapper)
+        .arg("--")
+        .args(&plan.argv[1..])
+        .env_clear();
     // Session runtime and home are explicit operator context. No inherited
     // display, bus address, LD_*, SOPHIA_* override or proof control survives.
     for name in ["HOME", "USER", "LOGNAME", "XDG_RUNTIME_DIR", "LANG"] {
@@ -144,21 +184,20 @@ pub(super) fn session(
         // lines and strips display identity from the physical proof transcript.
         // The explicit proof/runtime arguments prevent automatic daily capture.
         .env("XDG_STATE_HOME", &state)
-        .env("SOPHIA_BIN", &argv[0])
+        .env("SOPHIA_BIN", &plan.argv[0])
         .env("SOPHIA_BUILD_SESSION", "false")
         .env("SOPHIA_MANAGE_KEYD", "false")
         .env("SOPHIA_REQUIRE_LOCAL_VT", "true")
         .env("SOPHIA_REQUIRE_RUNTIME_DIR", "true")
-        .env("SOPHIA_SESSION_PREFLIGHT", &values["preflight"])
-        .env("SOPHIA_TTY_PROFILE", "output-file-native")
+        .env("SOPHIA_SESSION_PREFLIGHT", plan.preflight)
+        .env("SOPHIA_TTY_PROFILE", plan.label)
         .env("SOPHIA_SESSION_HANDOFF", "cycle_runner")
         .env("SOPHIA_INPUT_GUARD_ARMING", "automatic")
         .env(
             "SOPHIA_SESSION_WATCHDOG_SECONDS",
             (runtime / 1000 + 20).to_string(),
         )
-        .env("SOPHIA_FRAME_FED_OUTPUT_ARM", "1")
-        .env("SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE", "1")
+        .envs(plan.environment.iter().copied())
         .env(
             "SOPHIA_UNTRUSTED_SESSION_OUTPUT_LOG",
             logs.join("untrusted-session-output.log"),
@@ -171,8 +210,10 @@ pub(super) fn session(
             .spawn()
             .map_err(|e| format!("start recovery wrapper: {e}"))?,
         recovery: format!(
-            "From the recovery VT, inspect $XDG_RUNTIME_DIR/sophia-output-file-native-session-$UID/wrapper.pid and use {}/sophia-tree/tools/stop_sophia_session.sh output-file-native; retain {}.",
-            values["inputs"],
+            "From the recovery VT, inspect $XDG_RUNTIME_DIR/sophia-{}-session-$UID/wrapper.pid and use {}/stop_sophia_session.sh {}; retain {}.",
+            plan.label,
+            plan.wrapper.parent().unwrap().display(),
+            plan.label,
             stage.display()
         ),
     };

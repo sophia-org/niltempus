@@ -121,6 +121,48 @@ Its `joined_only` result proves sample provenance, not B9 acceptance, artifact
 identity or the completeness of the client recorder. The campaign must bind
 those inputs and compare the paired distributions separately.
 
+An attended native timing run has two separate commands:
+
+    cargo xtask shell-timing prepare-native REQUEST_JSON /ABS/NEW_PLAN.json
+    /ABS/PREPARED_XTASK shell-timing run-native /ABS/NEW_PLAN.json PLAN_SHA256 /ABS/NEW_RUN
+
+Preparation reads files and signed source identities; it opens no devices and
+starts no session. The request is a JSON object with these fields:
+
+| Field | Required value |
+| --- | --- |
+| `sophia_source`, `integration_source` | Objects with an absolute repository `path` and full signed `commit`; both checkouts must be clean. |
+| `artifacts` | Exactly `sophia`, `peer`, `wm`, `preflight`, `runner`, `core`, `profile`, `peer-config`; each has an absolute `path` and lowercase `sha256`. The first five must be executable. |
+| `tty`, `display`, `input_seat` | Explicit console `/dev/tty1`–`/dev/tty63`, private display number 90–99, and seat name. |
+| `runtime_ms`, `frames` | 60,000–600,000 milliseconds and 1–10,000 offered frames, within the peer's resource budget. |
+| `wire`, `output`, `mode_millihz` | `files` or `ipc`, positive output ID, and exactly 60,000 or 120,000 mHz. |
+
+The flattened desktop profile must select exactly one bar component with the
+prepared peer/config paths, denied GPU access, an explicit transport and empty
+startup. Use `9p2000.L` for files or `comparison-ipc` in the isolated comparator.
+Core and profile includes are refused. The peer JSON must match the declared
+wire, output and frame count, with `height` 1–128 and `hold_msec` equal to the
+full session runtime so it cannot restart after finishing the workload.
+Validate the full profile with the prepared Sophia configuration checker too;
+this runner checks workload bindings, not every desktop setting.
+
+After authorization, execution requires `SOPHIA_SHELL_TIMING_ARM=1` on the
+prepared console while that console is in the foreground. It checks all hashes
+and signed source revisions again and requires the exact prepared runner.
+The shared session wrapper owns the input guard, watchdog and console recovery;
+the runner keeps its logs, bounds output, and verifies normal recovery. It then
+preserves every client JSON record, extracts native witnesses, validates the
+journal and writes `native-samples.json` only if every offer joins successfully.
+No binaries are copied into evidence. `result.json` records wrapper capture and
+recovery; `native-samples.json` reports `joined_only`, never B9 acceptance.
+
+The source commits and executable digests are separate assertions: preparation
+does not prove how an executable was built. Retain build commands and source
+evidence. The expected refresh rate is checked against native completion
+bindings; it does not change the monitor mode. The campaign still needs a
+reviewed hardware/output selection, accounting instrumentation and frozen
+sample, warmup, load and comparison rules.
+
 ## Provisioning
 
     sh tools/provision.sh --cargo-home ABSOLUTE-DIR [--source ABSOLUTE-SOPHIA-REPO] \

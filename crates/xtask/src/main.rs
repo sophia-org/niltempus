@@ -20,6 +20,8 @@ const USAGE: &str = "usage:
   xtask dock profile LOM LOM_CONFIG BEMENU PROVLITA DOCK_CONFIG
   xtask dock verify HOST_LOG
   xtask shell-timing collect CLIENT_NDJSON EXPECTED_OFFERS
+  xtask shell-timing prepare-native REQUEST_JSON NEW_PLAN
+  xtask shell-timing run-native PLAN_JSON PLAN_SHA256 NEW_RUN_DIR
   xtask shell-timing join HOST_LOG CLIENT_JSON MODE_MILLIHZ EXPECTED_OFFERS
   xtask panel --probe --renderer=software --quickshell=/ABS --wm=/ABS --sophia=/ABS [--display=:N] [--output=/ABS/NEW]
   xtask panel [--renderer=gpu|software] [--quickshell=/ABS] [--output=/ABS/NEW]   (operator-only: attaches to the current session)
@@ -56,6 +58,12 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
         return xtask::nix_assembly::run(&arguments[1..]);
     }
     if arguments.first().map(String::as_str) == Some("shell-timing") {
+        if matches!(
+            arguments.get(1).map(String::as_str),
+            Some("prepare-native" | "run-native")
+        ) {
+            return xtask::shell_timing_native::run(&arguments[1..]);
+        }
         return xtask::shell_timing::run(&arguments[1..]);
     }
     // Product builders take explicit signed sources and private build inputs,
