@@ -182,3 +182,50 @@ October 15 evidence directory. This proves real GPU raster/upload and resource
 custody across replacement. Geometry and catalog decisions are supplied, admission
 uses supervisor evidence, and no Presented event is issued. It does not prove
 native frame retirement, physical input, three-client coexistence or B9 bounds.
+
+## Three-client progress under dock backpressure
+
+`crates/live-tests/tests/shell_trio.rs` launches the candidate's actual Lom,
+Bemenu and Provlita executables in separate protected domains. All three use
+one 64 MiB content registry with Session's three-role capacity, nominal role
+envelopes and public reconnect-limit selector. The first fixture attempt used
+the registry's two-role default and correctly refused the third admission;
+the test now selects the same explicit three-role capacity as Session.
+
+On October 15, all three clients uploaded content. The test then sent SIGSTOP
+to the dock and verified its stopped state through `/proc`. Catalog publication
+reached bounded backpressure after 192 accepted updates. While the dock could
+not read, Lom supplied another frame and Bemenu responded to a supplied text
+edit with a new candidate. Revoking and replacing the dock left both neighbors'
+grants unchanged; they supplied further frames while the replacement uploaded
+with the old dock's pixels still held. Releasing those pixels reclaimed the old
+epoch, and final teardown left all accounting quiescent.
+
+The exact package is `niltempus-ad35e88b86b247648c71` above. Lom uses its
+`examples/minimal/live-shell.kdl` (SHA-256
+`a0c88fc211df32888b8ec19df06dd839f925adcbdb5e0fc7a73b71a22db754fa`);
+Provlita uses this repository's `profiles/provlita.kdl` (SHA-256
+`0f52a212b6a68254467600d7eafcd5ae6886c127aa7154b5954df3aff71b1369`).
+Lom and Bemenu retain the exact binary hashes recorded in the authenticated-pair
+evidence; the dock hash is recorded above. The sole exposed render node is the
+same development GPU, PCI `0000:16:00.0`.
+
+To run, set `SOPHIA_TRIO_GPU_ARM=1`, `SOPHIA_TRIO_RENDER_NODE`,
+`SOPHIA_TRIO_PCI_BUS_ID`, and `SOPHIA_TRIO_{LOM,BEMENU,PROVLITA}_BINARY` with each
+matching `_BINARY_SHA256`. Lom and Provlita also require `_CONFIG` and
+`_CONFIG_SHA256` under their respective prefixes. Use the render-node wrapper
+above and select `--test shell_trio -- --ignored --nocapture`. Paths are explicit
+and hashes are checked before and after the run. Ordinary tests leave this gate
+ignored; unarmed and wrong-device invocations fail before launch.
+
+Evidence in the existing October 15 directory: `trio-backpressure.log`,
+`trio-wrong-device.log`, `trio-unarmed.log`, `trio-ordinary.log` and
+`trio-clippy.log`. The ordinary invocation verifies exclusion, not a hardware
+pass. Strict Clippy and formatting pass. The failed initial admission is retained
+as `trio-run1.log`; `trio-run2.log` is the earlier pass without forced saturation.
+
+This is actual-client content and slow-reader isolation evidence with supplied
+admission, geometry, completion and launcher input. Logs saying `presented`
+reflect those supplied receipts, not a physical display. Post-revocation client
+connection errors are expected during teardown. Native lifetime, exact physical
+input/reservations, the separate baseline, B9 and attended acceptance remain.
