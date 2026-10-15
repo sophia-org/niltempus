@@ -52,6 +52,87 @@ fn offers() -> Vec<Offer> {
         .collect()
 }
 
+fn journal() -> String {
+    let mut rows = vec![serde_json::json!({"schema":2,"event":"start","frames":2,"wire":"files"})];
+    for (index, (begin, accepted, submitted, terminal)) in
+        [(27, 28, 35, 50), (60, 61, 62, 64)].into_iter().enumerate()
+    {
+        let generation = index + 1;
+        rows.extend([
+            serde_json::json!({"schema":2,"event":"upload_offer","upload":{"connection_epoch":1,"content_grant_epoch":2,"output":3,"candidate_generation":generation,"resource_id":generation,"resource_generation":1,"width":1920,"height":24,"total_bytes":184320,"begin_usec":begin}}),
+            serde_json::json!({"schema":2,"event":"upload_accepted","resource_id":generation,"resource_generation":1,"accepted_usec":accepted}),
+            serde_json::json!({"schema":2,"event":"permit","generation":generation,"demand_usec":accepted,"received_usec":accepted}),
+            serde_json::json!({"schema":2,"event":"offer","connection_epoch":1,"content_grant_epoch":2,"output":3,"candidate_generation":generation,"submitted_monotonic_usec":submitted}),
+            serde_json::json!({"schema":2,"event":"terminal","connection_epoch":1,"content_grant_epoch":2,"output":3,"candidate_generation":generation,"outcome":"presented","kind":2,"reason":0,"observed_monotonic_usec":terminal}),
+        ]);
+    }
+    rows.push(serde_json::json!({"schema":2,"event":"end","offered":2,"completed":2}));
+    rows.iter().map(|r| r.to_string() + "\n").collect()
+}
+
+#[test]
+fn complete_upload_bytes_normalize_whole_workload_with_outward_rounding() {
+    use xtask::shell_timing_cost::measure_journal;
+    let report = measure_journal(&host(), &peer(), &journal(), 2).unwrap();
+    let normalized = report.normalized.unwrap();
+    assert_eq!(normalized.uploaded_bytes, 368640);
+    assert_eq!(normalized.presentation_bytes, 368640);
+    assert_eq!(normalized.transfer_probe_bytes, 0);
+    assert_eq!(normalized.frame_count, 2);
+    assert_eq!(
+        (
+            normalized.allocation_operations_per_frame.lower,
+            normalized.allocation_operations_per_frame.upper
+        ),
+        (22, 33)
+    );
+    assert_eq!(
+        (
+            normalized.cpu_ns_per_uploaded_mib.lower,
+            normalized.cpu_ns_per_uploaded_mib.upper
+        ),
+        (12800, 18489)
+    );
+    assert!(report.cpu_scope.contains("including_foreign_code"));
+    assert!(
+        report
+            .allocation_scope
+            .contains("excluding_foreign_allocators")
+    );
+    // A valid journal is insufficient if its upload started before the counter window.
+    assert!(
+        measure_journal(
+            &host(),
+            &peer(),
+            &journal().replace("\"begin_usec\":27", "\"begin_usec\":24"),
+            2
+        )
+        .is_err()
+    );
+    assert!(
+        measure_journal(
+            &host(),
+            &peer(),
+            &journal().replace("\"total_bytes\":184320", "\"total_bytes\":184321"),
+            2
+        )
+        .is_err()
+    );
+    assert!(measure_journal(&host(), &peer(), &journal(), 1).is_err());
+    assert!(
+        measure_journal(
+            &host(),
+            &peer(),
+            &journal().replace(
+                "\"observed_monotonic_usec\":64",
+                "\"observed_monotonic_usec\":67"
+            ),
+            2
+        )
+        .is_err()
+    );
+}
+
 #[test]
 fn outer_and_inner_samples_produce_conservative_bounds_not_interpolated_counts() {
     let report = measure(&host(), &peer(), &offers()).unwrap();

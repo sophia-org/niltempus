@@ -39,6 +39,7 @@ pub struct Journal {
     pub offers: Vec<Offer>,
     pub uploads: Vec<AcceptedUpload>,
     pub permits: Vec<PermitTiming>,
+    pub terminal_usec: Vec<u64>,
 }
 
 #[derive(Deserialize)]
@@ -139,6 +140,7 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
     let mut offers = Vec::with_capacity(expected);
     let mut uploads = Vec::new();
     let mut permits = Vec::with_capacity(expected);
+    let mut terminal_usec = Vec::with_capacity(expected);
     let mut last = 0;
     let mut identity = None;
     for generation in 1..=expected as u64 {
@@ -311,6 +313,7 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
             _ => return Err("missing, misattributed or non-presented terminal".into()),
         }
         offers.push(offer);
+        terminal_usec.push(last);
     }
     match event(lines.next().ok_or("missing end")?, schema)? {
         Event::End { offered, completed } if offered == expected && completed == expected => {}
@@ -325,5 +328,6 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
         offers,
         uploads,
         permits,
+        terminal_usec,
     })
 }

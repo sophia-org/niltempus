@@ -40,8 +40,106 @@ pub struct Frame {
 #[derive(Debug, Serialize)]
 pub struct Report {
     pub scope: &'static str,
+    pub cpu_scope: &'static str,
+    pub allocation_scope: &'static str,
     pub frames: Vec<Frame>,
     pub whole_workload: Cost,
+    pub normalized: Option<Normalized>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Normalized {
+    pub frame_count: u64,
+    pub uploaded_bytes: u64,
+    pub presentation_bytes: u64,
+    pub transfer_probe_bytes: u64,
+    pub cpu_ns_per_uploaded_mib: Bounds,
+    pub allocation_operations_per_frame: Bounds,
+}
+
+// Round outward, so normalization cannot turn an inconclusive bound into a pass.
+fn normalized(bounds: &Bounds, multiplier: u64, denominator: u64) -> Result<Bounds, String> {
+    if denominator == 0 {
+        return Err("zero normalization denominator".into());
+    }
+    let scale = |value: u64, ceil: bool| -> Result<u64, String> {
+        let numerator = u128::from(value) * u128::from(multiplier);
+        let divisor = u128::from(denominator);
+        u64::try_from(if ceil {
+            numerator.div_ceil(divisor)
+        } else {
+            numerator / divisor
+        })
+        .map_err(|_| "normalized count overflow".into())
+    };
+    Ok(Bounds {
+        lower: scale(bounds.lower, false)?,
+        upper: scale(bounds.upper, true)?,
+    })
+}
+
+/// Byte normalization requires complete upload evidence, not inferred image sizes.
+pub fn measure_journal(
+    host_log: &str,
+    peer_log: &str,
+    journal: &str,
+    expected: usize,
+) -> Result<Report, String> {
+    let metrics = crate::shell_timing::collect_metrics(journal, expected)?;
+    if metrics.schema != 2 {
+        return Err("byte-normalized costs require schema 2 upload evidence".into());
+    }
+    let mut report = measure(host_log, peer_log, &metrics.offers)?;
+    let peer = counters(peer_log, "peer")?;
+    let mut presentation_bytes = 0u64;
+    let mut transfer_probe_bytes = 0u64;
+    for (index, permit) in metrics.permits.iter().enumerate() {
+        if permit.demand_usec < peer[index * 2].after
+            || metrics.terminal_usec[index] > peer[index * 2 + 1].before
+        {
+            return Err("permit or terminal lies outside its frame counter interval".into());
+        }
+    }
+    for accepted in &metrics.uploads {
+        let upload = &accepted.upload;
+        let index = (upload.candidate_generation - 1) as usize;
+        let start = &peer[index * 2];
+        let end = &peer[index * 2 + 1];
+        if upload.begin_usec < start.after
+            || accepted.accepted_usec > end.before
+            || accepted.released_usec.is_some_and(|time| time > end.before)
+        {
+            return Err("upload lies outside its frame counter interval".into());
+        }
+        let total = if accepted.purpose == "transfer_probe" {
+            &mut transfer_probe_bytes
+        } else {
+            &mut presentation_bytes
+        };
+        *total = total
+            .checked_add(upload.total_bytes)
+            .ok_or("uploaded byte count overflow")?;
+    }
+    let uploaded_bytes = presentation_bytes
+        .checked_add(transfer_probe_bytes)
+        .ok_or("uploaded byte count overflow")?;
+    report.normalized = Some(Normalized {
+        frame_count: expected as u64,
+        uploaded_bytes,
+        presentation_bytes,
+        transfer_probe_bytes,
+        cpu_ns_per_uploaded_mib: normalized(
+            &report.whole_workload.process_cpu_ns,
+            1048576,
+            uploaded_bytes,
+        )?,
+        allocation_operations_per_frame: normalized(
+            &report.whole_workload.allocation_operations,
+            1,
+            expected as u64,
+        )?,
+    });
+    Ok(report)
 }
 
 pub fn for_mode(mode: &str, capture: &str, offers: &[Offer]) -> Result<Option<Report>, String> {
@@ -227,7 +325,10 @@ pub fn measure(host_log: &str, peer_log: &str, offers: &[Offer]) -> Result<Repor
     let whole_workload = cost(&host, &peer[0], peer.last().unwrap())?;
     Ok(Report {
         scope: "session_and_peer_rust_global_allocator",
+        cpu_scope: "all_threads_in_session_and_peer_processes_including_foreign_code_excluding_other_processes",
+        allocation_scope: "session_and_peer_rust_global_allocations_and_reallocations_excluding_foreign_allocators",
         frames,
         whole_workload,
+        normalized: None,
     })
 }

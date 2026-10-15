@@ -99,6 +99,7 @@ The read-only timing join is available separately:
 
     cargo xtask shell-timing collect CLIENT_NDJSON EXPECTED_OFFERS > CLIENT_JSON
     cargo xtask shell-timing metrics CLIENT_NDJSON EXPECTED_OFFERS
+    cargo xtask shell-timing cost-metrics HOST_COUNTERS PEER_COUNTERS CLIENT_NDJSON EXPECTED_OFFERS
     cargo xtask shell-timing join HOST_LOG CLIENT_JSON MODE_MILLIHZ EXPECTED_OFFERS
 
 `collect` reads the generic comparison peer's complete, paced journal. It
@@ -131,6 +132,18 @@ The prepared configuration hash binds this choice, and capture rejects a
 different declared probe size. Run latency-only bar measurements with the probe
 disabled. A probe-enabled process counter interval includes both uploads and
 their preparation and retirement; it is not a pure transfer CPU measurement.
+
+`cost-metrics` requires a complete schema 2 journal and both counter streams.
+Every upload, permit and terminal must lie inside its frame's counter interval.
+The report divides whole-workload CPU by exact uploaded bytes (one MiB is
+1,048,576 bytes), and allocation operations by the exact frame count. It keeps
+probe bytes separate from presentation bytes and rounds bounds outward.
+Native instrumented reports use the same calculation. Old offer-only `costs`
+reports remain unnormalized; they cannot establish a bytes denominator.
+CPU covers all threads in Session and the peer, including foreign code.
+Allocations cover their Rust global allocators, counting alloc and realloc.
+Both exclude other processes; allocation counts also exclude foreign allocators.
+These explicit limits do not approve this scope as the full B9 acceptance method.
 
 `HOST_LOG` contains captured `sophia_shell_native_binding` and
 `sophia_shell_native_completion` records. `CLIENT_JSON` is an array of every

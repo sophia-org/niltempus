@@ -304,6 +304,19 @@ fn bounded(path: &str) -> Result<String, String> {
 }
 
 pub fn run(args: &[String]) -> Result<Vec<String>, String> {
+    if let [command, host, peer, journal, expected] = args
+        && command == "cost-metrics"
+    {
+        let report = crate::shell_timing_cost::measure_journal(
+            &bounded(host)?,
+            &bounded(peer)?,
+            &bounded(journal)?,
+            expected.parse().map_err(|_| "invalid count")?,
+        )?;
+        return Ok(vec![
+            serde_json::to_string(&report).map_err(|e| e.to_string())?,
+        ]);
+    }
     if let [command, host, peer, client] = args
         && command == "costs"
     {

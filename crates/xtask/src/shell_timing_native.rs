@@ -488,11 +488,17 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
                 plan.request.mode_millihz,
                 plan.request.frames,
             )?;
-            let costs = crate::shell_timing_cost::for_mode(
-                &plan.request.instrumentation,
-                std::str::from_utf8(&capture).map_err(|e| e.to_string())?,
-                offers,
-            )?;
+            let counters = std::str::from_utf8(&capture).map_err(|e| e.to_string())?;
+            let costs = if plan.request.instrumentation == "rust-global" {
+                Some(crate::shell_timing_cost::measure_journal(
+                    counters,
+                    counters,
+                    &client,
+                    plan.request.frames,
+                )?)
+            } else {
+                crate::shell_timing_cost::for_mode(&plan.request.instrumentation, counters, offers)?
+            };
             let report = serde_json::json!({"schema":2,"verdict":"joined_only","instrumentation":plan.request.instrumentation,"offered":offers.len(),"samples":samples,"costs":costs,"journal":metrics});
             write(
                 &stage.join("native-samples.json"),

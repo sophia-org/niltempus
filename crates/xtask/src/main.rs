@@ -21,6 +21,7 @@ const USAGE: &str = "usage:
   xtask dock verify HOST_LOG
   xtask shell-timing collect CLIENT_NDJSON EXPECTED_OFFERS
   xtask shell-timing metrics CLIENT_NDJSON EXPECTED_OFFERS
+  xtask shell-timing cost-metrics HOST_COUNTERS PEER_COUNTERS CLIENT_NDJSON EXPECTED_OFFERS
   xtask shell-timing costs HOST_COUNTERS PEER_COUNTERS CLIENT_JSON
   xtask shell-timing prepare-native REQUEST_JSON NEW_PLAN
   xtask shell-timing run-native PLAN_JSON PLAN_SHA256 NEW_RUN_DIR
