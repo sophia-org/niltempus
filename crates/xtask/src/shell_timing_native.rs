@@ -193,7 +193,7 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
         || !matches!(request.wire.as_str(), "files" | "ipc")
         || !matches!(
             request.instrumentation.as_str(),
-            "none" | "rust-global" | "cpu-only" | "profile"
+            "none" | "rust-global" | "cpu-only" | "profile" | "progress"
         )
         || (request.instrumentation != "none" && request.runtime_ms > 60_000)
         || request.input_seat.is_empty()
@@ -494,7 +494,17 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
                 plan.request.frames,
             )?;
             let counters = std::str::from_utf8(&capture).map_err(|e| e.to_string())?;
-            let costs = if plan.request.instrumentation != "none" {
+            let progress = if plan.request.instrumentation == "progress" {
+                Some(crate::shell_progress::collect(counters)?)
+            } else {
+                if counters.contains("sophia_comparator_progress ") {
+                    return Err("progress diagnostics cannot supply cost or latency arms".into());
+                }
+                None
+            };
+            let costs = if plan.request.instrumentation == "progress" {
+                None
+            } else if plan.request.instrumentation != "none" {
                 let report = crate::shell_timing_cost::measure_journal(
                     counters,
                     counters,
@@ -508,7 +518,7 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
             } else {
                 crate::shell_timing_cost::for_mode(&plan.request.instrumentation, counters, offers)?
             };
-            let report = serde_json::json!({"schema":2,"verdict":"joined_only","instrumentation":plan.request.instrumentation,"offered":offers.len(),"samples":samples,"costs":costs,"journal":metrics});
+            let report = serde_json::json!({"schema":2,"verdict":"joined_only","instrumentation":plan.request.instrumentation,"offered":offers.len(),"samples":samples,"costs":costs,"journal":metrics,"progress":progress});
             write(
                 &stage.join("native-samples.json"),
                 &serde_json::to_vec_pretty(&report).map_err(|e| e.to_string())?,

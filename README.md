@@ -174,6 +174,18 @@ starts no session. The request is a JSON object with these fields:
 | `wire`, `output`, `mode_millihz` | `files` or `ipc`, positive output ID, and exactly 60,000 or 120,000 mHz. |
 | `instrumentation` | `none` for latency; `rust-global` for `comparator-allocation-counting`; `cpu-only` for `comparator-cpu-counting`; `profile` for `comparator-profiling`. Instrumented runs are limited to 60,000 ms. Build both binaries in the same mode; Sophia also requires `native-session`. |
 
+The `progress` diagnostic uses `comparator-progress` on Sophia and its peer.
+It records bounded numeric totals for owner/component passes, core server
+turns/flushes, readiness handoff/fallback, core bytes and replies, pending-read
+attempts, and peer content polls/waits. Core totals include all 9P servers in
+the process; replies include errors and are not presentation completions.
+Snapshots are independently timestamped, not atomic across counters. Use the
+validated journal for offered frames and outcomes. Reports retain progress
+samples with `costs: null`; cost/latency arms reject progress records. This mode
+cannot be combined with CPU, allocation or phase profiling features and does
+not establish a performance verdict. Native progress arms retain the same
+60-second bound and attended-console checks.
+
 CPU-only builds use the ordinary allocator. Their reports mark allocation
 results as `null`, not zero. Profiling builds add bounded phase observations;
 they cannot supply a cost or latency acceptance arm. Phase CPU belongs to the

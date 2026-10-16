@@ -129,7 +129,7 @@ fn capture_accepts_profile_volume_but_keeps_record_bounds() {
 
 #[test]
 fn instrumentation_modes_are_explicit_and_bounded() {
-    for mode in ["rust-global", "cpu-only", "profile"] {
+    for mode in ["rust-global", "cpu-only", "profile", "progress"] {
         let mut f = Fixture::new(mode, "files");
         f.request.instrumentation = mode.into();
         assert!(validate(&f.request).is_ok());
