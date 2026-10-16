@@ -362,7 +362,9 @@ pub fn split_capture(text: &str) -> Result<(String, String), String> {
     let mut client = String::new();
     let mut host = String::new();
     for (index, line) in text.lines().enumerate() {
-        if index >= 100_000 || line.len() > 65536 {
+        // Profiling emits five phase rows beside every counter sample. Keep
+        // room for the bounded sampler and client journal within the 64 MiB cap.
+        if index >= 500_000 || line.len() > 65536 {
             return Err("capture record bound exceeded".into());
         }
         let line = line.trim_start();

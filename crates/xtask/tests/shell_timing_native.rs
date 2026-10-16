@@ -116,6 +116,18 @@ fn capture_preserves_failed_client_records_and_refuses_interleaved_or_partial_wr
 }
 
 #[test]
+fn capture_accepts_profile_volume_but_keeps_record_bounds() {
+    let evidence = "{\"schema\":1,\"event\":\"failed\",\"error\":\"timeout\"}\nsophia_shell_native_completion schema=1\n";
+    let profile = "sophia_comparator_profile schema=1 phase=owner\n";
+    let capture = format!("{}{evidence}", profile.repeat(180_000));
+    let (client, host) = split_capture(&capture).unwrap();
+    assert_eq!(client.lines().count(), 1);
+    assert_eq!(host, "sophia_shell_native_completion schema=1\n");
+    assert!(split_capture(&format!("{}{evidence}", profile.repeat(500_000))).is_err());
+    assert!(split_capture(&format!("{}\n{evidence}", "x".repeat(65537))).is_err());
+}
+
+#[test]
 fn instrumentation_modes_are_explicit_and_bounded() {
     for mode in ["rust-global", "cpu-only", "profile"] {
         let mut f = Fixture::new(mode, "files");
