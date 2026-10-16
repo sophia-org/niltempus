@@ -5,6 +5,8 @@ use std::collections::BTreeMap;
 
 #[derive(Debug)]
 struct Counter {
+    cpu_only: bool,
+    profiling: bool,
     pid: u64,
     stage: String,
     sequence: u64,
@@ -25,7 +27,7 @@ pub struct Bounds {
 
 #[derive(Debug, Serialize)]
 pub struct Cost {
-    pub allocation_operations: Bounds,
+    pub allocation_operations: Option<Bounds>,
     pub process_cpu_ns: Bounds,
     pub outer_start_usec: u64,
     pub outer_end_usec: u64,
@@ -39,6 +41,7 @@ pub struct Frame {
 
 #[derive(Debug, Serialize)]
 pub struct Report {
+    pub instrumentation: &'static str,
     pub scope: &'static str,
     pub cpu_scope: &'static str,
     pub allocation_scope: &'static str,
@@ -54,7 +57,7 @@ pub struct Normalized {
     pub presentation_bytes: u64,
     pub transfer_probe_bytes: u64,
     pub cpu_ns_per_uploaded_mib: Bounds,
-    pub allocation_operations_per_frame: Bounds,
+    pub allocation_operations_per_frame: Option<Bounds>,
 }
 
 // Round outward, so normalization cannot turn an inconclusive bound into a pass.
@@ -133,18 +136,25 @@ pub fn measure_journal(
             1048576,
             uploaded_bytes,
         )?,
-        allocation_operations_per_frame: normalized(
-            &report.whole_workload.allocation_operations,
-            1,
-            expected as u64,
-        )?,
+        allocation_operations_per_frame: report
+            .whole_workload
+            .allocation_operations
+            .as_ref()
+            .map(|bounds| normalized(bounds, 1, expected as u64))
+            .transpose()?,
     });
     Ok(report)
 }
 
 pub fn for_mode(mode: &str, capture: &str, offers: &[Offer]) -> Result<Option<Report>, String> {
     match mode {
-        "rust-global" => measure(capture, capture, offers).map(Some),
+        "rust-global" | "cpu-only" | "profile" => {
+            let report = measure(capture, capture, offers)?;
+            if report.instrumentation != mode {
+                return Err("counter mode differs from prepared instrumentation".into());
+            }
+            Ok(Some(report))
+        }
         "none" if !capture.contains("sophia_comparator_counters ") => Ok(None),
         "none" => Err("instrumented capture cannot supply an uninstrumented timing run".into()),
         _ => Err("unknown instrumentation mode".into()),
@@ -177,12 +187,15 @@ fn counters(log: &str, process: &str) -> Result<Vec<Counter>, String> {
         let mut f = BTreeMap::new();
         for word in line[at..].split_whitespace().skip(1) {
             let (key, value) = word.split_once('=').ok_or("malformed counter record")?;
-            if !required.contains(&key) || f.insert(key, value).is_some() {
+            if (!required.contains(&key) && key != "mode") || f.insert(key, value).is_some() {
                 return Err("unknown or repeated counter field".into());
             }
         }
-        if f.len() != required.len()
-            || f["schema"] != "1"
+        let cpu_only = f.get("schema") == Some(&"2") && f.get("mode") == Some(&"cpu-only");
+        let profiling = f.get("schema") == Some(&"2") && f.get("mode") == Some(&"profile");
+        if !required.iter().all(|key| f.contains_key(key))
+            || f.len() != required.len() + usize::from(cpu_only || profiling)
+            || (!cpu_only && !profiling && f.get("schema") != Some(&"1"))
             || !matches!(f["process"], "session" | "peer")
         {
             return Err("invalid counter schema or process".into());
@@ -198,6 +211,8 @@ fn counters(log: &str, process: &str) -> Result<Vec<Counter>, String> {
             text.parse().map_err(|_| format!("overflowing {key}"))
         };
         let row = Counter {
+            cpu_only,
+            profiling,
             pid: n("pid")?,
             stage: f["stage"].into(),
             sequence: n("sequence")?,
@@ -209,11 +224,21 @@ fn counters(log: &str, process: &str) -> Result<Vec<Counter>, String> {
             deallocations: n("deallocations")?,
             bytes: n("bytes_allocated")?,
         };
+        if cpu_only
+            && (row.allocations != 0
+                || row.reallocations != 0
+                || row.deallocations != 0
+                || row.bytes != 0)
+        {
+            return Err("CPU-only record cannot claim allocation counts".into());
+        }
         if row.pid == 0 || row.before == 0 || row.after < row.before {
             return Err("invalid counter identity or clock bounds".into());
         }
         if let Some(old) = result.last()
-            && (old.pid != row.pid
+            && (old.cpu_only != row.cpu_only
+                || old.profiling != row.profiling
+                || old.pid != row.pid
                 || old.after > row.before
                 || old.cpu > row.cpu
                 || old.allocations > row.allocations
@@ -269,7 +294,11 @@ fn cost(host: &[Counter], start: &Counter, end: &Counter) -> Result<Cost, String
         })
     };
     Ok(Cost {
-        allocation_operations: range(allocation_operations)?,
+        allocation_operations: if start.cpu_only {
+            None
+        } else {
+            Some(range(allocation_operations)?)
+        },
         process_cpu_ns: range(|c| Ok(c.cpu))?,
         outer_start_usec: host[outer_start].before,
         outer_end_usec: host[outer_end].after,
@@ -301,6 +330,9 @@ pub fn measure(host_log: &str, peer_log: &str, offers: &[Offer]) -> Result<Repor
     if peer[0].pid == host[0].pid {
         return Err("peer and Session must be distinct processes".into());
     }
+    if peer[0].cpu_only != host[0].cpu_only || peer[0].profiling != host[0].profiling {
+        return Err("Session and peer use different counter modes".into());
+    }
     let mut frames = Vec::with_capacity(offers.len());
     for (index, offer) in offers.iter().enumerate() {
         let start = &peer[index * 2];
@@ -324,9 +356,24 @@ pub fn measure(host_log: &str, peer_log: &str, offers: &[Offer]) -> Result<Repor
     }
     let whole_workload = cost(&host, &peer[0], peer.last().unwrap())?;
     Ok(Report {
-        scope: "session_and_peer_rust_global_allocator",
+        instrumentation: if host[0].cpu_only {
+            "cpu-only"
+        } else if host[0].profiling {
+            "profile"
+        } else {
+            "rust-global"
+        },
+        scope: if host[0].cpu_only {
+            "session_and_peer_process_cpu"
+        } else {
+            "session_and_peer_rust_global_allocator"
+        },
         cpu_scope: "all_threads_in_session_and_peer_processes_including_foreign_code_excluding_other_processes",
-        allocation_scope: "session_and_peer_rust_global_allocations_and_reallocations_excluding_foreign_allocators",
+        allocation_scope: if host[0].cpu_only {
+            "not_measured"
+        } else {
+            "session_and_peer_rust_global_allocations_and_reallocations_excluding_foreign_allocators"
+        },
         frames,
         whole_workload,
         normalized: None,

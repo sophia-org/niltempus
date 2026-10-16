@@ -191,8 +191,11 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
         || !matches!(request.mode_millihz, 60_000 | 120_000)
         || request.output == 0
         || !matches!(request.wire.as_str(), "files" | "ipc")
-        || !matches!(request.instrumentation.as_str(), "none" | "rust-global")
-        || (request.instrumentation == "rust-global" && request.runtime_ms > 60_000)
+        || !matches!(
+            request.instrumentation.as_str(),
+            "none" | "rust-global" | "cpu-only" | "profile"
+        )
+        || (request.instrumentation != "none" && request.runtime_ms > 60_000)
         || request.input_seat.is_empty()
         || request.input_seat.len() > 64
         || !request
@@ -489,13 +492,17 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
                 plan.request.frames,
             )?;
             let counters = std::str::from_utf8(&capture).map_err(|e| e.to_string())?;
-            let costs = if plan.request.instrumentation == "rust-global" {
-                Some(crate::shell_timing_cost::measure_journal(
+            let costs = if plan.request.instrumentation != "none" {
+                let report = crate::shell_timing_cost::measure_journal(
                     counters,
                     counters,
                     &client,
                     plan.request.frames,
-                )?)
+                )?;
+                if report.instrumentation != plan.request.instrumentation {
+                    return Err("counter mode differs from prepared instrumentation".into());
+                }
+                Some(report)
             } else {
                 crate::shell_timing_cost::for_mode(&plan.request.instrumentation, counters, offers)?
             };

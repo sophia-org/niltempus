@@ -172,7 +172,15 @@ starts no session. The request is a JSON object with these fields:
 | `tty`, `display`, `input_seat` | Explicit console `/dev/tty1`–`/dev/tty63`, private display number 90–99, and seat name. |
 | `runtime_ms`, `frames` | 60,000–600,000 milliseconds and 1–10,000 offered frames. The peer reuses two resource IDs with fresh generations after retirement. |
 | `wire`, `output`, `mode_millihz` | `files` or `ipc`, positive output ID, and exactly 60,000 or 120,000 mHz. |
-| `instrumentation` | `none` for latency, or `rust-global` with a 60,000 ms run and both binaries built with the isolated `comparator-allocation-counting` feature. Sophia also requires `native-session`. |
+| `instrumentation` | `none` for latency; `rust-global` for `comparator-allocation-counting`; `cpu-only` for `comparator-cpu-counting`; `profile` for `comparator-profiling`. Instrumented runs are limited to 60,000 ms. Build both binaries in the same mode; Sophia also requires `native-session`. |
+
+CPU-only builds use the ordinary allocator. Their reports mark allocation
+results as `null`, not zero. Profiling builds add bounded phase observations;
+they cannot supply a cost or latency acceptance arm. Phase CPU belongs to the
+calling thread, but allocation deltas include the whole process while each
+scope is open. Scopes overlap and their totals must not be added. Match their
+monotonic sample bounds to the workload interval before comparing service counts.
+Neither mode subtracts estimated instrumentation overhead from a result.
 
 The PAM helper and every ancestor of its canonical path must be root-owned
 and not writable by group or others, matching Factotum's startup check. An

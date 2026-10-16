@@ -116,6 +116,20 @@ fn capture_preserves_failed_client_records_and_refuses_interleaved_or_partial_wr
 }
 
 #[test]
+fn instrumentation_modes_are_explicit_and_bounded() {
+    for mode in ["rust-global", "cpu-only", "profile"] {
+        let mut f = Fixture::new(mode, "files");
+        f.request.instrumentation = mode.into();
+        assert!(validate(&f.request).is_ok());
+        f.request.runtime_ms = 60_001;
+        assert!(validate(&f.request).is_err());
+    }
+    let mut f = Fixture::new("invalid-mode", "files");
+    f.request.instrumentation = "unknown".into();
+    assert!(validate(&f.request).is_err());
+}
+
+#[test]
 fn both_wires_bind_exact_workload_without_executing_artifacts() {
     for wire in ["files", "ipc"] {
         let f = Fixture::new(wire, wire);

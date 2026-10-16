@@ -1,5 +1,91 @@
 use xtask::{shell_timing::Offer, shell_timing_cost::measure};
 
+fn cpu_only(log: &str) -> String {
+    log.lines()
+        .map(|line| {
+            line.split_whitespace()
+                .map(|word| {
+                    if word == "schema=1" {
+                        "schema=2 mode=cpu-only"
+                    } else if word.starts_with("allocations=") {
+                        "allocations=0"
+                    } else if word.starts_with("reallocations=") {
+                        "reallocations=0"
+                    } else if word.starts_with("deallocations=") {
+                        "deallocations=0"
+                    } else if word.starts_with("bytes_allocated=") {
+                        "bytes_allocated=0"
+                    } else {
+                        word
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+                + "\n"
+        })
+        .collect()
+}
+
+#[test]
+fn cpu_only_retains_cpu_bounds_but_never_claims_allocation_results() {
+    use xtask::shell_timing_cost::{for_mode, measure_journal};
+    let host = cpu_only(&host());
+    let peer = cpu_only(&peer());
+    let report = measure_journal(&host, &peer, &journal(), 2).unwrap();
+    assert_eq!(report.instrumentation, "cpu-only");
+    assert_eq!(report.allocation_scope, "not_measured");
+    assert!(report.whole_workload.allocation_operations.is_none());
+    let normalized = report.normalized.unwrap();
+    assert!(normalized.allocation_operations_per_frame.is_none());
+    assert_eq!(
+        (
+            normalized.cpu_ns_per_uploaded_mib.lower,
+            normalized.cpu_ns_per_uploaded_mib.upper
+        ),
+        (12800, 18489)
+    );
+    let capture = host.clone() + &peer;
+    assert!(for_mode("cpu-only", &capture, &offers()).unwrap().is_some());
+    assert!(for_mode("rust-global", &capture, &offers()).is_err());
+    assert!(for_mode("none", &capture, &offers()).is_err());
+    assert!(measure(&host, &self::peer(), &offers()).is_err());
+    assert!(
+        measure(
+            &host.replace("allocations=0", "allocations=1"),
+            &peer,
+            &offers()
+        )
+        .is_err()
+    );
+    assert!(
+        measure(
+            &host.replace("mode=cpu-only", "mode=unknown"),
+            &peer,
+            &offers()
+        )
+        .is_err()
+    );
+    assert!(
+        measure(
+            &host.replacen("schema=2 mode=cpu-only", "schema=1", 1),
+            &peer,
+            &offers()
+        )
+        .is_err()
+    );
+    assert!(measure(&host.replace("pid=10 ", ""), &peer, &offers()).is_err());
+}
+
+#[test]
+fn profiling_records_cannot_supply_cost_or_latency_acceptance_arms() {
+    use xtask::shell_timing_cost::for_mode;
+    let capture = (host() + &peer()).replace("schema=1", "schema=2 mode=profile");
+    assert!(for_mode("profile", &capture, &offers()).unwrap().is_some());
+    assert!(for_mode("rust-global", &capture, &offers()).is_err());
+    assert!(for_mode("cpu-only", &capture, &offers()).is_err());
+    assert!(for_mode("none", &capture, &offers()).is_err());
+}
+
 fn row(process: &str, stage: &str, sequence: u64, time: u64, count: u64) -> String {
     let pid = if process == "session" { 10 } else { 20 };
     format!(
@@ -81,8 +167,16 @@ fn complete_upload_bytes_normalize_whole_workload_with_outward_rounding() {
     assert_eq!(normalized.frame_count, 2);
     assert_eq!(
         (
-            normalized.allocation_operations_per_frame.lower,
-            normalized.allocation_operations_per_frame.upper
+            normalized
+                .allocation_operations_per_frame
+                .as_ref()
+                .unwrap()
+                .lower,
+            normalized
+                .allocation_operations_per_frame
+                .as_ref()
+                .unwrap()
+                .upper
         ),
         (22, 33)
     );
@@ -139,8 +233,8 @@ fn outer_and_inner_samples_produce_conservative_bounds_not_interpolated_counts()
     let first = &report.frames[0].cost;
     assert_eq!(
         (
-            first.allocation_operations.lower,
-            first.allocation_operations.upper
+            first.allocation_operations.as_ref().unwrap().lower,
+            first.allocation_operations.as_ref().unwrap().upper
         ),
         (30, 50)
     );
@@ -151,15 +245,25 @@ fn outer_and_inner_samples_produce_conservative_bounds_not_interpolated_counts()
     let second = &report.frames[1].cost;
     assert_eq!(
         (
-            second.allocation_operations.lower,
-            second.allocation_operations.upper
+            second.allocation_operations.as_ref().unwrap().lower,
+            second.allocation_operations.as_ref().unwrap().upper
         ),
         (4, 24)
     );
     assert_eq!(
         (
-            report.whole_workload.allocation_operations.lower,
-            report.whole_workload.allocation_operations.upper
+            report
+                .whole_workload
+                .allocation_operations
+                .as_ref()
+                .unwrap()
+                .lower,
+            report
+                .whole_workload
+                .allocation_operations
+                .as_ref()
+                .unwrap()
+                .upper
         ),
         (45, 65)
     );
