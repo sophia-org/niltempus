@@ -1,7 +1,7 @@
 use xtask::shell_progress::{NAMES, collect};
 fn row(process: &str, time: u64, count: u64) -> String {
     let mut row = format!(
-        "sophia_comparator_progress schema=1 mode=progress process={process} pid=1 sequence={time} before_usec={time} after_usec={time}"
+        "sophia_comparator_progress schema=2 mode=progress process={process} pid=1 sequence={time} before_usec={time} after_usec={time}"
     );
     for name in NAMES {
         row.push_str(&format!(" {name}={count}"));
@@ -19,4 +19,17 @@ fn accepts_separate_process_totals_and_refuses_ambiguous_evidence() {
     assert!(collect(&(good.clone() + "sophia_comparator_counters mode=cpu-only\n")).is_err());
     assert!(collect(&good.replace("peer_wait=0", "peer_wait=0 peer_wait=0")).is_err());
     assert!(collect(&good.replace("owner_pass=0", "owner_pass=no")).is_err());
+}
+
+#[test]
+fn historical_schema_replays_but_cannot_mix_with_new_counts() {
+    let modern = row("session", 1, 0) + &row("peer", 1, 0);
+    let mut old = modern.replace("schema=2", "schema=1");
+    for name in &NAMES[12..] {
+        old = old.replace(&format!(" {name}=0"), "");
+    }
+    assert_eq!(collect(&old).unwrap()[0].counts.len(), 12);
+    assert_eq!(collect(&modern).unwrap()[0].counts.len(), 20);
+    assert!(collect(&(old + &row("peer", 2, 1))).is_err());
+    assert!(collect(&modern.replace("relay_idle=0", "relay_idle=no")).is_err());
 }

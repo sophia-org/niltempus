@@ -2,7 +2,7 @@
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-pub const NAMES: [&str; 12] = [
+pub const NAMES: [&str; 20] = [
     "owner_pass",
     "component_pass",
     "server_poll_turn",
@@ -15,6 +15,14 @@ pub const NAMES: [&str; 12] = [
     "pending_read_attempt",
     "peer_content_poll",
     "peer_wait",
+    "relay_dispatch",
+    "relay_idle",
+    "relay_expiry",
+    "request_walk",
+    "request_open",
+    "request_read",
+    "request_write",
+    "request_clunk",
 ];
 
 #[derive(Clone, Serialize)]
@@ -24,12 +32,13 @@ pub struct Sample {
     pub sequence: u64,
     pub before_usec: u64,
     pub after_usec: u64,
-    pub counts: [u64; 12],
+    pub counts: Vec<u64>,
 }
 
 pub fn collect(text: &str) -> Result<Vec<Sample>, String> {
     let mut samples = Vec::new();
     let mut previous: BTreeMap<String, Sample> = BTreeMap::new();
+    let mut schema = None;
     for line in text.lines() {
         if line.contains("sophia_comparator_counters ")
             && !line.split_whitespace().any(|s| s == "mode=progress")
@@ -46,12 +55,18 @@ pub fn collect(text: &str) -> Result<Vec<Sample>, String> {
                 return Err("duplicate progress field".into());
             }
         }
-        if fields.len() != 19
-            || fields.get("schema") != Some(&"1")
-            || fields.get("mode") != Some(&"progress")
-        {
+        let count = match fields.get("schema") {
+            Some(&"1") => 12,
+            Some(&"2") => NAMES.len(),
+            _ => return Err("unsupported progress schema".into()),
+        };
+        if fields.len() != count + 7 || fields.get("mode") != Some(&"progress") {
             return Err("unsupported progress schema or fields".into());
         }
+        if schema.is_some_and(|old| old != count) {
+            return Err("mixed progress schemas".into());
+        }
+        schema = Some(count);
         let number = |key: &str| {
             fields
                 .get(key)
@@ -63,8 +78,8 @@ pub fn collect(text: &str) -> Result<Vec<Sample>, String> {
         if !matches!(process, "session" | "peer") {
             return Err("unknown progress process".into());
         }
-        let mut counts = [0; 12];
-        for (i, name) in NAMES.iter().enumerate() {
+        let mut counts = vec![0; count];
+        for (i, name) in NAMES[..count].iter().enumerate() {
             counts[i] = number(name)?;
         }
         let sample = Sample {
@@ -82,7 +97,7 @@ pub fn collect(text: &str) -> Result<Vec<Sample>, String> {
             && (old.pid != sample.pid
                 || old.sequence > sample.sequence
                 || old.after_usec > sample.before_usec
-                || old.counts.iter().zip(counts).any(|(a, b)| *a > b))
+                || old.counts.iter().zip(&sample.counts).any(|(a, b)| a > b))
         {
             return Err("progress counters reset, wrap or go backwards".into());
         }
