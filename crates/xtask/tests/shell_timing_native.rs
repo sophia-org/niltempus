@@ -149,8 +149,53 @@ fn sealed_preparation_requires_matching_files_source_without_running_artifacts()
     f.request.source = ImageSource::Sealed;
     assert!(validate(&f.request).is_err());
     f.put("peer-config", br#"{"wire":"files","source":"sealed","output":1,"frames":3,"height":24,"hold_msec":60000}"#, false);
+    assert!(validate(&f.request).is_err());
+    let config = serde_json::json!({
+        "wire":"files", "source":"sealed", "output":1, "frames":3,
+        "height":24, "hold_msec":60000,
+        "image": { "max_resource_bytes":4194304, "max_width":4096,
+            "max_height":4096, "max_admitted_outputs":8,
+            "transfer_slots":4, "transfer_timeout_ms":2000 }
+    });
+    f.put("peer-config", config.to_string().as_bytes(), false);
     assert!(validate(&f.request).is_ok());
+    for key in [
+        "max_resource_bytes",
+        "max_width",
+        "max_height",
+        "max_admitted_outputs",
+        "transfer_slots",
+        "transfer_timeout_ms",
+    ] {
+        for value in [
+            serde_json::Value::Null,
+            serde_json::json!(0),
+            serde_json::json!(-1),
+        ] {
+            let mut bad = config.clone();
+            bad["image"][key] = value;
+            f.put("peer-config", bad.to_string().as_bytes(), false);
+            assert!(validate(&f.request).is_err(), "accepted invalid {key}");
+        }
+        let mut bad = config.clone();
+        bad["image"].as_object_mut().unwrap().remove(key);
+        f.put("peer-config", bad.to_string().as_bytes(), false);
+        assert!(validate(&f.request).is_err(), "accepted missing {key}");
+    }
+    let mut bad = config.clone();
+    bad["image"]["extra"] = serde_json::json!(1);
+    f.put("peer-config", bad.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_err());
+    bad = config.clone();
+    bad["image"]["transfer_slots"] = serde_json::json!(u64::from(u32::MAX) + 1);
+    f.put("peer-config", bad.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_err());
+    f.put("peer-config", config.to_string().as_bytes(), false);
     f.request.source = ImageSource::Bytes;
+    assert!(validate(&f.request).is_err());
+    bad = config.clone();
+    bad["source"] = serde_json::json!("bytes");
+    f.put("peer-config", bad.to_string().as_bytes(), false);
     assert!(validate(&f.request).is_err());
     f.request.source = ImageSource::Sealed;
     f.request.wire = "ipc".into();

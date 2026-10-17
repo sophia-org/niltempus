@@ -78,6 +78,31 @@ struct PeerConfig {
     hold_msec: u64,
     #[serde(default)]
     probe_bytes: u64,
+    image: Option<ImageConfig>,
+}
+
+/// Caller bounds for the sealed SDK adapter. The peer verifies these against
+/// the negotiated content limits; preparation binds their exact artifact bytes.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImageConfig {
+    max_resource_bytes: u64,
+    max_width: u32,
+    max_height: u32,
+    max_admitted_outputs: u32,
+    transfer_slots: u32,
+    transfer_timeout_ms: u32,
+}
+
+impl ImageConfig {
+    fn valid(&self) -> bool {
+        self.max_resource_bytes != 0
+            && self.max_width != 0
+            && self.max_height != 0
+            && self.max_admitted_outputs != 0
+            && self.transfer_slots != 0
+            && self.transfer_timeout_ms != 0
+    }
 }
 
 fn bounded(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
@@ -241,6 +266,10 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
     if peer.wire != request.wire
         || peer.source != request.source
         || (peer.source == ImageSource::Sealed && request.wire != "files")
+        || match peer.source {
+            ImageSource::Sealed => !peer.image.as_ref().is_some_and(ImageConfig::valid),
+            ImageSource::Bytes => peer.image.is_some(),
+        }
         || peer.output != request.output
         || peer.frames != request.frames
         || !(1..=128).contains(&peer.height)

@@ -48,6 +48,14 @@ the prepared source, wire and probe size. This labels the payload path without
 claiming descriptor custody from a journal alone: that also depends on the
 reviewed peer artifact and its SDK/export qualification.
 
+Sealed peer configurations also require an `image` object with positive
+`max_resource_bytes`, `max_width`, `max_height`, `max_admitted_outputs`,
+`transfer_slots` and `transfer_timeout_ms`. The first is a 64-bit value; the
+others are 32-bit values. Unknown or missing fields are refused. The reviewed
+peer checks these caller bounds against its negotiated content limits; the
+prepared artifact digest binds their exact values. Byte configurations omit
+`image` and retain their existing behavior.
+
 Cost reports retain the source and normalize CPU by both frames and logical
 accepted payload bytes. `transferred_bytes` and the compatibility field
 `uploaded_bytes` name the same denominator, including sealed payloads; neither
