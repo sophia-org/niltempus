@@ -152,7 +152,10 @@ writes. IPC records are classified when decoded (resource chunks as pixels);
 IPC has no separate submit request. Cadence means a due pacing/deadline predicate
 was observed, not that a frame was presented. Other includes core reads, writes
 and clunks and IPC input bytes, so it overlaps refined shell categories.
-Categories can overlap, and mixed counts passes with multiple categories.
+Categories can overlap, and `owner_mixed` includes that Other overlap: one shell
+write or one decoded IPC frame may be mixed without multiple kinds of shell work.
+Other is not a residual category. These counts cannot identify an ACK/read pair
+or the order of requests and replies; that requires a separate ordered trace.
 Flush-only means output bytes with none of those other observations; unattributed
 means no instrumented activity was observed. Neither proves a pass did no work.
 Completed passes are counted on scope exit, including early returns; a sampler
