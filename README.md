@@ -145,6 +145,22 @@ Allocations cover their Rust global allocators, counting alloc and realloc.
 Both exclude other processes; allocation counts also exclude foreign allocators.
 These explicit limits do not approve this scope as the full B9 acceptance method.
 
+Progress schema 3 adds owner-pass activity observations. These report work
+seen on the owner thread, not why it woke. Setup includes core 9P walk/open
+requests across roles; record, submit and pixel fields distinguish shell file
+writes. IPC records are classified when decoded (resource chunks as pixels);
+IPC has no separate submit request. Cadence means a due pacing/deadline predicate
+was observed, not that a frame was presented. Other includes core reads, writes
+and clunks and IPC input bytes, so it overlaps refined shell categories.
+Categories can overlap, and mixed counts passes with multiple categories.
+Flush-only means output bytes with none of those other observations; unattributed
+means no instrumented activity was observed. Neither proves a pass did no work.
+Completed passes are counted on scope exit, including early returns; a sampler
+may see a started pass before completion. Normalize bounded deltas by joined
+frames in separate progress runs; never substitute these counts for CPU or
+allocation evidence. The reader retains schema 1 and 2 support but rejects mixed
+schemas within a capture.
+
 `HOST_LOG` contains captured `sophia_shell_native_binding` and
 `sophia_shell_native_completion` records. `CLIENT_JSON` is an array of every
 offered candidate, with integer `connection_epoch`, `content_grant_epoch`,

@@ -2,7 +2,7 @@
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-pub const NAMES: [&str; 20] = [
+pub const NAMES: [&str; 30] = [
     "owner_pass",
     "component_pass",
     "server_poll_turn",
@@ -23,6 +23,16 @@ pub const NAMES: [&str; 20] = [
     "request_read",
     "request_write",
     "request_clunk",
+    "owner_completed",
+    "owner_setup",
+    "owner_record",
+    "owner_submit",
+    "owner_pixel",
+    "owner_cadence",
+    "owner_flush_only",
+    "owner_other",
+    "owner_unattributed",
+    "owner_mixed",
 ];
 
 #[derive(Clone, Serialize)]
@@ -57,7 +67,8 @@ pub fn collect(text: &str) -> Result<Vec<Sample>, String> {
         }
         let count = match fields.get("schema") {
             Some(&"1") => 12,
-            Some(&"2") => NAMES.len(),
+            Some(&"2") => 20,
+            Some(&"3") => NAMES.len(),
             _ => return Err("unsupported progress schema".into()),
         };
         if fields.len() != count + 7 || fields.get("mode") != Some(&"progress") {
