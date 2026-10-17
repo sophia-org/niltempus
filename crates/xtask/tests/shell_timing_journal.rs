@@ -1,6 +1,33 @@
 use xtask::shell_timing::{collect, collect_metrics};
 
 #[test]
+fn sealed_evidence_is_explicit_and_cannot_claim_the_ipc_or_legacy_path() {
+    use xtask::shell_timing::ImageSource;
+    let bytes = upload_journal();
+    assert_eq!(
+        collect_metrics(&bytes, 1).unwrap().source,
+        ImageSource::Bytes
+    );
+    let sealed = bytes.replacen(
+        "\"event\":\"start\"",
+        "\"event\":\"start\",\"source\":\"sealed\"",
+        1,
+    );
+    assert_eq!(
+        collect_metrics(&sealed, 1).unwrap().source,
+        ImageSource::Sealed
+    );
+    assert!(collect_metrics(&sealed.replace("files", "ipc"), 1).is_err());
+    assert!(collect_metrics(&sealed.replace("sealed", "unknown"), 1).is_err());
+    let legacy = journal().replacen(
+        "\"event\":\"start\"",
+        "\"event\":\"start\",\"source\":\"sealed\"",
+        1,
+    );
+    assert!(collect_metrics(&legacy, 1).is_err());
+}
+
+#[test]
 fn nearest_rank_preserves_tail_and_distinguishes_missing_measurements() {
     use xtask::shell_timing::Distribution;
     assert!(Distribution::from_samples(&[]).is_none());

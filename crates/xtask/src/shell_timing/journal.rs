@@ -1,5 +1,5 @@
 //! Validate the paced peer's complete journal before exporting any samples.
-use super::{MAX_BYTES, MAX_RECORDS, Offer};
+use super::{ImageSource, MAX_BYTES, MAX_RECORDS, Offer};
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize)]
@@ -35,6 +35,8 @@ pub struct PermitTiming {
 #[derive(Serialize)]
 pub struct Journal {
     pub schema: u64,
+    pub wire: String,
+    pub source: ImageSource,
     pub probe_bytes: u64,
     pub offers: Vec<Offer>,
     pub uploads: Vec<AcceptedUpload>,
@@ -48,6 +50,8 @@ enum Event {
     Start {
         frames: usize,
         wire: String,
+        #[serde(default)]
+        source: ImageSource,
         #[serde(default)]
         probe_bytes: u64,
     },
@@ -123,17 +127,19 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
     let schema = serde_json::from_str::<Record>(start)
         .map_err(|e| e.to_string())?
         .schema;
-    let probe_bytes = match event(start, schema)? {
+    let (probe_bytes, source, wire) = match event(start, schema)? {
         Event::Start {
             frames,
             wire,
+            source,
             probe_bytes,
         } if frames == expected
             && matches!(wire.as_str(), "files" | "ipc")
+            && (source == ImageSource::Bytes || (schema == 2 && wire == "files"))
             && matches!(probe_bytes, 0 | 4194304)
             && (schema == 2 || probe_bytes == 0) =>
         {
-            probe_bytes
+            (probe_bytes, source, wire)
         }
         _ => return Err("wrong start count or wire".into()),
     };
@@ -324,6 +330,8 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
     }
     Ok(Journal {
         schema,
+        wire,
+        source,
         probe_bytes,
         offers,
         uploads,

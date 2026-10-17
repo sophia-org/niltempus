@@ -1,5 +1,37 @@
 use xtask::{shell_timing::Offer, shell_timing_cost::measure};
 
+#[test]
+fn sealed_cost_uses_the_same_logical_bytes_and_reports_cpu_per_frame() {
+    use xtask::{shell_timing::ImageSource, shell_timing_cost::measure_journal};
+    let bytes = measure_journal(&host(), &peer(), &journal(), 2)
+        .unwrap()
+        .normalized
+        .unwrap();
+    let input = journal().replacen(
+        "\"event\":\"start\"",
+        "\"event\":\"start\",\"source\":\"sealed\"",
+        1,
+    );
+    let sealed = measure_journal(&host(), &peer(), &input, 2)
+        .unwrap()
+        .normalized
+        .unwrap();
+    assert_eq!(sealed.source, ImageSource::Sealed);
+    assert_eq!(sealed.transferred_bytes, bytes.uploaded_bytes);
+    assert_eq!(sealed.uploaded_bytes, sealed.transferred_bytes);
+    assert_eq!(
+        sealed.cpu_ns_per_uploaded_mib.lower,
+        bytes.cpu_ns_per_uploaded_mib.lower
+    );
+    assert_eq!(
+        sealed.cpu_ns_per_uploaded_mib.upper,
+        bytes.cpu_ns_per_uploaded_mib.upper
+    );
+    assert_eq!(sealed.cpu_ns_per_frame.lower, bytes.cpu_ns_per_frame.lower);
+    assert_eq!(sealed.cpu_ns_per_frame.upper, bytes.cpu_ns_per_frame.upper);
+    assert!(sealed.cpu_ns_per_frame.lower > 0);
+}
+
 fn cpu_only(log: &str) -> String {
     log.lines()
         .map(|line| {

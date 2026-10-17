@@ -7,8 +7,17 @@ use serde::{Deserialize, Serialize};
 
 mod journal;
 mod latency;
-pub use journal::{collect, collect_metrics};
+pub use journal::{Journal, collect, collect_metrics};
 pub use latency::{Distribution, latency_report};
+
+/// Payload path recorded by the peer; omission in older evidence means bytes.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageSource {
+    #[default]
+    Bytes,
+    Sealed,
+}
 
 const MAX_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RECORDS: usize = 100_000;

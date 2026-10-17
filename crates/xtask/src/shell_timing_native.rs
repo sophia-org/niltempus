@@ -1,4 +1,5 @@
 //! Bind a reviewed shell workload to exact files before any attended launch.
+use crate::shell_timing::ImageSource;
 use crate::{hex, output_file_native_run::process, sha256};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -49,6 +50,8 @@ pub struct Request {
     pub input_seat: String,
     pub runtime_ms: u64,
     pub wire: String,
+    #[serde(default)]
+    pub source: ImageSource,
     pub output: u64,
     pub frames: usize,
     pub mode_millihz: u64,
@@ -67,6 +70,8 @@ struct Plan {
 #[serde(deny_unknown_fields)]
 struct PeerConfig {
     wire: String,
+    #[serde(default)]
+    source: ImageSource,
     output: u64,
     frames: usize,
     height: u64,
@@ -234,6 +239,8 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
     let peer: PeerConfig =
         serde_json::from_slice(&texts["peer-config"]).map_err(|e| e.to_string())?;
     if peer.wire != request.wire
+        || peer.source != request.source
+        || (peer.source == ImageSource::Sealed && request.wire != "files")
         || peer.output != request.output
         || peer.frames != request.frames
         || !(1..=128).contains(&peer.height)
@@ -385,6 +392,21 @@ pub fn split_capture(text: &str) -> Result<(String, String), String> {
     Ok((client, host))
 }
 
+/// Reject a valid journal from a different arm before joining native samples.
+pub fn validate_captured_workload(
+    metrics: &crate::shell_timing::Journal,
+    request: &Request,
+    probe_bytes: u64,
+) -> Result<(), String> {
+    if metrics.probe_bytes != probe_bytes
+        || metrics.source != request.source
+        || metrics.wire != request.wire
+    {
+        return Err("captured upload workload differs from prepared configuration".into());
+    }
+    Ok(())
+}
+
 pub fn run(args: &[String]) -> Result<Vec<String>, String> {
     match args {
         [command, input, output] if command == "prepare-native" => {
@@ -483,9 +505,7 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
                 MAX_INPUT,
             )?)
             .map_err(|e| e.to_string())?;
-            if metrics.probe_bytes != peer.probe_bytes {
-                return Err("captured upload workload differs from prepared configuration".into());
-            }
+            validate_captured_workload(&metrics, &plan.request, peer.probe_bytes)?;
             let offers = &metrics.offers;
             let samples = crate::shell_timing::join(
                 &host,

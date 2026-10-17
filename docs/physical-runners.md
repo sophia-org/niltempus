@@ -41,6 +41,20 @@ not compare a pair, validate campaign conditions or decide B9 acceptance.
 Keep the raw logs, including failed runs, alongside the report. CPU and
 allocation accounting remain separate in `shell-timing cost-metrics`.
 
+The prepared request, peer configuration and journal start name the image
+`source`: `bytes` or `sealed`. Missing fields in older evidence mean `bytes`.
+Sealed evidence requires the files wire and schema 2; the capture must match
+the prepared source, wire and probe size. This labels the payload path without
+claiming descriptor custody from a journal alone: that also depends on the
+reviewed peer artifact and its SDK/export qualification.
+
+Cost reports retain the source and normalize CPU by both frames and logical
+accepted payload bytes. `transferred_bytes` and the compatibility field
+`uploaded_bytes` name the same denominator, including sealed payloads; neither
+counts socket copies or memory bandwidth. `cpu_ns_per_frame` uses the same
+outward-rounded bounds as CPU per MiB. Existing byte-path gate calculations
+are unchanged. No report by itself establishes a paired performance pass.
+
 ## What every runner requires
 
 No runner builds anything. Binaries and the pinned Sophia tree come from

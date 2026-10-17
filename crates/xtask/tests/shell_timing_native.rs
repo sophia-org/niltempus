@@ -28,6 +28,7 @@ impl Fixture {
                 input_seat: "seat0".into(),
                 runtime_ms: 60_000,
                 wire: wire.into(),
+                source: xtask::shell_timing::ImageSource::Bytes,
                 output: 1,
                 frames: 3,
                 mode_millihz: 60_000,
@@ -139,6 +140,53 @@ fn instrumentation_modes_are_explicit_and_bounded() {
     let mut f = Fixture::new("invalid-mode", "files");
     f.request.instrumentation = "unknown".into();
     assert!(validate(&f.request).is_err());
+}
+
+#[test]
+fn sealed_preparation_requires_matching_files_source_without_running_artifacts() {
+    use xtask::shell_timing::ImageSource;
+    let mut f = Fixture::new("sealed", "files");
+    f.request.source = ImageSource::Sealed;
+    assert!(validate(&f.request).is_err());
+    f.put("peer-config", br#"{"wire":"files","source":"sealed","output":1,"frames":3,"height":24,"hold_msec":60000}"#, false);
+    assert!(validate(&f.request).is_ok());
+    f.request.source = ImageSource::Bytes;
+    assert!(validate(&f.request).is_err());
+    f.request.source = ImageSource::Sealed;
+    f.request.wire = "ipc".into();
+    f.put(
+        "peer-config",
+        br#"{"wire":"ipc","source":"sealed","output":1,"frames":3,"height":24,"hold_msec":60000}"#,
+        false,
+    );
+    assert!(validate(&f.request).is_err());
+}
+
+#[test]
+fn captured_source_cannot_be_substituted_after_preparation() {
+    use xtask::shell_timing::{ImageSource, Journal};
+    use xtask::shell_timing_native::validate_captured_workload;
+    let mut f = Fixture::new("capture-source", "files");
+    f.request.source = ImageSource::Sealed;
+    // Parsing and native-custody joins have their own complete-journal controls.
+    // This guard binds the parsed arm to the prepared request.
+    let mut metrics = Journal {
+        schema: 2,
+        wire: "files".into(),
+        source: ImageSource::Bytes,
+        probe_bytes: 0,
+        offers: vec![],
+        uploads: vec![],
+        permits: vec![],
+        terminal_usec: vec![],
+    };
+    assert!(validate_captured_workload(&metrics, &f.request, 0).is_err());
+    metrics.source = ImageSource::Sealed;
+    assert!(validate_captured_workload(&metrics, &f.request, 0).is_ok());
+    metrics.wire = "ipc".into();
+    assert!(validate_captured_workload(&metrics, &f.request, 0).is_err());
+    metrics.wire = "files".into();
+    assert!(validate_captured_workload(&metrics, &f.request, 4194304).is_err());
 }
 
 #[test]

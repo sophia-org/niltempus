@@ -53,10 +53,16 @@ pub struct Report {
 #[derive(Debug, Serialize)]
 pub struct Normalized {
     pub frame_count: u64,
+    pub source: crate::shell_timing::ImageSource,
+    /// Logical accepted payload bytes, including sealed payloads. This is not
+    /// a socket-copy or memory-bandwidth measurement.
+    pub transferred_bytes: u64,
+    /// Compatibility name for the same denominator in older byte-path reports.
     pub uploaded_bytes: u64,
     pub presentation_bytes: u64,
     pub transfer_probe_bytes: u64,
     pub cpu_ns_per_uploaded_mib: Bounds,
+    pub cpu_ns_per_frame: Bounds,
     pub allocation_operations_per_frame: Option<Bounds>,
 }
 
@@ -128,6 +134,8 @@ pub fn measure_journal(
         .ok_or("uploaded byte count overflow")?;
     report.normalized = Some(Normalized {
         frame_count: expected as u64,
+        source: metrics.source,
+        transferred_bytes: uploaded_bytes,
         uploaded_bytes,
         presentation_bytes,
         transfer_probe_bytes,
@@ -136,6 +144,7 @@ pub fn measure_journal(
             1048576,
             uploaded_bytes,
         )?,
+        cpu_ns_per_frame: normalized(&report.whole_workload.process_cpu_ns, 1, expected as u64)?,
         allocation_operations_per_frame: report
             .whole_workload
             .allocation_operations
