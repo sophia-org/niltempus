@@ -225,7 +225,23 @@ fn ancillary_rights_close_even_when_control_is_truncated() {
         drop(writer);
         assert!(receiver.receive().is_err());
         // EOF proves no received duplicate of the write endpoint remains open.
-        assert_eq!(reader.read(&mut [0]).unwrap(), 0);
+        // Parallel child-spawn tests may briefly inherit a copy between fork
+        // and exec, before CLOEXEC closes it. Bound that transient explicitly;
+        // a descriptor retained by this receiver never reaches EOF.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match reader.read(&mut [0]) {
+                Ok(0) => break,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "received descriptor remains open"
+                    );
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                other => panic!("unexpected data or read error: {other:?}"),
+            }
+        }
     }
 }
 
