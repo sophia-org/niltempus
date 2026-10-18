@@ -65,6 +65,37 @@ are unchanged. No report by itself establishes a paired performance pass.
 
 ## What every runner requires
 
+### Paired sealed/bytes panel calibration
+
+The t338 calibration measures the files byte and sealed paths without running
+the full t331 campaign. Both plans must use the same CPU-only host, peer and
+support artifacts, 1000 frames, a 24-pixel panel, no bulk probe and a 60-second
+hold. They require environment readback. Freeze the selected card, output,
+connector, 1920×1080@120 Hz mode, whole-number scale, VRR off and quiet-window
+declaration before running either arm.
+
+```text
+/absolute/prepared/xtask shell-timing prepare-calibration REQUEST_JSON NEW_FROZEN_DIR
+SOPHIA_SHELL_TIMING_ARM=1 /absolute/prepared/xtask shell-timing run-calibration-arm FROZEN_DIR SHA256 bytes NEW_BYTES_RUN
+SOPHIA_SHELL_TIMING_ARM=1 /absolute/prepared/xtask shell-timing run-calibration-arm FROZEN_DIR SHA256 sealed NEW_SEALED_RUN
+/absolute/prepared/xtask shell-timing report-calibration FROZEN_DIR SHA256 NEW_BYTES_RUN NEW_SEALED_RUN
+```
+
+The preparation request contains `schema: 1`, `target`, `quiet_window`, and
+absolute `bytes` and `sealed` prepared-plan paths. The target contains `card`,
+`output`, `scale_milli`, `connector`, `width`, `height`, `mode_millihz` and `vrr`.
+Preparation is read-only apart from creating the frozen directory. Each run
+still requires its declared foreground console, the explicit arm, exact signed
+sources and prepared runner image. The daily desktop is not a target.
+
+Run directories are create-only. Each retains `attempt.json` and a `run/`
+subdirectory with the native capture, environment monitor evidence and receipt
+sidecar. Preserve failed attempts; do not replace their files or present a
+selected successful retry as the original pair. Replay rechecks digests,
+process and sender provenance, the environment and kernel timestamp bindings,
+then reports the sealed-minus-bytes cost difference. It supplies no IPC +10%
+gate or campaign-condition verdict and launches no load workers.
+
 ### Frozen shell timing campaigns
 
 The campaign commands run one explicitly selected arm at a time. They do not

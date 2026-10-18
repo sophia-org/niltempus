@@ -25,6 +25,7 @@ pub mod session;
 pub mod session_preflight;
 pub mod shell_progress;
 pub mod shell_timing;
+pub mod shell_timing_calibration;
 pub mod shell_timing_campaign;
 pub mod shell_timing_campaign_import;
 pub mod shell_timing_campaign_observer;
