@@ -47,7 +47,7 @@ impl Role {
         match (wire, source) {
             ("ipc", ImageSource::Bytes) => Ok(Self::A),
             ("files", ImageSource::Bytes) => Ok(Self::B),
-            ("files", ImageSource::Sealed) => Ok(Self::C),
+            ("files", ImageSource::Isb) => Ok(Self::C),
             _ => Err("arm wire and source name no comparison role".into()),
         }
     }

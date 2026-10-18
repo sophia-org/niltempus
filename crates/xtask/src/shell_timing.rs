@@ -19,7 +19,9 @@ pub use latency::{
 pub enum ImageSource {
     #[default]
     Bytes,
-    Sealed,
+    /// Immutable Shared Buffers; retain the source label in frozen evidence.
+    #[serde(rename = "sealed")]
+    Isb,
 }
 
 const MAX_BYTES: u64 = 64 * 1024 * 1024;

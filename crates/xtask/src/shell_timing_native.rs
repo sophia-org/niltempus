@@ -269,9 +269,9 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
         serde_json::from_slice(&texts["peer-config"]).map_err(|e| e.to_string())?;
     if peer.wire != request.wire
         || peer.source != request.source
-        || (peer.source == ImageSource::Sealed && request.wire != "files")
+        || (peer.source == ImageSource::Isb && request.wire != "files")
         || match peer.source {
-            ImageSource::Sealed => !peer.image.as_ref().is_some_and(ImageConfig::valid),
+            ImageSource::Isb => !peer.image.as_ref().is_some_and(ImageConfig::valid),
             ImageSource::Bytes => peer.image.is_some(),
         }
         || peer.output != request.output

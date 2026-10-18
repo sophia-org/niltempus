@@ -15,7 +15,7 @@ fn sealed_evidence_is_explicit_and_cannot_claim_the_ipc_or_legacy_path() {
     );
     assert_eq!(
         collect_metrics(&sealed, 1).unwrap().source,
-        ImageSource::Sealed
+        ImageSource::Isb
     );
     assert!(collect_metrics(&sealed.replace("files", "ipc"), 1).is_err());
     assert!(collect_metrics(&sealed.replace("sealed", "unknown"), 1).is_err());

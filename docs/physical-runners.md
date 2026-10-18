@@ -1,4 +1,9 @@
 <!-- Provenance: the physical-runner guidance moved from Sophia docs/validation.md (the physical sections: output topology, frame-fed output, mirror and mixed output, keyboard independence, milestone 4/5 hardware proofs, standalone and benchmark runners) and docs/live-session-bootstrap.md (the guarded Kitty TTY3 session and persistent proof) at de776c68afdf9a133818f86917893c3362dc9fb7 (the pin) (Sophia rule 13). Rewritten for this repository's commands and the prepared-inputs custody. -->
+
+Image-transport terminology: **Immutable Shared Buffers (ISB)** is the current
+name for the CPU image path backed by sealed memfds. Frozen plans, arm IDs,
+commands and report fields retain `sealed` so their bytes and digests remain
+valid. These historical identifiers select ISB; they are not another path.
 # Physical runners
 
 These runners take real DRM, input and TTY ownership on the reference rig

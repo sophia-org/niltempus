@@ -215,7 +215,7 @@ impl World {
             runtime_ms: 60_000,
             wire: "files".into(),
             source: if shape.sealed {
-                ImageSource::Sealed
+                ImageSource::Isb
             } else {
                 ImageSource::Bytes
             },

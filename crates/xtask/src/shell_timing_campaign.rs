@@ -194,7 +194,7 @@ pub fn validate_arm_plan(
     let (wire, source) = match arm.variant {
         Variant::A => ("ipc", ImageSource::Bytes),
         Variant::B => ("files", ImageSource::Bytes),
-        Variant::C => ("files", ImageSource::Sealed),
+        Variant::C => ("files", ImageSource::Isb),
     };
     let instrumentation = match arm.measurement {
         Measurement::Latency => "none",

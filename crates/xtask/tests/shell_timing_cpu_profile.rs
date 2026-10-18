@@ -336,7 +336,7 @@ fn only_observed_cpu_plans_can_be_profiled() {
     request.environment_readback = false;
     assert!(projected(&request, 0, "sha").is_err());
     request.environment_readback = true;
-    request.source = xtask::shell_timing::ImageSource::Sealed;
+    request.source = xtask::shell_timing::ImageSource::Isb;
     assert!(projected(&request, 0, "sha").is_err());
     request.wire = "files".into();
     assert!(projected(&request, 0, "sha").is_ok());

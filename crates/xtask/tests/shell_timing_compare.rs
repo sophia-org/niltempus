@@ -112,7 +112,7 @@ fn shaped(
     };
     let (host, journal) = arm(5, &timing, wire);
     let mut journal = edit(journal);
-    if source == ImageSource::Sealed {
+    if source == ImageSource::Isb {
         journal = journal.replacen(
             "\"event\":\"start\"",
             "\"event\":\"start\",\"source\":\"sealed\"",
@@ -182,7 +182,7 @@ fn cost(
 const ROLES: [(&str, &str, ImageSource); 3] = [
     ("a", "ipc", ImageSource::Bytes),
     ("b", "files", ImageSource::Bytes),
-    ("c", "files", ImageSource::Sealed),
+    ("c", "files", ImageSource::Isb),
 ];
 
 /// One complete pair. `slow` adds latency to the given role's arms and
@@ -258,7 +258,7 @@ fn latency_gates_use_per_pair_points_and_label_bar_measures_in_bulk_arms() {
     let exact = latency(
         "c",
         "files",
-        ImageSource::Sealed,
+        ImageSource::Isb,
         Workload::Bulk,
         Timing {
             present: |_| 2_000,
@@ -285,7 +285,7 @@ fn latency_gates_use_per_pair_points_and_label_bar_measures_in_bulk_arms() {
     let over = latency(
         "c",
         "files",
-        ImageSource::Sealed,
+        ImageSource::Isb,
         Workload::Bulk,
         Timing {
             present: |_| 2_001,
@@ -310,7 +310,7 @@ fn latency_gates_use_per_pair_points_and_label_bar_measures_in_bulk_arms() {
     );
     // Baselines must be IPC bytes, and workloads must match.
     assert!(compare_latency(&a, &over).is_err());
-    let panel = latency("c", "files", ImageSource::Sealed, Workload::Panel, quick());
+    let panel = latency("c", "files", ImageSource::Isb, Workload::Panel, quick());
     assert!(compare_latency(&panel, &a).is_err());
 }
 
@@ -367,7 +367,7 @@ fn cost_and_source_comparisons_refuse_mismatched_identity() {
     let c = cost(
         "c",
         "files",
-        ImageSource::Sealed,
+        ImageSource::Isb,
         Workload::Panel,
         "cpu-only",
         (110, 110),
@@ -376,7 +376,7 @@ fn cost_and_source_comparisons_refuse_mismatched_identity() {
     let alloc = cost(
         "c",
         "files",
-        ImageSource::Sealed,
+        ImageSource::Isb,
         Workload::Panel,
         "rust-global",
         (110, 110),
@@ -385,7 +385,7 @@ fn cost_and_source_comparisons_refuse_mismatched_identity() {
     let bulk = cost(
         "c",
         "files",
-        ImageSource::Sealed,
+        ImageSource::Isb,
         Workload::Bulk,
         "cpu-only",
         (110, 110),
@@ -394,7 +394,7 @@ fn cost_and_source_comparisons_refuse_mismatched_identity() {
     let mut fewer = cost(
         "c",
         "files",
-        ImageSource::Sealed,
+        ImageSource::Isb,
         Workload::Panel,
         "cpu-only",
         (110, 110),
@@ -404,7 +404,7 @@ fn cost_and_source_comparisons_refuse_mismatched_identity() {
     let mut mislabelled = cost(
         "c",
         "files",
-        ImageSource::Sealed,
+        ImageSource::Isb,
         Workload::Panel,
         "cpu-only",
         (1, 1),
@@ -437,14 +437,14 @@ fn cost_and_source_comparisons_refuse_mismatched_identity() {
     );
     assert!(compare_source_cost(&c, &b_alloc).is_err());
     let bl = latency("b", "files", ImageSource::Bytes, Workload::Panel, quick());
-    let cl = latency("c", "files", ImageSource::Sealed, Workload::Panel, quick());
+    let cl = latency("c", "files", ImageSource::Isb, Workload::Panel, quick());
     assert!(
         compare_source_latency(&cl, &bl)
             .unwrap()
             .iter()
             .all(|e| e.outcome == "reported_only")
     );
-    let cb = latency("c", "files", ImageSource::Sealed, Workload::Bulk, quick());
+    let cb = latency("c", "files", ImageSource::Isb, Workload::Bulk, quick());
     assert!(compare_source_latency(&cb, &bl).is_err());
 }
 
@@ -537,25 +537,25 @@ fn latency_comparisons_refuse_different_upload_shapes() {
     for workload in [Workload::Panel, Workload::Bulk] {
         let a = latency("a", "ipc", ImageSource::Bytes, workload, quick());
         let b = latency("b", "files", ImageSource::Bytes, workload, quick());
-        let c = latency("c", "files", ImageSource::Sealed, workload, quick());
+        let c = latency("c", "files", ImageSource::Isb, workload, quick());
         assert!(compare_latency(&c, &a).is_ok());
         assert!(compare_source_latency(&c, &b).is_ok());
         for edit in [&narrow as &dyn Fn(String) -> String, &first] {
-            let c2 = shaped("c", "files", ImageSource::Sealed, workload, quick(), edit);
+            let c2 = shaped("c", "files", ImageSource::Isb, workload, quick(), edit);
             assert_eq!(c2.latency.measured_samples, c.latency.measured_samples);
             assert!(compare_latency(&c2, &a).is_err());
             assert!(compare_source_latency(&c2, &b).is_err());
         }
     }
     // Same dimensions, different bytes in one generation.
-    let mut c = latency("c", "files", ImageSource::Sealed, Workload::Panel, quick());
+    let mut c = latency("c", "files", ImageSource::Isb, Workload::Panel, quick());
     c.latency.journal_metrics.uploads[3].upload.total_bytes += 4;
     let a = latency("a", "ipc", ImageSource::Bytes, Workload::Panel, quick());
     let b = latency("b", "files", ImageSource::Bytes, Workload::Panel, quick());
     assert!(compare_latency(&c, &a).is_err());
     assert!(compare_source_latency(&c, &b).is_err());
     // Epochs and timestamps may differ.
-    let mut c = latency("c", "files", ImageSource::Sealed, Workload::Panel, quick());
+    let mut c = latency("c", "files", ImageSource::Isb, Workload::Panel, quick());
     for upload in &mut c.latency.journal_metrics.uploads {
         upload.upload.connection_epoch += 7;
         upload.upload.begin_usec += 11;
@@ -568,7 +568,7 @@ fn latency_comparisons_refuse_different_upload_shapes() {
 #[test]
 fn bulk_arms_require_the_exact_four_mib_probe() {
     let a = latency("a", "ipc", ImageSource::Bytes, Workload::Bulk, quick());
-    let mut c = latency("c", "files", ImageSource::Sealed, Workload::Bulk, quick());
+    let mut c = latency("c", "files", ImageSource::Isb, Workload::Bulk, quick());
     assert!(compare_latency(&c, &a).is_ok());
     c.latency.probe_bytes = 4096;
     assert!(compare_latency(&c, &a).is_err());
@@ -588,7 +588,7 @@ fn bulk_arms_require_the_exact_four_mib_probe() {
     let mut c = cost(
         "c",
         "files",
-        ImageSource::Sealed,
+        ImageSource::Isb,
         Workload::Bulk,
         "cpu-only",
         (100, 100),

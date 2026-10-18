@@ -181,7 +181,7 @@ fn check_plan(target: &ProvenanceTarget, label: &str, bytes: &[u8]) -> Result<Re
     let (request, probe) = verify_prepared(bytes)?;
     let source = match label {
         "bytes" => ImageSource::Bytes,
-        "sealed" => ImageSource::Sealed,
+        "sealed" => ImageSource::Isb,
         _ => return Err("calibration plans are bytes then sealed".into()),
     };
     let peer = request

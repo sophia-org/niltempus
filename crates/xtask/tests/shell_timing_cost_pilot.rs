@@ -224,7 +224,7 @@ impl World {
             runtime_ms: 60_000,
             wire: if shape.ipc { "ipc" } else { "files" }.into(),
             source: if shape.sealed {
-                ImageSource::Sealed
+                ImageSource::Isb
             } else {
                 ImageSource::Bytes
             },
@@ -760,7 +760,7 @@ fn report_comparison_uses_cross_bounds_and_rejects_legacy_counters() {
         lower: 100,
         upper: 120,
     };
-    reports[0].normalized.as_mut().unwrap().source = xtask::shell_timing::ImageSource::Sealed;
+    reports[0].normalized.as_mut().unwrap().source = xtask::shell_timing::ImageSource::Isb;
     assert_eq!(
         comparisons(&reports).unwrap_err(),
         "pilot reports differ from the declared bulk workload or mode"

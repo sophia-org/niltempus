@@ -183,7 +183,7 @@ fn arm_labels_cannot_substitute_for_prepared_workload() {
     let mut r = request(a);
     assert!(validate_arm_plan(&m, a, &r, 0).is_ok());
     assert!(validate_arm_plan(&m, a, &r, 4_194_304).is_err());
-    r.source = xtask::shell_timing::ImageSource::Sealed;
+    r.source = xtask::shell_timing::ImageSource::Isb;
     assert!(validate_arm_plan(&m, a, &r, 0).is_err());
     let mut r = request(a);
     r.instrumentation = "rust-global".into();
@@ -220,7 +220,7 @@ fn all_variant_workload_and_measurement_bindings_are_checked() {
         let (wire, source) = match arm.variant {
             Variant::A => ("ipc", ImageSource::Bytes),
             Variant::B => ("files", ImageSource::Bytes),
-            Variant::C => ("files", ImageSource::Sealed),
+            Variant::C => ("files", ImageSource::Isb),
         };
         r.wire = wire.into();
         r.source = source;
@@ -240,7 +240,7 @@ fn all_variant_workload_and_measurement_bindings_are_checked() {
         assert!(validate_arm_plan(&m, arm, &r, probe).is_err());
         r.wire = wire.into();
         r.source = if source == ImageSource::Bytes {
-            ImageSource::Sealed
+            ImageSource::Isb
         } else {
             ImageSource::Bytes
         };

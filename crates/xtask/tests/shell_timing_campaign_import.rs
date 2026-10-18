@@ -853,7 +853,7 @@ fn prepared_plan(
         runtime_ms: 60_000,
         wire: wire.into(),
         source: if image == "sealed" {
-            ImageSource::Sealed
+            ImageSource::Isb
         } else {
             ImageSource::Bytes
         },

@@ -45,7 +45,7 @@ pub fn projected(request: &Request, probe: u64, plan_sha256: &str) -> Result<Arm
     let variant = match (request.wire.as_str(), request.source) {
         ("ipc", crate::shell_timing::ImageSource::Bytes) => Variant::A,
         ("files", crate::shell_timing::ImageSource::Bytes) => Variant::B,
-        ("files", crate::shell_timing::ImageSource::Sealed) => Variant::C,
+        ("files", crate::shell_timing::ImageSource::Isb) => Variant::C,
         _ => return Err("unsupported profiling transport".into()),
     };
     let workload = match probe {

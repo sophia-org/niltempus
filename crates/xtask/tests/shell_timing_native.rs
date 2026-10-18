@@ -186,7 +186,7 @@ fn instrumentation_modes_are_explicit_and_bounded() {
 fn sealed_preparation_requires_matching_files_source_without_running_artifacts() {
     use xtask::shell_timing::ImageSource;
     let mut f = Fixture::new("sealed", "files");
-    f.request.source = ImageSource::Sealed;
+    f.request.source = ImageSource::Isb;
     assert!(validate(&f.request).is_err());
     f.put("peer-config", br#"{"wire":"files","source":"sealed","output":1,"frames":3,"height":24,"hold_msec":60000}"#, false);
     assert!(validate(&f.request).is_err());
@@ -237,7 +237,7 @@ fn sealed_preparation_requires_matching_files_source_without_running_artifacts()
     bad["source"] = serde_json::json!("bytes");
     f.put("peer-config", bad.to_string().as_bytes(), false);
     assert!(validate(&f.request).is_err());
-    f.request.source = ImageSource::Sealed;
+    f.request.source = ImageSource::Isb;
     f.request.wire = "ipc".into();
     f.put(
         "peer-config",
@@ -252,7 +252,7 @@ fn captured_source_cannot_be_substituted_after_preparation() {
     use xtask::shell_timing::{ImageSource, Journal};
     use xtask::shell_timing_native::validate_captured_workload;
     let mut f = Fixture::new("capture-source", "files");
-    f.request.source = ImageSource::Sealed;
+    f.request.source = ImageSource::Isb;
     // Parsing and native-custody joins have their own complete-journal controls.
     // This guard binds the parsed arm to the prepared request.
     let mut metrics = Journal {
@@ -266,7 +266,7 @@ fn captured_source_cannot_be_substituted_after_preparation() {
         terminal_usec: vec![],
     };
     assert!(validate_captured_workload(&metrics, &f.request, 0).is_err());
-    metrics.source = ImageSource::Sealed;
+    metrics.source = ImageSource::Isb;
     assert!(validate_captured_workload(&metrics, &f.request, 0).is_ok());
     metrics.wire = "ipc".into();
     assert!(validate_captured_workload(&metrics, &f.request, 0).is_err());
@@ -602,7 +602,7 @@ fn sealed_campaign_policy_signature_tracks_every_adapter_bound() {
             .unwrap();
     peer["source"] = serde_json::json!("sealed");
     peer["image"] = serde_json::json!({"max_resource_bytes":4194304,"max_width":8192,"max_height":4096,"max_admitted_outputs":16,"transfer_slots":4,"transfer_timeout_ms":2000});
-    fixture.request.source = xtask::shell_timing::ImageSource::Sealed;
+    fixture.request.source = xtask::shell_timing::ImageSource::Isb;
     fixture.put("peer-config", &serde_json::to_vec(&peer).unwrap(), false);
     validate(&fixture.request).unwrap();
     let expected = campaign_image_bounds(&fixture.request).unwrap();

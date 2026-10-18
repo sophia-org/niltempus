@@ -16,7 +16,7 @@ fn sealed_cost_uses_the_same_logical_bytes_and_reports_cpu_per_frame() {
         .unwrap()
         .normalized
         .unwrap();
-    assert_eq!(sealed.source, ImageSource::Sealed);
+    assert_eq!(sealed.source, ImageSource::Isb);
     assert_eq!(sealed.transferred_bytes, bytes.uploaded_bytes);
     assert_eq!(sealed.uploaded_bytes, sealed.transferred_bytes);
     assert_eq!(

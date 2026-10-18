@@ -305,7 +305,7 @@ fn identity(variant: Variant) -> (&'static str, ImageSource) {
     match variant {
         Variant::A => ("ipc", ImageSource::Bytes),
         Variant::B => ("files", ImageSource::Bytes),
-        Variant::C => ("files", ImageSource::Sealed),
+        Variant::C => ("files", ImageSource::Isb),
     }
 }
 

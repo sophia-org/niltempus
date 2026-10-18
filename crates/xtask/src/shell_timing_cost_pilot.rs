@@ -188,7 +188,7 @@ fn check_plans_height(
         let variant = index % 3;
         let wire = if variant == 0 { "ipc" } else { "files" };
         let source = if variant == 2 {
-            ImageSource::Sealed
+            ImageSource::Isb
         } else {
             ImageSource::Bytes
         };
@@ -539,7 +539,7 @@ fn comparisons_for_shape(
                 || n.transfer_probe_bytes != 1000 * probe_bytes(workload)
                 || n.source
                     != if matches!(index, 2 | 3 | 8) {
-                        ImageSource::Sealed
+                        ImageSource::Isb
                     } else {
                         ImageSource::Bytes
                     }
