@@ -249,7 +249,7 @@ impl CampaignObserver for LiveCampaignObserver {
         if self.condition == Condition::Load {
             self.start_load(request)?;
         }
-        let socket = stage.join("environment.sock");
+        let socket = crate::shell_timing_environment_socket::socket_path(stage)?;
         self.monitor = Some(EnvironmentMonitor::new(
             MonitorConfig {
                 host_executable: request.artifacts["sophia"].path.clone(),

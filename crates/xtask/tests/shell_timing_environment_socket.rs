@@ -16,6 +16,22 @@ use std::{
 };
 use xtask::shell_timing_environment_socket::{EnvironmentReceiver, MAX_RECORD_BYTES, MAX_RECORDS};
 
+#[test]
+fn campaign_socket_address_limit_is_checked_without_creating_a_run() {
+    use xtask::shell_timing_environment_socket::socket_path;
+    let component_bytes = 107 - "/environment.sock".len() - 1;
+    let fits = PathBuf::from(format!("/{}", "x".repeat(component_bytes)));
+    assert!(socket_path(&fits).is_ok());
+    let too_long = PathBuf::from(format!("/{}", "x".repeat(component_bytes + 1)));
+    assert!(
+        socket_path(&too_long)
+            .unwrap_err()
+            .contains("socket path is invalid")
+    );
+    let multibyte = PathBuf::from(format!("/{}", "é".repeat(component_bytes)));
+    assert!(socket_path(&multibyte).is_err());
+}
+
 fn send_record(sender: &UnixDatagram, path: &std::path::Path, bytes: &[u8]) {
     let pidfd = rustix::process::pidfd_open(
         rustix::process::getpid(),

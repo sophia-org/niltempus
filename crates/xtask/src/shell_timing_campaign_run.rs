@@ -116,6 +116,7 @@ pub fn run(arguments: &[String]) -> Result<Vec<String>, String> {
     shell_timing_native::launch_prerequisites(&request)?;
     verify_arm(directory, digest, &arm.id)?;
     let stage = directory.join(&arm.id).join("run");
+    crate::shell_timing_environment_socket::socket_path(&stage)?;
     shell_timing_native::stage_available(&stage)?;
     let plan_name = plan_path.to_str().ok_or("plan path is not UTF-8")?;
     let stage_name = stage.to_str().ok_or("run path is not UTF-8")?;

@@ -216,6 +216,9 @@ peer executable/config paths and wire choice; panel height is 24 throughout.
 Owner and peer binaries must match within each instrumentation method. It saves
 exact plan bytes under each arm ID and writes `READY` last. An existing campaign
 directory is never overwritten, including after partial failure.
+Preparation also checks each run's environment socket against the Unix-socket
+address limit. Use a short campaign root; execution repeats this check before
+claiming an arm, so an overlong path cannot consume its single-use attempt.
 
 The campaign library provides `claim_attempt` and `read_finished`. Claims and
 results form a checked hash chain in arm order. Each arm can be claimed once;

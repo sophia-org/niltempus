@@ -20,6 +20,19 @@ use std::{
 pub const MAX_RECORD_BYTES: usize = 65_536;
 pub const MAX_RECORDS: usize = 64;
 
+/// Validate the address before a campaign claims an arm or creates its run.
+/// This constructs an address only; it opens no socket or device.
+pub fn socket_path(stage: &Path) -> Result<PathBuf, String> {
+    let path = stage.join("environment.sock");
+    std::os::unix::net::SocketAddr::from_pathname(&path).map_err(|error| {
+        format!(
+            "campaign environment socket path is invalid: {}: {error}",
+            path.display()
+        )
+    })?;
+    Ok(path)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EnvironmentReceipt {

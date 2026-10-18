@@ -1,5 +1,26 @@
 use xtask::shell_timing_campaign::*;
 
+#[test]
+fn overlong_environment_socket_is_refused_before_reading_plans_or_creating_campaign() {
+    let m = manifest();
+    let root = std::env::temp_dir().join(format!(
+        "campaign-path-limit-{}-{}",
+        std::process::id(),
+        "x".repeat(120)
+    ));
+    let plans = m
+        .arms
+        .iter()
+        .map(|a| (a.id.clone(), root.join("absent-plan.json")))
+        .collect();
+    let error = freeze(&m, &plans, &root).unwrap_err();
+    assert!(
+        error.contains("campaign environment socket path is invalid"),
+        "{error}"
+    );
+    assert!(!root.exists());
+}
+
 fn manifest() -> Manifest {
     let mut arms = Vec::new();
     for condition in [Condition::Idle, Condition::Load] {

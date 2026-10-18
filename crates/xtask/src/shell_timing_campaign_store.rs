@@ -57,6 +57,9 @@ pub fn freeze(
     let mut binaries = BTreeMap::new();
     let mut image_bounds = None;
     for arm in &manifest.arms {
+        crate::shell_timing_environment_socket::socket_path(
+            &root.join(&manifest.id).join(&arm.id).join("run"),
+        )?;
         let path = plans.get(&arm.id).ok_or("missing arm plan")?;
         let bytes = read_plan(path)?;
         if sha256(&bytes) != arm.plan_sha256 {
