@@ -30,6 +30,7 @@ pub mod shell_timing_compare;
 pub mod shell_timing_cost;
 pub mod shell_timing_cpu_worker;
 pub mod shell_timing_environment;
+pub mod shell_timing_load;
 pub mod shell_timing_native;
 pub mod verify_archives;
 
