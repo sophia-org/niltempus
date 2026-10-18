@@ -176,9 +176,22 @@ Its `joined_only` result proves sample provenance, not B9 acceptance, artifact
 identity or the completeness of the client recorder. The campaign must bind
 those inputs and compare the paired distributions separately.
 
-The 120 Hz campaign can freeze its complete arm matrix before any launch:
+Campaigns freeze their complete arm matrix before any launch:
 
     cargo xtask shell-timing freeze-campaign REQUEST_JSON /ABS/EXISTING_CAMPAIGN_ROOT
+
+For current ISB-only qualification, use manifest schema `3`: 72 arms at either
+60,000 or 120,000 mHz, scale 1000, with A (IPC bytes) and C (files ISB). Keep
+the condition/pair/workload/measurement order below; each group is CA for pairs
+1 and 3, AC for pair 2. Freeze a separate campaign for each refresh rate. Both
+cost methods and latency remain required, with the same frame counts, warmup,
+16-worker load and per-pair gates. The report omits retired B measurements,
+labels their status as not run, and applies every C-versus-A and absolute gate.
+No passing verdict is inferred for the absent byte-upload arm.
+
+Historical schema `2` retains its exact 108-arm, 120 Hz matrix and reports.
+The nine-arm cost pilot and byte/sealed calibration commands also retain their
+historical format; they cannot qualify the ISB-only candidate.
 
 The request contains `manifest` and `plans`. `plans` maps each arm ID to an
 existing `prepare-native` plan path. The manifest has schema `2`, a unique `id`,

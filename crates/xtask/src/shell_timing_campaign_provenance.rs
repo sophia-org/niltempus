@@ -116,12 +116,12 @@ impl ProvenanceTarget {
                 .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
             || self.width != 1920
             || self.height != 1080
-            || self.mode_millihz != 120_000
+            || !matches!(self.mode_millihz, 60_000 | 120_000)
             || self.vrr
         {
             return Err(
                 "target requires a canonical card, nonzero output, whole scale, \
-                 a valid connector and 1920x1080@120 Hz with VRR off"
+                 a valid connector and 1920x1080 at 60/120 Hz with VRR off"
                     .into(),
             );
         }

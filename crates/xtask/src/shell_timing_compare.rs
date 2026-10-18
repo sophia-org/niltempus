@@ -673,8 +673,8 @@ fn find_cost<'a>(
     }
 }
 
-fn pair_report(pair: &PairInput) -> Result<PairReport, String> {
-    let expected = ROLES.len() * WORKLOADS.len();
+fn pair_report(pair: &PairInput, include_bytes: bool) -> Result<PairReport, String> {
+    let expected = if include_bytes { 3 } else { 2 } * WORKLOADS.len();
     if pair.latency.len() != expected || pair.cost.len() != expected * INSTRUMENTATION.len() {
         return Err(format!("pair {}: incomplete or extra arms", pair.index));
     }
@@ -702,21 +702,25 @@ fn pair_report(pair: &PairInput) -> Result<PairReport, String> {
     let mut sealed_vs_bytes = Vec::new();
     for workload in WORKLOADS {
         let a = find_latency(pair, Role::A, workload)?;
-        let b = find_latency(pair, Role::B, workload)?;
         let c = find_latency(pair, Role::C, workload)?;
         sealed_vs_ipc.extend(compare_latency(c, a)?);
         sealed_vs_ipc.extend(absolute_gates(a)?);
         sealed_vs_ipc.extend(absolute_gates(c)?);
-        bytes_vs_ipc.extend(compare_latency(b, a)?);
-        bytes_vs_ipc.extend(absolute_gates(b)?);
-        sealed_vs_bytes.extend(compare_source_latency(c, b)?);
+        if include_bytes {
+            let b = find_latency(pair, Role::B, workload)?;
+            bytes_vs_ipc.extend(compare_latency(b, a)?);
+            bytes_vs_ipc.extend(absolute_gates(b)?);
+            sealed_vs_bytes.extend(compare_source_latency(c, b)?);
+        }
         for instrumentation in INSTRUMENTATION {
             let a = find_cost(pair, Role::A, workload, instrumentation)?;
-            let b = find_cost(pair, Role::B, workload, instrumentation)?;
             let c = find_cost(pair, Role::C, workload, instrumentation)?;
             sealed_vs_ipc.push(compare_cost(c, a)?);
-            bytes_vs_ipc.push(compare_cost(b, a)?);
-            sealed_vs_bytes.push(compare_source_cost(c, b)?);
+            if include_bytes {
+                let b = find_cost(pair, Role::B, workload, instrumentation)?;
+                bytes_vs_ipc.push(compare_cost(b, a)?);
+                sealed_vs_bytes.push(compare_source_cost(c, b)?);
+            }
         }
     }
     Ok(PairReport {
@@ -724,7 +728,11 @@ fn pair_report(pair: &PairInput) -> Result<PairReport, String> {
         order: pair.order.clone(),
         sealed_vs_ipc_outcome: fold(&sealed_vs_ipc),
         sealed_vs_ipc,
-        bytes_vs_ipc_outcome: fold(&bytes_vs_ipc),
+        bytes_vs_ipc_outcome: if include_bytes {
+            fold(&bytes_vs_ipc)
+        } else {
+            Outcome::Inconclusive
+        },
         bytes_vs_ipc,
         sealed_vs_bytes,
     })
@@ -734,6 +742,19 @@ fn pair_report(pair: &PairInput) -> Result<PairReport, String> {
 /// pass; a failing or inconclusive pair decides the verdict whatever the
 /// pooled data show.
 pub fn condition_report(pairs: &[PairInput]) -> Result<ConditionReport, String> {
+    condition_report_for_roles(pairs, true)
+}
+
+/// ISB-only campaign: the retired file-byte arm is absent, not a passing arm.
+/// The same C-versus-A and absolute gates decide every restarted pair.
+pub fn isb_condition_report(pairs: &[PairInput]) -> Result<ConditionReport, String> {
+    condition_report_for_roles(pairs, false)
+}
+
+fn condition_report_for_roles(
+    pairs: &[PairInput],
+    include_bytes: bool,
+) -> Result<ConditionReport, String> {
     if pairs.len() != PAIRS {
         return Err("a condition requires exactly three pairs".into());
     }
@@ -786,10 +807,15 @@ pub fn condition_report(pairs: &[PairInput]) -> Result<ConditionReport, String> 
     }
     let reports = pairs
         .iter()
-        .map(pair_report)
+        .map(|pair| pair_report(pair, include_bytes))
         .collect::<Result<Vec<_>, _>>()?;
     let mut pooled = Vec::new();
-    for role in ROLES {
+    let roles: &[Role] = if include_bytes {
+        &ROLES
+    } else {
+        &[Role::A, Role::C]
+    };
+    for &role in roles {
         for workload in WORKLOADS {
             let mut samples = Measures::<Vec<u64>>::default();
             for pair in pairs {
@@ -824,11 +850,15 @@ pub fn condition_report(pairs: &[PairInput]) -> Result<ConditionReport, String> 
         }
     }
     Ok(ConditionReport {
-        schema: 1,
+        schema: if include_bytes { 1 } else { 2 },
         scope: format!("single condition at {mode} mHz; not a B9 verdict"),
         verdict_scope: "files sealed (C) against IPC bytes (A): t331 gates after t338",
         verdict: fold_outcomes(reports.iter().map(|r| r.sealed_vs_ipc_outcome)),
-        bytes_vs_ipc_scope: "files bytes (B) against IPC bytes (A): reported, not the condition verdict",
+        bytes_vs_ipc_scope: if include_bytes {
+            "files bytes (B) against IPC bytes (A): reported, not the condition verdict"
+        } else {
+            "not run: file-byte uploads are retired; no B-arm result is claimed"
+        },
         bytes_vs_ipc_outcome: fold_outcomes(reports.iter().map(|r| r.bytes_vs_ipc_outcome)),
         pairs: reports,
         pooled,

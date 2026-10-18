@@ -220,6 +220,9 @@ pub fn check_pair(
     plans: Vec<(PlanRef, Vec<u8>)>,
 ) -> Result<Vec<VerifiedPlan>, String> {
     target.validate()?;
+    if target.mode_millihz != 120_000 {
+        return Err("historical byte/sealed calibration requires 120 Hz".into());
+    }
     let labels: Vec<&str> = plans.iter().map(|(r, _)| r.label.as_str()).collect();
     if labels != LABELS {
         return Err("calibration plans are bytes then sealed".into());

@@ -127,6 +127,7 @@ pub struct ImportedArm {
 }
 
 pub struct ImportedCondition {
+    pub campaign_schema: u8,
     pub condition: Condition,
     pub pairs: Vec<PairInput>,
     pub arms: Vec<ImportedArm>,
@@ -188,6 +189,7 @@ pub fn import_condition(
     }
     let pairs = pair_inputs(&manifest, condition, derived)?;
     Ok(ImportedCondition {
+        campaign_schema: manifest.schema,
         condition,
         pairs,
         arms,
@@ -196,7 +198,11 @@ pub fn import_condition(
 
 /// The gates are `condition_report`'s alone.
 pub fn condition_verdict(imported: &ImportedCondition) -> Result<ConditionReport, String> {
-    crate::shell_timing_compare::condition_report(&imported.pairs)
+    match imported.campaign_schema {
+        2 => crate::shell_timing_compare::condition_report(&imported.pairs),
+        3 => crate::shell_timing_compare::isb_condition_report(&imported.pairs),
+        _ => Err("unknown campaign schema".into()),
+    }
 }
 
 /// The names an arm must record: exactly the base set, plus the load record

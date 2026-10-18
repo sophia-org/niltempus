@@ -97,7 +97,7 @@ pub fn run(arguments: &[String]) -> Result<Vec<String>, String> {
         return Ok(vec![
             serde_json::to_string_pretty(&serde_json::json!({
                 "schema": 1, "campaign_sha256": digest, "condition": condition,
-                "scope": "trusted runner evidence; one 120 Hz condition, not a B9 verdict",
+                "scope": "trusted runner evidence; one declared-rate condition, not a B9 verdict",
                 "comparison": verdict, "arms": arms,
             }))
             .map_err(|e| e.to_string())?,

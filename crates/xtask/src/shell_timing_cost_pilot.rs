@@ -118,6 +118,9 @@ fn declaration(
     quiet: &str,
 ) -> Result<Workload, String> {
     target.validate()?;
+    if target.mode_millihz != 120_000 {
+        return Err("historical nine-arm pilots require 120 Hz".into());
+    }
     if quiet.trim().is_empty() || quiet.len() > 4096 {
         return Err("cost pilot needs a bounded quiet-window declaration".into());
     }
@@ -163,6 +166,9 @@ fn check_plans_height(
     inputs: Vec<(PlanRef, Vec<u8>)>,
 ) -> Result<Vec<VerifiedPlan>, String> {
     target.validate()?;
+    if target.mode_millihz != 120_000 {
+        return Err("historical nine-arm pilots require 120 Hz".into());
+    }
     if inputs
         .iter()
         .map(|(p, _)| p.label.as_str())

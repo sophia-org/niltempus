@@ -489,6 +489,71 @@ fn condition_requires_three_complete_unique_pairs() {
     assert!(condition_report(&[pair(1, None, None), pair(2, None, None), unordered]).is_err());
 }
 
+fn without_retired_bytes(mut pair: PairInput) -> PairInput {
+    pair.latency
+        .retain(|a| a.wire != "files" || a.source != ImageSource::Bytes);
+    pair.cost
+        .retain(|a| a.wire != "files" || a.source != ImageSource::Bytes);
+    let labels: std::collections::BTreeSet<_> = pair
+        .latency
+        .iter()
+        .map(|a| a.label.clone())
+        .chain(pair.cost.iter().map(|a| a.label.clone()))
+        .collect();
+    pair.order.retain(|id| labels.contains(id));
+    pair
+}
+
+#[test]
+fn isb_only_condition_keeps_every_gate_and_refuses_missing_or_extra_arms() {
+    let pairs = [1, 2, 3].map(|i| without_retired_bytes(pair(i, None, None)));
+    let report = isb_condition_report(&pairs).unwrap();
+    assert_eq!(report.schema, 2);
+    assert_eq!(report.verdict, Outcome::Pass);
+    assert_eq!(report.pooled.len(), 4);
+    assert_eq!(report.bytes_vs_ipc_outcome, Outcome::Inconclusive);
+    assert!(report.bytes_vs_ipc_scope.starts_with("not run"));
+    for row in &report.pairs {
+        assert_eq!(
+            row.sealed_vs_ipc
+                .iter()
+                .filter(|g| g.gate.starts_with("cost_"))
+                .count(),
+            4
+        );
+        assert!(row.bytes_vs_ipc.is_empty());
+        assert!(row.sealed_vs_bytes.is_empty());
+    }
+    assert!(isb_condition_report(&pairs[..2]).is_err());
+    assert!(condition_report(&pairs).is_err());
+    assert!(
+        isb_condition_report(&[
+            pair(1, None, None),
+            pair(2, None, None),
+            pair(3, None, None)
+        ])
+        .is_err()
+    );
+    let failed = [
+        without_retired_bytes(pair(1, None, None)),
+        without_retired_bytes(pair(2, Some(("c", 1001)), None)),
+        without_retired_bytes(pair(3, None, None)),
+    ];
+    assert_eq!(
+        isb_condition_report(&failed).unwrap().verdict,
+        Outcome::Fail
+    );
+    let uncertain = [
+        without_retired_bytes(pair(1, None, Some(("c", (100, 111))))),
+        without_retired_bytes(pair(2, None, None)),
+        without_retired_bytes(pair(3, None, None)),
+    ];
+    assert_eq!(
+        isb_condition_report(&uncertain).unwrap().verdict,
+        Outcome::Inconclusive
+    );
+}
+
 #[test]
 fn one_failing_pair_fails_the_condition_and_bytes_results_stay_separate() {
     // Pair 2's sealed arms present 1001 us later: a p95 failure in one pair.

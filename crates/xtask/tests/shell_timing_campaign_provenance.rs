@@ -674,7 +674,7 @@ fn invalid_calibration_targets_refuse() {
         ),
         ("wrong width", Box::new(|t| t.width = 2560)),
         ("wrong height", Box::new(|t| t.height = 720)),
-        ("wrong mode", Box::new(|t| t.mode_millihz = 60_000)),
+        ("wrong mode", Box::new(|t| t.mode_millihz = 90_000)),
         ("vrr on", Box::new(|t| t.vrr = true)),
     ];
     for (name, mutate) in invalid {
@@ -686,6 +686,26 @@ fn invalid_calibration_targets_refuse() {
             "{name} was accepted"
         );
     }
+}
+
+#[test]
+fn sixty_hz_target_still_requires_matching_captured_mode() {
+    use xtask::shell_timing_campaign_provenance::verify_environment;
+    let manifest = manifest();
+    let arm = manifest.arms[0].clone();
+    let evidence = base_evidence();
+    let receipts = evidence.receipts.clone();
+    let case = make_case(&evidence, &receipts);
+    let files = case.files(&arm, None);
+    let mut target = calibration_target();
+    target.mode_millihz = 60_000;
+    target.validate().unwrap();
+    let verified = verify_environment(&target, &files).unwrap();
+    assert!(
+        xtask::shell_timing_environment::environment_record(&verified.capture, &verified.expect)
+            .is_err(),
+        "120 Hz capture cannot qualify 60 Hz"
+    );
 }
 
 #[test]

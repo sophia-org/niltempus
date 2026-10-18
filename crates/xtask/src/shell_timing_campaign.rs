@@ -1,4 +1,4 @@
-//! Frozen arm ordering for the 120 Hz sealed/bytes campaign.
+//! Frozen ordering for historical three-source and ISB-only paired campaigns.
 //!
 //! This validates the declared matrix only. Artifact verification, attended
 //! execution, load evidence and environment capture are separate requirements;
@@ -86,18 +86,18 @@ fn identifier(value: &str) -> bool {
 
 impl Manifest {
     pub fn validate(&self) -> Result<(), String> {
-        if self.schema != 2
+        if !matches!(self.schema, 2 | 3)
             || !identifier(&self.id)
             || !identifier(&self.connector)
             || self.width != 1920
             || self.height != 1080
-            || self.mode_millihz != 120_000
+            || !(self.mode_millihz == 120_000 || self.schema == 3 && self.mode_millihz == 60_000)
             || self.vrr
             || self.load_workers != 16
             || self.quiet_window.trim().is_empty()
             || self.quiet_window.len() > 4096
         {
-            return Err("campaign requires an identified 1920x1080@120 Hz output, VRR off, 16 workers and a quiet window".into());
+            return Err("campaign requires 1920x1080 at the declared 60/120 Hz rate (legacy schema 2: 120 Hz), VRR off, 16 workers and a quiet window".into());
         }
         let card = self.environment.card.strip_prefix("card");
         if !card.is_some_and(|digits| {
@@ -107,13 +107,17 @@ impl Manifest {
         }) || self.environment.output == 0
             || self.environment.scale_milli == 0
             || !self.environment.scale_milli.is_multiple_of(1000)
+            || self.schema == 3 && self.environment.scale_milli != 1000
         {
             return Err(
                 "campaign requires a declared card, output id and applied integer scale".into(),
             );
         }
-        if self.arms.len() != 108 {
-            return Err("campaign requires all 108 arms; failed arms cannot be replaced".into());
+        let expected_arms = if self.schema == 3 { 72 } else { 108 };
+        if self.arms.len() != expected_arms {
+            return Err(format!(
+                "campaign requires all {expected_arms} arms; failed arms cannot be replaced"
+            ));
         }
         let mut ids = BTreeSet::new();
         let mut index = 0;
@@ -125,12 +129,14 @@ impl Manifest {
                         Measurement::CpuOnly,
                         Measurement::RustGlobal,
                     ] {
-                        let order = match pair {
-                            1 => [Variant::C, Variant::B, Variant::A],
-                            2 => [Variant::A, Variant::B, Variant::C],
-                            _ => [Variant::B, Variant::C, Variant::A],
+                        let order: &[Variant] = match (self.schema, pair) {
+                            (3, 2) => &[Variant::A, Variant::C],
+                            (3, _) => &[Variant::C, Variant::A],
+                            (_, 1) => &[Variant::C, Variant::B, Variant::A],
+                            (_, 2) => &[Variant::A, Variant::B, Variant::C],
+                            _ => &[Variant::B, Variant::C, Variant::A],
                         };
-                        for variant in order {
+                        for &variant in order {
                             let arm = &self.arms[index];
                             index += 1;
                             if (

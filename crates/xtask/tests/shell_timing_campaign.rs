@@ -75,6 +75,34 @@ fn full_matrix_is_bound_without_requiring_distinct_restart_plan_bytes() {
 }
 
 #[test]
+fn isb_only_matrix_preserves_both_rates_and_three_balanced_restarts() {
+    for mode in [60_000, 120_000] {
+        let mut m = manifest();
+        m.schema = 3;
+        m.mode_millihz = mode;
+        m.arms.retain(|arm| arm.variant != Variant::B);
+        assert_eq!(m.arms.len(), 72);
+        m.validate().unwrap();
+        let digest = m.digest().unwrap();
+        m.environment.scale_milli = 2000;
+        assert!(m.validate().is_err());
+        m.environment.scale_milli = 1000;
+        m.arms.swap(0, 1);
+        assert!(m.validate().is_err());
+        m.arms.swap(0, 1);
+        assert_eq!(m.digest().unwrap(), digest);
+        m.arms.pop();
+        assert!(m.validate().is_err());
+    }
+    let mut legacy = manifest();
+    legacy.mode_millihz = 60_000;
+    assert!(
+        legacy.validate().is_err(),
+        "legacy captures retain their shape"
+    );
+}
+
+#[test]
 fn environment_target_is_frozen_and_legacy_manifests_are_refused() {
     let original = manifest().digest().unwrap();
     let mut m = manifest();
