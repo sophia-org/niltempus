@@ -56,6 +56,10 @@ pub struct Request {
     pub frames: usize,
     pub mode_millihz: u64,
     pub instrumentation: String,
+    /// Freeze the explicit environment observation flag into the host argv.
+    /// Legacy single-arm capture plans leave this false.
+    #[serde(default)]
+    pub environment_readback: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -335,7 +339,7 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
     {
         return Err("profile must explicitly select empty startup".into());
     }
-    Ok(vec![
+    let mut argv = vec![
         absolute(&request.artifacts["sophia"].path)?.into(),
         "session".into(),
         "run".into(),
@@ -358,7 +362,11 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
             "--factotum-pam-helper={}",
             absolute(&request.artifacts["pam-helper"].path)?
         ),
-    ])
+    ];
+    if request.environment_readback {
+        argv.push("--output-environment-readback".into());
+    }
+    Ok(argv)
 }
 
 /// Match Factotum's helper custody rule before an attended launch. A Nix store
@@ -555,7 +563,34 @@ pub fn verify_prepared(bytes: &[u8]) -> Result<(Request, u64), String> {
     Ok((plan.request, peer.probe_bytes))
 }
 
+/// Attended campaign hooks. Preparation happens only after console, source,
+/// artifact and runner checks, with a new private stage directory. `finish`
+/// must retain evidence and stop owned load workers even when launch fails.
+pub trait CampaignObserver {
+    fn prepare(&mut self, request: &Request, stage: &Path) -> Result<PathBuf, String>;
+    fn observe(&mut self, wrapper_pid: u32, logs: &Path) -> Result<(), String>;
+    fn finish(&mut self, stage: &Path) -> Result<(), String>;
+}
+
 pub fn run(args: &[String]) -> Result<Vec<String>, String> {
+    run_inner(args, None)
+}
+
+/// Uses exactly the same attended launch and restoration path as run-native.
+pub fn run_observed(
+    args: &[String],
+    observer: &mut dyn CampaignObserver,
+) -> Result<Vec<String>, String> {
+    if args.first().map(String::as_str) != Some("run-native") {
+        return Err("campaign observation requires run-native".into());
+    }
+    run_inner(args, Some(observer))
+}
+
+fn run_inner(
+    args: &[String],
+    mut observer: Option<&mut dyn CampaignObserver>,
+) -> Result<Vec<String>, String> {
     match args {
         [command, input, output] if command == "prepare-native" => {
             let request: Request = serde_json::from_slice(&bounded(Path::new(input), MAX_INPUT)?)
@@ -586,6 +621,12 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
             let plan: Plan = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
             if plan.schema != 1 || validate(&plan.request)? != plan.argv {
                 return Err("plan arguments differ".into());
+            }
+            if plan.request.environment_readback != observer.is_some() {
+                return Err(
+                    "environment readback requires the campaign observer and its frozen flag"
+                        .into(),
+                );
             }
             process::attended_with(&plan.request.tty, "SOPHIA_SHELL_TIMING_ARM")?;
             validate_pam_helper(&plan.request.artifacts["pam-helper"].path)?;
@@ -618,24 +659,52 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
                 .sophia_source
                 .path
                 .join("tools/run_sophia_session.sh");
-            let environment = if plan.request.wire == "ipc" {
-                vec![("SOPHIA_COMPARATOR_ADMISSION", "protected-legacy-baseline")]
-            } else {
-                vec![]
-            };
-            let result = process::run_bound(
-                &process::BoundSession {
-                    wrapper: &wrapper,
-                    argv: &plan.argv,
-                    preflight: absolute(&plan.request.artifacts["preflight"].path)?,
-                    tty: &plan.request.tty,
-                    runtime: plan.request.runtime_ms,
-                    label: "shell-timing",
-                    arm: "SOPHIA_SHELL_TIMING_ARM",
-                    environment: &environment,
-                },
-                stage,
-            );
+            let mut result = (|| {
+                let destination = match observer.as_deref_mut() {
+                    Some(observer) => Some(observer.prepare(&plan.request, stage)?),
+                    None => None,
+                };
+                let mut environment = vec![("SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE", "1")];
+                if plan.request.wire == "ipc" {
+                    environment.push(("SOPHIA_COMPARATOR_ADMISSION", "protected-legacy-baseline"));
+                }
+                if let Some(destination) = &destination {
+                    if destination.parent() != Some(stage) || destination.file_name().is_none() {
+                        return Err(
+                            "environment receiver must be inside the private run directory".into(),
+                        );
+                    }
+                    environment.push(("SOPHIA_OUTPUT_ENVIRONMENT_ARM", "1"));
+                    environment.push(("SOPHIA_OUTPUT_ENVIRONMENT_SOCKET", absolute(destination)?));
+                }
+                process::run_bound_observed(
+                    &process::BoundSession {
+                        wrapper: &wrapper,
+                        argv: &plan.argv,
+                        preflight: absolute(&plan.request.artifacts["preflight"].path)?,
+                        tty: &plan.request.tty,
+                        runtime: plan.request.runtime_ms,
+                        label: "shell-timing",
+                        arm: "SOPHIA_SHELL_TIMING_ARM",
+                        environment: &environment,
+                    },
+                    stage,
+                    |pid, logs| match observer.as_deref_mut() {
+                        Some(observer) => observer.observe(pid, logs),
+                        None => Ok(()),
+                    },
+                )
+            })();
+            if let Some(observer) = observer
+                && let Err(error) = observer.finish(stage)
+            {
+                result = Err(match result {
+                    Ok(()) => format!("campaign observation finalization failed: {error}"),
+                    Err(previous) => {
+                        format!("{previous}; campaign observation finalization failed: {error}")
+                    }
+                });
+            }
             let record = serde_json::json!({"schema":1,"status":if result.is_ok() {"captured_only"} else {"failed"},"error":result.as_ref().err()});
             write(
                 &stage.join("result.json"),

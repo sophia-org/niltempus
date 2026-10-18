@@ -172,6 +172,7 @@ fn request(arm: &Arm) -> xtask::shell_timing_native::Request {
         frames: arm.frames,
         mode_millihz: 120_000,
         instrumentation: "none".into(),
+        environment_readback: true,
     }
 }
 
@@ -192,6 +193,12 @@ fn arm_labels_cannot_substitute_for_prepared_workload() {
     assert!(validate_arm_plan(&m, a, &r, 0).is_err());
     let mut r = request(a);
     r.artifacts.get_mut("peer-config").unwrap().sha256 = "c".repeat(64);
+    assert!(validate_arm_plan(&m, a, &r, 0).is_err());
+    let mut r = request(a);
+    r.environment_readback = false;
+    assert!(validate_arm_plan(&m, a, &r, 0).is_err());
+    let mut r = request(a);
+    r.output = m.environment.output + 1;
     assert!(validate_arm_plan(&m, a, &r, 0).is_err());
 }
 

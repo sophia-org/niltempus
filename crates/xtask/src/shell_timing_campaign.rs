@@ -212,6 +212,8 @@ pub fn validate_arm_plan(
         || request.frames != arm.frames
         || request.runtime_ms != arm.runtime_ms
         || request.mode_millihz != manifest.mode_millihz
+        || request.output != manifest.environment.output
+        || !request.environment_readback
         || request.artifacts.get("peer-config").map(|a| &a.sha256) != Some(&arm.peer_config_sha256)
     {
         return Err(format!("prepared workload does not match arm {}", arm.id));

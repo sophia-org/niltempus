@@ -33,6 +33,7 @@ impl Fixture {
                 frames: 3,
                 mode_millihz: 60_000,
                 instrumentation: "none".into(),
+                environment_readback: false,
             },
         };
         // These fixtures are hashed only. None may be executed by validation.
@@ -142,6 +143,29 @@ fn environment_capture_preserves_unknown_and_duplicate_records_for_validation() 
     assert!(environment_capture(json).is_err());
     assert!(environment_capture(output.trim_end()).is_err());
     assert!(environment_capture(&format!("{}\n{output}", "x".repeat(65537))).is_err());
+}
+
+#[test]
+fn environment_observation_is_explicit_in_the_frozen_host_arguments() {
+    let mut f = Fixture::new("environment-argv", "files");
+    let original = validate(&f.request).unwrap();
+    assert!(
+        !original
+            .iter()
+            .any(|arg| arg == "--output-environment-readback")
+    );
+    f.request.environment_readback = true;
+    let observed = validate(&f.request).unwrap();
+    assert_eq!(&observed[..original.len()], original);
+    assert_eq!(observed.last().unwrap(), "--output-environment-readback");
+    let mut legacy = serde_json::to_value(&f.request).unwrap();
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("environment_readback");
+    let legacy: Request = serde_json::from_value(legacy).unwrap();
+    assert!(!legacy.environment_readback);
+    assert_eq!(validate(&legacy).unwrap(), original);
 }
 
 #[test]
@@ -418,6 +442,54 @@ fn physical_launch_requires_arm_and_actual_console_before_source_or_process_work
             }),
             "{error}"
         );
+        assert!(!out.exists());
+    }
+}
+
+#[test]
+fn observation_cannot_start_before_launch_prerequisites_or_without_its_frozen_flag() {
+    use xtask::shell_timing_native::{CampaignObserver, run, run_observed};
+    struct MustNotStart;
+    impl CampaignObserver for MustNotStart {
+        fn prepare(&mut self, _: &Request, _: &std::path::Path) -> Result<PathBuf, String> {
+            panic!("observer must not start before attended/source checks")
+        }
+        fn observe(&mut self, _: u32, _: &std::path::Path) -> Result<(), String> {
+            panic!("no child may have launched")
+        }
+        fn finish(&mut self, _: &std::path::Path) -> Result<(), String> {
+            panic!("observer must not be entered before preparation")
+        }
+    }
+    let mut f = Fixture::new("observed-unarmed", "files");
+    let path = f.root.join("plan.json");
+    let out = f.root.join("not-created");
+    for enabled in [false, true] {
+        f.request.environment_readback = enabled;
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "schema":1,"request":f.request,"argv":validate(&f.request).unwrap()
+        }))
+        .unwrap();
+        fs::write(&path, &bytes).unwrap();
+        let args = vec![
+            "run-native".into(),
+            path.display().to_string(),
+            format!("{:x}", Sha256::digest(&bytes)),
+            out.display().to_string(),
+        ];
+        if enabled {
+            assert_eq!(
+                run(&args).unwrap_err(),
+                "environment readback requires the campaign observer and its frozen flag"
+            );
+        }
+        let error = run_observed(&args, &mut MustNotStart).unwrap_err();
+        if !enabled {
+            assert_eq!(
+                error,
+                "environment readback requires the campaign observer and its frozen flag"
+            );
+        }
         assert!(!out.exists());
     }
 }
