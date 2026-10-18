@@ -232,3 +232,48 @@ fn accepted_pair_order_keeps_both_files_variants_on_the_required_side_of_ipc() {
         "superseded ABC first pair must refuse"
     );
 }
+
+#[test]
+fn reopening_requires_the_original_complete_evidence() {
+    use sha2::{Digest, Sha256};
+    use std::fs;
+    // Integrity-only fixture. These bytes deliberately are not native plans;
+    // verify_arm must still reject them before any execution can be considered.
+    let root = std::env::temp_dir().join(format!("campaign-integrity-{}", std::process::id()));
+    fs::create_dir(&root).unwrap();
+    let mut m = manifest();
+    let bytes = b"integrity fixture, not an executable plan";
+    for arm in &mut m.arms {
+        arm.plan_sha256 = format!("{:x}", Sha256::digest(bytes));
+    }
+    let dir = root.join(&m.id);
+    fs::create_dir(&dir).unwrap();
+    fs::write(dir.join("manifest.json"), serde_json::to_vec(&m).unwrap()).unwrap();
+    let digest = m.digest().unwrap();
+    for arm in &m.arms {
+        fs::create_dir(dir.join(&arm.id)).unwrap();
+        fs::write(dir.join(&arm.id).join("plan.json"), bytes).unwrap();
+    }
+    assert!(
+        verify_frozen(&dir, &digest).is_err(),
+        "no READY means partial preparation"
+    );
+    fs::write(dir.join("READY"), &digest).unwrap();
+    assert!(verify_frozen(&dir, &digest).is_ok());
+    assert!(
+        verify_arm(&dir, &digest, &m.arms[0].id).is_err(),
+        "integrity is not plan validity"
+    );
+    assert!(verify_frozen(&dir, &"f".repeat(64)).is_err());
+    let last = dir.join(&m.arms.last().unwrap().id).join("plan.json");
+    fs::write(&last, b"replacement").unwrap();
+    assert!(
+        verify_frozen(&dir, &digest).is_err(),
+        "even the last arm is checked"
+    );
+    fs::write(&last, bytes).unwrap();
+    m.quiet_window.push_str(" changed");
+    fs::write(dir.join("manifest.json"), serde_json::to_vec(&m).unwrap()).unwrap();
+    assert!(verify_frozen(&dir, &digest).is_err());
+    fs::remove_dir_all(root).unwrap();
+}

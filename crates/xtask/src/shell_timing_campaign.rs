@@ -198,7 +198,7 @@ pub fn validate_arm_plan(
 
 #[path = "shell_timing_campaign_store.rs"]
 mod store;
-pub use store::freeze;
+pub use store::{freeze, verify_arm, verify_frozen};
 
 /// Device-free preparation input. Plans are existing prepare-native outputs.
 #[derive(Deserialize)]

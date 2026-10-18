@@ -161,3 +161,49 @@ fn persist(
 #[cfg(test)]
 #[path = "../tests/support/shell_timing_campaign_store.rs"]
 mod tests;
+
+/// Reopen frozen evidence by its caller-held digest. This checks preparation
+/// integrity only; it neither certifies the environment nor authorizes a run.
+pub fn verify_frozen(directory: &Path, digest: &str) -> Result<Manifest, String> {
+    if !directory.is_absolute() || !crate::hex(digest, 64) {
+        return Err("absolute campaign directory and full digest required".into());
+    }
+    let manifest: Manifest = serde_json::from_slice(&read_plan(&directory.join("manifest.json"))?)
+        .map_err(|e| e.to_string())?;
+    if manifest.digest()? != digest
+        || read_plan(&directory.join("READY"))? != digest.as_bytes()
+        || directory.file_name().and_then(|s| s.to_str()) != Some(&manifest.id)
+    {
+        return Err("campaign identity or readiness differs".into());
+    }
+    for arm in &manifest.arms {
+        if sha256(&read_plan(&directory.join(&arm.id).join("plan.json"))?) != arm.plan_sha256 {
+            return Err(format!("frozen plan changed for {}", arm.id));
+        }
+    }
+    Ok(manifest)
+}
+
+/// Recheck a selected frozen arm and every artifact it uses immediately before
+/// launch. Attended, environment, load and run-order checks remain the runner's
+/// obligation; successful verification alone must never start a session.
+pub fn verify_arm(
+    directory: &Path,
+    digest: &str,
+    arm_id: &str,
+) -> Result<crate::shell_timing_native::Request, String> {
+    let manifest = verify_frozen(directory, digest)?;
+    let arm = manifest
+        .arms
+        .iter()
+        .find(|a| a.id == arm_id)
+        .ok_or("unknown campaign arm")?;
+    let bytes = read_plan(&directory.join(&arm.id).join("plan.json"))?;
+    if sha256(&bytes) != arm.plan_sha256 {
+        return Err("frozen plan changed during verification".into());
+    }
+    let (request, probe) = verify_prepared(&bytes)?;
+    validate_arm_plan(&manifest, arm, &request, probe)?;
+    verify_sources(&request)?;
+    Ok(request)
+}
