@@ -33,6 +33,7 @@ pub mod shell_timing_campaign_provenance;
 pub mod shell_timing_campaign_run;
 pub mod shell_timing_compare;
 pub mod shell_timing_cost;
+pub mod shell_timing_cost_pilot;
 pub mod shell_timing_cpu_worker;
 pub mod shell_timing_environment;
 pub mod shell_timing_environment_capture;

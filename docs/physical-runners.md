@@ -63,6 +63,62 @@ counts socket copies or memory bandwidth. `cpu_ns_per_frame` uses the same
 outward-rounded bounds as CPU per MiB. Existing byte-path gate calculations
 are unchanged. No report by itself establishes a paired performance pass.
 
+## t331 bulk cost diagnostic
+
+The separate cost pilot freezes six prepared plans and nine attempts. It uses
+1000 changing frames with a 4 MiB transfer probe plus the 1920×24 panel per
+frame, no warmup exclusion, and a fresh 60-second Session for each arm.
+The selected target is DP-1 at 1920×1080, nominal 120000 mHz, scale 1, VRR off.
+Keep the governor, affinity and scheduling identical across all arms; the
+report refuses differences in retained environment fact values. CPU-only and
+Rust allocation-counting builds must come from the same signed sources.
+
+The request is `schema: 1`, `target` (the calibration target fields), a
+`quiet_window` declaration, and `plans`, an object mapping these six names to
+absolute prepared-plan paths: `cpu-ipc`, `cpu-bytes`, `cpu-sealed`, `alloc-ipc`,
+`alloc-bytes`, `alloc-sealed`. Profiles may differ only in their checked peer
+executable, configuration and transport fields. The host and peer binaries
+may differ across instrumentation sets, but not within a set. Prepared plans
+and artifacts remain external, bound by their paths and digests; retain them.
+
+```text
+/absolute/prepared/xtask shell-timing prepare-cost-pilot REQUEST_JSON NEW_FROZEN_DIR
+SOPHIA_SHELL_TIMING_ARM=1 /absolute/prepared/xtask shell-timing run-cost-pilot-arm FROZEN_DIR SHA256 ARM
+/absolute/prepared/xtask shell-timing report-cost-pilot FROZEN_DIR SHA256
+```
+
+Run one arm at a time from the attended declared console, in this frozen order:
+
+1. `cpu-1-ipc`, `cpu-1-bytes`, `cpu-1-sealed`.
+2. `cpu-2-sealed`, `cpu-2-bytes`, `cpu-2-ipc`.
+3. `alloc-1-ipc`, `alloc-1-bytes`, `alloc-1-sealed`.
+
+Each attempt lives under `FROZEN_DIR/ARM/`, with `claim.json`, `attempt.json`
+and `run/`. Claims bind the previous result digest. A missing, unfinished or
+failed predecessor prevents subsequent attempts. A failed or unfinished arm
+requires a new pilot; preserve the old evidence. Preparation and reporting
+open no devices. Launch still requires the prepared runner image, source
+checks, foreground console and explicit arm flag. The normal desktop remains
+outside the experiment; this route launches no CPU load workers.
+
+The report requires schema-3 counters, authenticated environment receipts and
+complete native presentation joins for every arm. It retains Session, peer
+and combined CPU, allocation-operation and minor/major page-fault bounds,
+normalized per frame and logical MiB where applicable. CPU comparisons use
+only CPU-only arms; allocation comparisons use Rust-global arms. Both CPU
+blocks and their variation are shown separately. Differences use cross-bounds;
+counter bounds are not statistical confidence intervals. One allocation
+observation per variant does not establish repeatability.
+
+All three paths use the same canvas, allocated inside the first measured
+frame and rewritten for each upload. Sealed still creates, writes and seals a
+fresh memfd each upload; SDK byte chunk allocations remain measured. Schema-3
+sampling adds a getrusage read inside each snapshot's clock bounds. Page-fault
+counts do not measure kernel page allocation, zeroing, copy volume or their
+CPU cost. Old schema-1/2 captures remain replayable without invented fault
+counts, but cannot supply this pilot. This diagnostic does not close t331,
+produce a B9 verdict, or choose a transport.
+
 ## What every runner requires
 
 ### Paired sealed/bytes panel calibration

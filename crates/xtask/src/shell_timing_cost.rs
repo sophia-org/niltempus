@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 #[derive(Debug)]
 struct Counter {
+    schema: u8,
     cpu_only: bool,
     profiling: bool,
     pid: u64,
@@ -17,9 +18,11 @@ struct Counter {
     reallocations: u64,
     deallocations: u64,
     bytes: u64,
+    minor_faults: u64,
+    major_faults: u64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize)]
 pub struct Bounds {
     pub lower: u64,
     pub upper: u64,
@@ -48,6 +51,36 @@ pub struct Report {
     pub frames: Vec<Frame>,
     pub whole_workload: Cost,
     pub normalized: Option<Normalized>,
+    /// Schema-3 diagnostics only. Legacy captures retain their original output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<ProcessDiagnostics>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProcessDiagnostics {
+    pub counter_schema: u8,
+    pub fault_scope: &'static str,
+    pub session: ProcessCost,
+    pub peer: ProcessCost,
+    pub combined: ProcessCost,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProcessCost {
+    pub cpu_ns: Bounds,
+    pub allocation_operations: Option<Bounds>,
+    pub minor_faults: Bounds,
+    pub major_faults: Bounds,
+    pub normalized: Option<ProcessNormalized>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProcessNormalized {
+    pub cpu_ns_per_frame: Bounds,
+    pub cpu_ns_per_logical_mib: Bounds,
+    pub allocation_operations_per_frame: Option<Bounds>,
+    pub minor_faults_per_frame: Bounds,
+    pub major_faults_per_frame: Bounds,
 }
 
 #[derive(Debug, Serialize)]
@@ -152,6 +185,25 @@ pub fn measure_journal(
             .map(|bounds| normalized(bounds, 1, expected as u64))
             .transpose()?,
     });
+    if let Some(diagnostics) = &mut report.diagnostics {
+        for cost in [
+            &mut diagnostics.session,
+            &mut diagnostics.peer,
+            &mut diagnostics.combined,
+        ] {
+            cost.normalized = Some(ProcessNormalized {
+                cpu_ns_per_frame: normalized(&cost.cpu_ns, 1, expected as u64)?,
+                cpu_ns_per_logical_mib: normalized(&cost.cpu_ns, 1048576, uploaded_bytes)?,
+                allocation_operations_per_frame: cost
+                    .allocation_operations
+                    .as_ref()
+                    .map(|b| normalized(b, 1, expected as u64))
+                    .transpose()?,
+                minor_faults_per_frame: normalized(&cost.minor_faults, 1, expected as u64)?,
+                major_faults_per_frame: normalized(&cost.major_faults, 1, expected as u64)?,
+            });
+        }
+    }
     Ok(report)
 }
 
@@ -196,15 +248,31 @@ fn counters(log: &str, process: &str) -> Result<Vec<Counter>, String> {
         let mut f = BTreeMap::new();
         for word in line[at..].split_whitespace().skip(1) {
             let (key, value) = word.split_once('=').ok_or("malformed counter record")?;
-            if (!required.contains(&key) && key != "mode") || f.insert(key, value).is_some() {
+            if (!required.contains(&key)
+                && !["mode", "minor_faults", "major_faults"].contains(&key))
+                || f.insert(key, value).is_some()
+            {
                 return Err("unknown or repeated counter field".into());
             }
         }
-        let cpu_only = f.get("schema") == Some(&"2") && f.get("mode") == Some(&"cpu-only");
-        let profiling = f.get("schema") == Some(&"2") && f.get("mode") == Some(&"profile");
+        let schema = match f.get("schema").copied() {
+            Some("1") => 1,
+            Some("2") => 2,
+            Some("3") => 3,
+            _ => return Err("invalid counter schema or process".into()),
+        };
+        let cpu_only = schema >= 2 && f.get("mode") == Some(&"cpu-only");
+        let profiling = schema >= 2 && f.get("mode") == Some(&"profile");
+        let valid_mode = match schema {
+            1 => !f.contains_key("mode"),
+            2 => cpu_only || profiling,
+            _ => cpu_only || profiling || f.get("mode") == Some(&"rust-global"),
+        };
         if !required.iter().all(|key| f.contains_key(key))
-            || f.len() != required.len() + usize::from(cpu_only || profiling)
-            || (!cpu_only && !profiling && f.get("schema") != Some(&"1"))
+            || f.len()
+                != required.len() + usize::from(schema >= 2) + if schema == 3 { 2 } else { 0 }
+            || !valid_mode
+            || (schema == 3) != (f.contains_key("minor_faults") && f.contains_key("major_faults"))
             || !matches!(f["process"], "session" | "peer")
         {
             return Err("invalid counter schema or process".into());
@@ -220,6 +288,7 @@ fn counters(log: &str, process: &str) -> Result<Vec<Counter>, String> {
             text.parse().map_err(|_| format!("overflowing {key}"))
         };
         let row = Counter {
+            schema,
             cpu_only,
             profiling,
             pid: n("pid")?,
@@ -232,6 +301,8 @@ fn counters(log: &str, process: &str) -> Result<Vec<Counter>, String> {
             reallocations: n("reallocations")?,
             deallocations: n("deallocations")?,
             bytes: n("bytes_allocated")?,
+            minor_faults: if schema == 3 { n("minor_faults")? } else { 0 },
+            major_faults: if schema == 3 { n("major_faults")? } else { 0 },
         };
         if cpu_only
             && (row.allocations != 0
@@ -245,7 +316,8 @@ fn counters(log: &str, process: &str) -> Result<Vec<Counter>, String> {
             return Err("invalid counter identity or clock bounds".into());
         }
         if let Some(old) = result.last()
-            && (old.cpu_only != row.cpu_only
+            && (old.schema != row.schema
+                || old.cpu_only != row.cpu_only
                 || old.profiling != row.profiling
                 || old.pid != row.pid
                 || old.after > row.before
@@ -253,7 +325,9 @@ fn counters(log: &str, process: &str) -> Result<Vec<Counter>, String> {
                 || old.allocations > row.allocations
                 || old.reallocations > row.reallocations
                 || old.deallocations > row.deallocations
-                || old.bytes > row.bytes)
+                || old.bytes > row.bytes
+                || old.minor_faults > row.minor_faults
+                || old.major_faults > row.major_faults)
         {
             return Err("counter process changed or counters/clock moved backward".into());
         }
@@ -271,7 +345,13 @@ fn allocation_operations(c: &Counter) -> Result<u64, String> {
         .ok_or_else(|| "allocation count overflow".into())
 }
 
-fn cost(host: &[Counter], start: &Counter, end: &Counter) -> Result<Cost, String> {
+/// Session bounds, exact peer delta, and their conservative sum, in that order.
+fn split_range(
+    host: &[Counter],
+    start: &Counter,
+    end: &Counter,
+    value: fn(&Counter) -> Result<u64, String>,
+) -> Result<[Bounds; 3], String> {
     let outer_start = host
         .partition_point(|s| s.after <= start.before)
         .checked_sub(1)
@@ -284,24 +364,44 @@ fn cost(host: &[Counter], start: &Counter, end: &Counter) -> Result<Cost, String
     let inner_end = host
         .partition_point(|s| s.after <= end.before)
         .checked_sub(1);
-    let range = |value: fn(&Counter) -> Result<u64, String>| -> Result<Bounds, String> {
-        let peer = value(end)?
-            .checked_sub(value(start)?)
-            .ok_or("backward peer count")?;
-        let outer = value(&host[outer_end])?
-            .checked_sub(value(&host[outer_start])?)
-            .ok_or("backward host count")?;
-        let inner = match inner_end {
-            Some(last) if inner_start < last => value(&host[last])?
-                .checked_sub(value(&host[inner_start])?)
-                .ok_or("backward inner count")?,
-            _ => 0,
-        };
-        Ok(Bounds {
+    let peer = value(end)?
+        .checked_sub(value(start)?)
+        .ok_or("backward peer count")?;
+    let outer = value(&host[outer_end])?
+        .checked_sub(value(&host[outer_start])?)
+        .ok_or("backward host count")?;
+    let inner = match inner_end {
+        Some(last) if inner_start < last => value(&host[last])?
+            .checked_sub(value(&host[inner_start])?)
+            .ok_or("backward inner count")?,
+        _ => 0,
+    };
+    Ok([
+        Bounds {
+            lower: inner,
+            upper: outer,
+        },
+        Bounds {
+            lower: peer,
+            upper: peer,
+        },
+        Bounds {
             lower: peer.checked_add(inner).ok_or("lower count overflow")?,
             upper: peer.checked_add(outer).ok_or("upper count overflow")?,
-        })
-    };
+        },
+    ])
+}
+
+fn cost(host: &[Counter], start: &Counter, end: &Counter) -> Result<Cost, String> {
+    let outer_start = host
+        .partition_point(|s| s.after <= start.before)
+        .checked_sub(1)
+        .ok_or("no host snapshot wholly before client window")?;
+    let outer_end = host.partition_point(|s| s.before < end.after);
+    if outer_end == host.len() {
+        return Err("no host snapshot wholly after client window".into());
+    }
+    let range = |value| split_range(host, start, end, value).map(|values| values[2]);
     Ok(Cost {
         allocation_operations: if start.cpu_only {
             None
@@ -311,6 +411,35 @@ fn cost(host: &[Counter], start: &Counter, end: &Counter) -> Result<Cost, String
         process_cpu_ns: range(|c| Ok(c.cpu))?,
         outer_start_usec: host[outer_start].before,
         outer_end_usec: host[outer_end].after,
+    })
+}
+
+fn process_diagnostics(
+    host: &[Counter],
+    start: &Counter,
+    end: &Counter,
+) -> Result<ProcessDiagnostics, String> {
+    let cpu = split_range(host, start, end, |c| Ok(c.cpu))?;
+    let allocations = if start.cpu_only {
+        None
+    } else {
+        Some(split_range(host, start, end, allocation_operations)?)
+    };
+    let minor = split_range(host, start, end, |c| Ok(c.minor_faults))?;
+    let major = split_range(host, start, end, |c| Ok(c.major_faults))?;
+    let part = |index: usize| ProcessCost {
+        cpu_ns: cpu[index],
+        allocation_operations: allocations.map(|a| a[index]),
+        minor_faults: minor[index],
+        major_faults: major[index],
+        normalized: None,
+    };
+    Ok(ProcessDiagnostics {
+        counter_schema: 3,
+        fault_scope: "process user page faults; not kernel page allocation, zeroing or copy counts",
+        session: part(0),
+        peer: part(1),
+        combined: part(2),
     })
 }
 
@@ -339,7 +468,10 @@ pub fn measure(host_log: &str, peer_log: &str, offers: &[Offer]) -> Result<Repor
     if peer[0].pid == host[0].pid {
         return Err("peer and Session must be distinct processes".into());
     }
-    if peer[0].cpu_only != host[0].cpu_only || peer[0].profiling != host[0].profiling {
+    if peer[0].schema != host[0].schema
+        || peer[0].cpu_only != host[0].cpu_only
+        || peer[0].profiling != host[0].profiling
+    {
         return Err("Session and peer use different counter modes".into());
     }
     let mut frames = Vec::with_capacity(offers.len());
@@ -364,6 +496,11 @@ pub fn measure(host_log: &str, peer_log: &str, offers: &[Offer]) -> Result<Repor
         });
     }
     let whole_workload = cost(&host, &peer[0], peer.last().unwrap())?;
+    let diagnostics = if host[0].schema == 3 {
+        Some(process_diagnostics(&host, &peer[0], peer.last().unwrap())?)
+    } else {
+        None
+    };
     Ok(Report {
         instrumentation: if host[0].cpu_only {
             "cpu-only"
@@ -386,5 +523,6 @@ pub fn measure(host_log: &str, peer_log: &str, offers: &[Offer]) -> Result<Repor
         frames,
         whole_workload,
         normalized: None,
+        diagnostics,
     })
 }

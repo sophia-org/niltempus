@@ -28,6 +28,9 @@ const USAGE: &str = "usage:
   xtask shell-timing prepare-calibration REQUEST_JSON NEW_FROZEN_DIR
   xtask shell-timing run-calibration-arm FROZEN_DIR SHA256 bytes|sealed NEW_RUN_DIR
   xtask shell-timing report-calibration FROZEN_DIR SHA256 BYTES_RUN SEALED_RUN
+  xtask shell-timing prepare-cost-pilot REQUEST_JSON NEW_FROZEN_DIR
+  xtask shell-timing run-cost-pilot-arm FROZEN_DIR SHA256 ARM
+  xtask shell-timing report-cost-pilot FROZEN_DIR SHA256
   xtask shell-timing run-campaign-arm CAMPAIGN SHA256 ARM
   xtask shell-timing report-campaign-condition CAMPAIGN SHA256 idle|load
   xtask shell-timing cpu-worker DURATION_MS
@@ -74,6 +77,12 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
         }
         if arguments.get(1).map(String::as_str) == Some("freeze-campaign") {
             return xtask::shell_timing_campaign::run(&arguments[1..]);
+        }
+        if matches!(
+            arguments.get(1).map(String::as_str),
+            Some("prepare-cost-pilot" | "run-cost-pilot-arm" | "report-cost-pilot")
+        ) {
+            return xtask::shell_timing_cost_pilot::run(&arguments[1..]);
         }
         if matches!(
             arguments.get(1).map(String::as_str),

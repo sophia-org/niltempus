@@ -152,6 +152,7 @@ fn cost(
         source,
         workload,
         report: Report {
+            diagnostics: None,
             instrumentation,
             scope: "synthetic",
             cpu_scope: "synthetic",

@@ -89,7 +89,7 @@ pub struct VerifiedPlan {
 }
 
 /// A regular file, not a link, read with a hard bound.
-fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
+pub(crate) fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
     use rustix::fs::OFlags;
     let not_regular = || format!("{} is not a regular file", path.display());
     let file = std::fs::OpenOptions::new()
@@ -120,7 +120,7 @@ fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -132,14 +132,14 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
-fn create_private(directory: &Path) -> Result<(), String> {
+pub(crate) fn create_private(directory: &Path) -> Result<(), String> {
     std::fs::DirBuilder::new()
         .mode(0o700)
         .create(directory)
         .map_err(|e| format!("{}: {e}", directory.display()))
 }
 
-fn absolute(path: &Path) -> Result<&str, String> {
+pub(crate) fn absolute(path: &Path) -> Result<&str, String> {
     let text = path.to_str().ok_or("path is not UTF-8")?;
     if !path.is_absolute()
         || path
@@ -320,7 +320,7 @@ pub fn prepare(request: &Path, frozen: &Path) -> Result<String, String> {
     ))
 }
 
-fn attempt_error(error: &str) -> String {
+pub(crate) fn attempt_error(error: &str) -> String {
     let error = error.trim();
     let mut end = error.len().min(4000);
     while !error.is_char_boundary(end) {
@@ -434,7 +434,7 @@ pub fn run_arm(
 /// Static and scheduling fact values two arms must share. Pids, process
 /// start times, capture timestamps and source origins are excluded; the
 /// derived timing refresh is reported, never compared.
-fn comparable(environment: &Environment) -> serde_json::Value {
+pub(crate) fn comparable(environment: &Environment) -> serde_json::Value {
     let output = &environment.output.value;
     let renderer = &environment.renderer.value;
     let processes: Vec<_> = environment
@@ -485,7 +485,10 @@ type EnvironmentCheck<'a> =
     &'a dyn Fn(&ProvenanceTarget, &ArmFiles<'_>) -> Result<VerifiedEnvironment, String>;
 
 /// The provider's expectation must be the frozen target.
-fn check_target(target: &ProvenanceTarget, verified: &VerifiedEnvironment) -> Result<(), String> {
+pub(crate) fn check_target(
+    target: &ProvenanceTarget,
+    verified: &VerifiedEnvironment,
+) -> Result<(), String> {
     let expect = &verified.expect;
     let vrr = if target.vrr { Vrr::On } else { Vrr::Off };
     if expect.connector != target.connector

@@ -364,3 +364,148 @@ fn instrumentation_cannot_silently_disappear_or_enter_a_latency_only_run() {
     );
     assert!(for_mode("unknown", &capture, &offers()).is_err());
 }
+
+fn schema_three(log: &str) -> String {
+    log.lines()
+        .map(|line| {
+            let count: u64 = line
+                .split_whitespace()
+                .find_map(|w| w.strip_prefix("cpu_ns="))
+                .unwrap()
+                .parse::<u64>()
+                .unwrap()
+                / 100;
+            let line = line
+                .replace("schema=1", "schema=3 mode=rust-global")
+                .replace("schema=2", "schema=3");
+            format!("{line} minor_faults={count} major_faults={}\n", count / 10)
+        })
+        .collect()
+}
+
+#[test]
+fn schema_three_preserves_legacy_costs_and_splits_process_diagnostics() {
+    use xtask::shell_timing_cost::measure_journal;
+    let old = measure_journal(&host(), &peer(), &journal(), 2).unwrap();
+    let new = measure_journal(
+        &schema_three(&host()),
+        &schema_three(&peer()),
+        &journal(),
+        2,
+    )
+    .unwrap();
+    let mut new_json = serde_json::to_value(&new).unwrap();
+    assert!(
+        new_json
+            .as_object_mut()
+            .unwrap()
+            .remove("diagnostics")
+            .is_some()
+    );
+    assert_eq!(new_json, serde_json::to_value(old).unwrap());
+    let d = new.diagnostics.unwrap();
+    assert_eq!(d.counter_schema, 3);
+    assert_eq!(
+        (d.session.minor_faults.lower, d.session.minor_faults.upper),
+        (30, 50)
+    );
+    assert_eq!(
+        (d.peer.minor_faults.lower, d.peer.minor_faults.upper),
+        (15, 15)
+    );
+    assert_eq!(
+        (d.combined.minor_faults.lower, d.combined.minor_faults.upper),
+        (45, 65)
+    );
+    assert_eq!(
+        (d.combined.major_faults.lower, d.combined.major_faults.upper),
+        (5, 7)
+    );
+    assert_eq!(
+        d.combined.cpu_ns.lower,
+        d.session.cpu_ns.lower + d.peer.cpu_ns.lower
+    );
+    assert_eq!(
+        d.combined.cpu_ns.upper,
+        d.session.cpu_ns.upper + d.peer.cpu_ns.upper
+    );
+    let n = d.combined.normalized.unwrap();
+    assert_eq!(
+        (
+            n.minor_faults_per_frame.lower,
+            n.minor_faults_per_frame.upper
+        ),
+        (22, 33)
+    );
+    assert_eq!(
+        (
+            n.major_faults_per_frame.lower,
+            n.major_faults_per_frame.upper
+        ),
+        (2, 4)
+    );
+}
+
+#[test]
+fn schema_three_cpu_only_has_faults_but_no_allocation_claim() {
+    use xtask::shell_timing_cost::measure_journal;
+    let report = measure_journal(
+        &schema_three(&cpu_only(&host())),
+        &schema_three(&cpu_only(&peer())),
+        &journal(),
+        2,
+    )
+    .unwrap();
+    for process in [
+        &report.diagnostics.as_ref().unwrap().session,
+        &report.diagnostics.as_ref().unwrap().peer,
+        &report.diagnostics.as_ref().unwrap().combined,
+    ] {
+        assert!(process.allocation_operations.is_none());
+        assert!(
+            process
+                .normalized
+                .as_ref()
+                .unwrap()
+                .allocation_operations_per_frame
+                .is_none()
+        );
+    }
+}
+
+#[test]
+fn schema_three_refuses_incomplete_mixed_or_regressing_fault_evidence() {
+    let h = schema_three(&host());
+    let p = schema_three(&peer());
+    for bad in [
+        h.replace(" minor_faults=0", ""),
+        h.replace(" major_faults=0", ""),
+        h.replacen("minor_faults=0", "minor_faults=0 minor_faults=0", 1),
+        h.replace("minor_faults=20", "minor_faults=9"),
+        h.replace("major_faults=2", "major_faults=0"),
+        h.replace("minor_faults=20", "minor_faults=-1"),
+        h.replace("major_faults=2", "major_faults=18446744073709551616"),
+        h.replacen("schema=3", "schema=2", 1),
+    ] {
+        assert!(measure(&bad, &p, &offers()).is_err(), "accepted {bad}");
+    }
+    assert!(measure(&h, &peer(), &offers()).is_err());
+    assert!(measure(&host(), &p, &offers()).is_err());
+}
+
+#[test]
+fn schema_three_profile_remains_diagnostic_only() {
+    use xtask::shell_timing_cost::for_mode;
+    let capture = (schema_three(&host()) + &schema_three(&peer()))
+        .replace("mode=rust-global", "mode=profile");
+    assert!(
+        for_mode("profile", &capture, &offers())
+            .unwrap()
+            .unwrap()
+            .diagnostics
+            .is_some()
+    );
+    for mode in ["cpu-only", "rust-global", "none"] {
+        assert!(for_mode(mode, &capture, &offers()).is_err());
+    }
+}
