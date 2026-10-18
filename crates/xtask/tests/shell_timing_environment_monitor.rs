@@ -161,13 +161,14 @@ fn fixture(host_ready: bool) -> Fixture {
     write(
         &fx.proc_root.join(format!("{}/status", host())),
         &format!(
-            "Name:\thost\nUid:\t{uid} {uid} {uid} {uid}\nGid:\t{gid} {gid} {gid} {gid}\n\
-             Cpus_allowed_list:\t0-1\n"
+            "Name:\thost\nPid:\t{}\nUid:\t{uid} {uid} {uid} {uid}\nGid:\t{gid} {gid} {gid} {gid}\n\
+             Cpus_allowed_list:\t0-1\n",
+            host()
         ),
     );
     write(
         &fx.proc_root.join(format!("{PEER}/status")),
-        "Name:\tpeer\nUid:\t1000 1000 1000 1000\nGid:\t1000 1000 1000 1000\n\
+        "Name:\tpeer\nPid:\t300\nUid:\t1000 1000 1000 1000\nGid:\t1000 1000 1000 1000\n\
          Cpus_allowed_list:\t0-1\n",
     );
     fx
@@ -391,6 +392,181 @@ fn sticky_receiver_failure_latches_and_finish_retains_accepted_receipts() {
         evidence.end.static_sources.is_ok(),
         "end capture after failure"
     );
+}
+
+fn monotonic_now_usec() -> u64 {
+    let clock = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
+    u64::try_from(i128::from(clock.tv_sec) * 1_000_000 + i128::from(clock.tv_nsec) / 1_000).unwrap()
+}
+
+fn campaign_manifest() -> xtask::shell_timing_campaign::Manifest {
+    use xtask::shell_timing_campaign::{
+        Arm, Condition, EnvironmentTarget, Manifest, Measurement, Variant, Workload,
+    };
+    let mut arms = Vec::new();
+    for condition in [Condition::Idle, Condition::Load] {
+        for pair in 1..=3u8 {
+            for workload in [Workload::Panel, Workload::Bulk] {
+                for measurement in [
+                    Measurement::Latency,
+                    Measurement::CpuOnly,
+                    Measurement::RustGlobal,
+                ] {
+                    let order = match pair {
+                        1 => [Variant::C, Variant::B, Variant::A],
+                        2 => [Variant::A, Variant::B, Variant::C],
+                        _ => [Variant::B, Variant::C, Variant::A],
+                    };
+                    for variant in order {
+                        let index = arms.len();
+                        let (frames, warmup) = if measurement == Measurement::Latency {
+                            (1100, 100)
+                        } else {
+                            (1000, 0)
+                        };
+                        arms.push(Arm {
+                            id: format!("arm-{index}"),
+                            condition,
+                            pair,
+                            workload,
+                            measurement,
+                            variant,
+                            plan_sha256: "a".repeat(64),
+                            peer_config_sha256: "b".repeat(64),
+                            frames,
+                            warmup,
+                            runtime_ms: 60_000,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    Manifest {
+        schema: 2,
+        id: "campaign".into(),
+        connector: "DP-2".into(),
+        width: 1920,
+        height: 1080,
+        mode_millihz: 120_000,
+        vrr: false,
+        environment: EnvironmentTarget {
+            card: "card1".into(),
+            output: 3,
+            scale_milli: 1000,
+        },
+        load_workers: 16,
+        quiet_window: "declared quiet window".into(),
+        arms,
+    }
+}
+
+/// Monitor -> provider schema composition with a real monitor, real
+/// pidfd datagrams and the fixture proc/sys tree. The fixture
+/// bindings and static facts are supplied; the sender credentials
+/// and pidfd are real kernel facts about this test process. This is
+/// not a hardware or live-host claim.
+#[test]
+fn monitor_evidence_composes_into_the_m5_record() {
+    use xtask::shell_timing_campaign_import::{ArmFiles, ArmProvenance, check_measured_interval};
+    use xtask::shell_timing_campaign_provenance::TrustedRunnerProvenance;
+    use xtask::shell_timing_environment::{Interval, environment_record};
+
+    let fx = fixture(true);
+    let mut monitor = fx.monitor();
+    let stamp = monotonic_now_usec();
+    send_record(
+        &fx.socket,
+        format!(
+            "sophia_shell_environment_output schema=1 pid={} output=3 card=card1 \
+             connector=DP-2 width=1920 height=1080 refresh_millihz=120000 \
+             timing_refresh_millihz=119980 scale_milli=1000 vrr=off monotonic_usec={stamp}",
+            host()
+        )
+        .as_bytes(),
+    );
+    send_record(
+        &fx.socket,
+        format!(
+            "sophia_shell_environment_renderer schema=1 pid={} output=3 card=card1 \
+             driver=amdgpu vendor=Mesa renderer=AMD%20Radeon version=4.6 monotonic_usec={stamp}",
+            host()
+        )
+        .as_bytes(),
+    );
+    assert_eq!(monitor.observe(WRAPPER).unwrap(), MonitorTurn::Bound);
+    // The evidence comes only from monitor.finish(); no supplied
+    // MonitorEvidence constructor is involved.
+    let evidence = monitor.finish();
+    assert_eq!(evidence.outcome, MonitorOutcome::Bound);
+    assert_eq!(evidence.receipts.len(), 2);
+
+    let manifest = campaign_manifest();
+    let arm = manifest.arms[0].clone();
+    let provider = TrustedRunnerProvenance::new(manifest).unwrap();
+    let current_exe = std::env::current_exe().unwrap();
+    let artifact = |path: &Path| serde_json::json!({"path": path.display().to_string(), "sha256": "c".repeat(64)});
+    let mut artifacts = std::collections::BTreeMap::new();
+    artifacts.insert("sophia".to_string(), artifact(&current_exe));
+    artifacts.insert("peer".to_string(), artifact(&fx.peer_file));
+    artifacts.insert("runner".to_string(), artifact(&current_exe));
+    let plan = serde_json::to_vec(&serde_json::json!({
+        "schema": 1,
+        "request": {
+            "sophia_source": {"path": "/fixture/sophia-source", "commit": "d".repeat(40)},
+            "integration_source": {"path": "/fixture/integration", "commit": "e".repeat(40)},
+            "artifacts": artifacts,
+            "tty": "tty3",
+            "display": 1,
+            "input_seat": "seat0",
+            "runtime_ms": 60000,
+            "wire": "files",
+            "output": 3,
+            "frames": 1100,
+            "mode_millihz": 120000,
+            "instrumentation": "none",
+            "environment_readback": true
+        },
+        "argv": ["/fixture/sophia", "session"]
+    }))
+    .unwrap();
+    let environment_bytes = serde_json::to_vec(&evidence).unwrap();
+    let receipt_bytes = serde_json::to_vec(&evidence.receipts).unwrap();
+    let files = ArmFiles {
+        arm: &arm,
+        plan: &plan,
+        environment: &environment_bytes,
+        environment_receipts: &receipt_bytes,
+        load: None,
+    };
+    let verified = provider.environment(&files).unwrap();
+    let record = environment_record(&verified.capture, &verified.expect).unwrap();
+    assert_eq!(record.verdict, "environment_complete");
+    // The declared measurement is the proven lifetime: a raw span
+    // covering it passes, one ending past the proven-alive opening
+    // refuses.
+    let measured = verified.expect.measurement;
+    check_measured_interval(&verified, measured).unwrap();
+    assert!(
+        check_measured_interval(
+            &verified,
+            Interval {
+                start_usec: measured.start_usec,
+                end_usec: measured.end_usec + 1,
+            },
+        )
+        .is_err()
+    );
+    // A tampered sidecar receipt no longer matches the monitor
+    // evidence and cannot qualify.
+    let mut tampered = evidence.receipts.clone();
+    tampered[0].record.push_str(" forged=1");
+    let tampered_bytes = serde_json::to_vec(&tampered).unwrap();
+    let files = ArmFiles {
+        environment_receipts: &tampered_bytes,
+        ..files
+    };
+    assert!(provider.environment(&files).is_err());
 }
 
 #[test]
