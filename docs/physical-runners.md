@@ -65,6 +65,71 @@ are unchanged. No report by itself establishes a paired performance pass.
 
 ## What every runner requires
 
+### Frozen shell timing campaigns
+
+The campaign commands run one explicitly selected arm at a time. They do not
+start an automatic sequence or choose a connector. Freeze the complete manifest
+and prepared plans first with `shell-timing freeze-campaign`; the schema-2
+manifest fixes the output, card, applied scale, quiet window and all 108 arms.
+Every prepared request must set `environment_readback: true`. Use the same
+reviewed Sophia artifact for IPC bytes, files bytes and files sealed within
+each instrumentation method.
+
+From the declared foreground text console, invoke the **prepared runner
+executable**, not `cargo run`:
+
+```text
+SOPHIA_SHELL_TIMING_ARM=1 /absolute/prepared/xtask shell-timing run-campaign-arm /absolute/campaign CAMPAIGN_SHA256 ARM_ID
+```
+
+Console, source, PAM-helper, runner-image and absent-run-directory checks happen
+before claiming an arm. The launch repeats the checks. The claim is single-use:
+failed attempts are retained and cannot be replaced. An unfinished claim,
+including a failed final result write or changed predecessor chain, blocks the
+campaign. Retain that evidence and freeze a new campaign; do not remove claims
+or replace failed arms in place.
+
+The runner binds a private environment socket before starting the wrapper.
+It accepts host records only with kernel credentials, a matching live sender
+pidfd and supervised process-identity brackets. Raw session-log lines never
+supply environment authority. Start and end kernel, CPU-governor, online-CPU
+and DRM-driver snapshots must agree. These snapshots and leader-thread
+scheduling observations do not prove continuous stability between reads.
+
+Load arms start exactly 16 copies of the prepared runner's bounded CPU worker,
+before the monitor's capture window begins. They run at inherited scheduling
+and affinity; qualification requires normal policy, nice zero, all online CPUs,
+one thread, no descendants and positive CPU progress in every worker. The
+runner retains bracketed start/alive observations and stops/reaps workers on
+every normal error path. Only requested SIGTERM termination qualifies; timeout,
+natural exit, SIGKILL or incomplete cleanup refuses the load. Worker lifetime
+is arm runtime plus 120 seconds, including wrapper restoration and final
+observation room. No load is started by replay or import commands.
+
+Each arm retains `run/plan.json`, `result.json`, `session.log`,
+`environment.json`, `environment-receipts.json`, and, for load arms only,
+`load.json`. The attempt records their digests. Auxiliary split logs and samples
+remain diagnostic; the importer rebuilds timings and costs from retained raw
+evidence. `captured_only` means the run completed capture, not that any gate
+passed.
+
+After a complete condition, replay without devices:
+
+```text
+/absolute/prepared/xtask shell-timing report-campaign-condition /absolute/campaign CAMPAIGN_SHA256 idle
+/absolute/prepared/xtask shell-timing report-campaign-condition /absolute/campaign CAMPAIGN_SHA256 load
+```
+
+The JSON report includes every arm's evidence digests and environment facts,
+load intervals and CPU ticks, per-pair gate outcomes and reported-only pooled
+distributions. Read the comparison verdict; producing a report is not a pass.
+A missing, failed or inconsistent arm refuses the whole condition. Provenance
+assumes the trusted owned runner and retained attempt digests; arbitrary edited
+JSON is not authenticated. This campaign covers 120 Hz only and cannot close
+the separate 60 Hz B9 requirement or allocation-attribution/read-pairing work.
+
+### Prepared inputs
+
 No runner builds anything. Binaries and the pinned Sophia tree come from
 `cargo xtask prepare-physical-inputs` ([operations](operations.md#physical-gate-inputs)),
 called by the runner through `tools/lib/physical_inputs.sh`:

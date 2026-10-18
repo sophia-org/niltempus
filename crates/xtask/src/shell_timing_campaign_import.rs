@@ -5,8 +5,9 @@
 //!
 //! Environment and load facts come only through [`ArmProvenance`], a seam for
 //! root-owned authenticated delivery. The raw session log is never
-//! authentication and never supplies environment facts. No production
-//! provider exists yet, so nothing here can qualify a real campaign.
+//! authentication and never supplies environment facts. The attended runner's
+//! provider is [`crate::shell_timing_campaign_provenance::TrustedRunnerProvenance`];
+//! supplied test providers prove import mechanics only.
 use crate::shell_timing::{ImageSource, Window};
 use crate::shell_timing_campaign::{
     Arm, AttemptOutcome, Condition, Manifest, Measurement, Variant, Workload as ArmWorkload,

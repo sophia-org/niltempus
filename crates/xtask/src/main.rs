@@ -25,6 +25,8 @@ const USAGE: &str = "usage:
   xtask shell-timing cost-metrics HOST_COUNTERS PEER_COUNTERS CLIENT_NDJSON EXPECTED_OFFERS
   xtask shell-timing costs HOST_COUNTERS PEER_COUNTERS CLIENT_JSON
   xtask shell-timing freeze-campaign REQUEST_JSON EXISTING_CAMPAIGN_ROOT
+  xtask shell-timing run-campaign-arm CAMPAIGN SHA256 ARM
+  xtask shell-timing report-campaign-condition CAMPAIGN SHA256 idle|load
   xtask shell-timing cpu-worker DURATION_MS
   xtask shell-timing prepare-native REQUEST_JSON NEW_PLAN
   xtask shell-timing run-native PLAN_JSON PLAN_SHA256 NEW_RUN_DIR
@@ -69,6 +71,12 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
         }
         if arguments.get(1).map(String::as_str) == Some("freeze-campaign") {
             return xtask::shell_timing_campaign::run(&arguments[1..]);
+        }
+        if matches!(
+            arguments.get(1).map(String::as_str),
+            Some("run-campaign-arm" | "report-campaign-condition")
+        ) {
+            return xtask::shell_timing_campaign_run::run(&arguments[1..]);
         }
         if matches!(
             arguments.get(1).map(String::as_str),

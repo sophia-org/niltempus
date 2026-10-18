@@ -576,6 +576,48 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
     run_inner(args, None)
 }
 
+/// Read-only launch prerequisites, shared with the campaign entry point so
+/// routine preflight refusals do not consume its single-use arm claim.
+pub(crate) fn launch_prerequisites(request: &Request) -> Result<(), String> {
+    process::attended_with(&request.tty, "SOPHIA_SHELL_TIMING_ARM")?;
+    validate_pam_helper(&request.artifacts["pam-helper"].path)?;
+    source(&request.sophia_source)?;
+    source(&request.integration_source)?;
+    git(
+        &request.sophia_source,
+        &["ls-files", "--error-unmatch", "tools/run_sophia_session.sh"],
+    )?;
+    if std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .canonicalize()
+        .map_err(|e| e.to_string())?
+        != request.artifacts["runner"]
+            .path
+            .canonicalize()
+            .map_err(|e| e.to_string())?
+    {
+        return Err("run with the prepared runner executable".into());
+    }
+    let running = fs::metadata("/proc/self/exe").map_err(|e| e.to_string())?;
+    let prepared = fs::metadata(&request.artifacts["runner"].path).map_err(|e| e.to_string())?;
+    if (running.dev(), running.ino()) != (prepared.dev(), prepared.ino())
+        || file_digest(Path::new("/proc/self/exe"), 1024 * MAX_INPUT)?
+            != request.artifacts["runner"].sha256
+    {
+        return Err("running image differs from the prepared runner artifact".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn stage_available(stage: &Path) -> Result<(), String> {
+    absolute(stage)?;
+    match fs::symlink_metadata(stage) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+        Ok(_) => Err("run directory already exists".into()),
+    }
+}
+
 /// Uses exactly the same attended launch and restoration path as run-native.
 pub fn run_observed(
     args: &[String],
@@ -628,27 +670,9 @@ fn run_inner(
                         .into(),
                 );
             }
-            process::attended_with(&plan.request.tty, "SOPHIA_SHELL_TIMING_ARM")?;
-            validate_pam_helper(&plan.request.artifacts["pam-helper"].path)?;
-            source(&plan.request.sophia_source)?;
-            source(&plan.request.integration_source)?;
-            git(
-                &plan.request.sophia_source,
-                &["ls-files", "--error-unmatch", "tools/run_sophia_session.sh"],
-            )?;
-            if std::env::current_exe()
-                .map_err(|e| e.to_string())?
-                .canonicalize()
-                .map_err(|e| e.to_string())?
-                != plan.request.artifacts["runner"]
-                    .path
-                    .canonicalize()
-                    .map_err(|e| e.to_string())?
-            {
-                return Err("run with the prepared runner executable".into());
-            }
+            launch_prerequisites(&plan.request)?;
             let stage = Path::new(output);
-            absolute(stage)?;
+            stage_available(stage)?;
             fs::DirBuilder::new()
                 .mode(0o700)
                 .create(stage)
