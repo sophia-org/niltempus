@@ -31,8 +31,10 @@ pub mod shell_timing_cost;
 pub mod shell_timing_cpu_worker;
 pub mod shell_timing_environment;
 pub mod shell_timing_environment_capture;
+pub mod shell_timing_environment_socket;
 pub mod shell_timing_load;
 pub mod shell_timing_native;
+pub mod shell_timing_process_binding;
 pub mod verify_archives;
 
 pub(crate) fn hex(value: &str, length: usize) -> bool {
