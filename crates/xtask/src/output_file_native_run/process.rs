@@ -153,6 +153,19 @@ pub(crate) struct BoundSession<'a> {
 }
 
 pub(crate) fn run_bound(plan: &BoundSession<'_>, stage: &Path) -> Result<(), String> {
+    run_bound_observed(plan, stage, |_, _| Ok(()))
+}
+
+/// Poll campaign evidence beside the recovery wrapper. The observer receives
+/// the owned wrapper's PID and its private log directory, never a PID supplied
+/// by a client log. An observation failure invalidates the run but does not
+/// bypass normal Session shutdown and console restoration. Keep observing so
+/// the caller can retain end-of-run and load-cleanup evidence after a failure.
+pub(crate) fn run_bound_observed(
+    plan: &BoundSession<'_>,
+    stage: &Path,
+    mut observe: impl FnMut(u32, &Path) -> Result<(), String>,
+) -> Result<(), String> {
     let active = attended_with(plan.tty, plan.arm)?;
     let record = serde_json::json!({"schema":1,"planned_tty":plan.tty,"active_tty":format!("/dev/{active}"),"status":"matched"});
     new_log(&stage.join("foreground-console.json"))?
@@ -218,8 +231,12 @@ pub(crate) fn run_bound(plan: &BoundSession<'_>, stage: &Path) -> Result<(), Str
         ),
     };
     let deadline = Instant::now() + Duration::from_millis(runtime) + Duration::from_secs(90);
+    let mut observation_error = None;
     let status = loop {
         log_bounds(stage, &logs)?;
+        if let Err(error) = observe(child.child.id(), &logs) {
+            observation_error.get_or_insert(error);
+        }
         if let Some(status) = child.status()? {
             break status;
         }
@@ -249,6 +266,9 @@ pub(crate) fn run_bound(plan: &BoundSession<'_>, stage: &Path) -> Result<(), Str
         stage.join("session.log"),
     )
     .map_err(|e| e.to_string())?;
+    if let Some(error) = observation_error {
+        return Err(format!("native observation failed: {error}"));
+    }
     Ok(())
 }
 

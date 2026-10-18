@@ -52,6 +52,14 @@ pub struct Arm {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct EnvironmentTarget {
+    pub card: String,
+    pub output: u64,
+    pub scale_milli: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Manifest {
     pub schema: u8,
     pub id: String,
@@ -60,6 +68,8 @@ pub struct Manifest {
     pub height: u32,
     pub mode_millihz: u64,
     pub vrr: bool,
+    /// Frozen before the first run; never selected from a successful capture.
+    pub environment: EnvironmentTarget,
     pub load_workers: u8,
     /// Human declaration of the quiet window; capture records actual interference.
     pub quiet_window: String,
@@ -76,7 +86,7 @@ fn identifier(value: &str) -> bool {
 
 impl Manifest {
     pub fn validate(&self) -> Result<(), String> {
-        if self.schema != 1
+        if self.schema != 2
             || !identifier(&self.id)
             || !identifier(&self.connector)
             || self.width != 1920
@@ -88,6 +98,19 @@ impl Manifest {
             || self.quiet_window.len() > 4096
         {
             return Err("campaign requires an identified 1920x1080@120 Hz output, VRR off, 16 workers and a quiet window".into());
+        }
+        let card = self.environment.card.strip_prefix("card");
+        if !card.is_some_and(|digits| {
+            digits
+                .parse::<u32>()
+                .is_ok_and(|id| id.to_string() == digits)
+        }) || self.environment.output == 0
+            || self.environment.scale_milli == 0
+            || !self.environment.scale_milli.is_multiple_of(1000)
+        {
+            return Err(
+                "campaign requires a declared card, output id and applied integer scale".into(),
+            );
         }
         if self.arms.len() != 108 {
             return Err("campaign requires all 108 arms; failed arms cannot be replaced".into());
@@ -199,6 +222,10 @@ pub fn validate_arm_plan(
 #[path = "shell_timing_campaign_store.rs"]
 mod store;
 pub use store::{freeze, verify_arm, verify_frozen};
+
+#[path = "shell_timing_campaign_attempt.rs"]
+mod attempt;
+pub use attempt::{Attempt, AttemptOutcome, claim_attempt, read_finished};
 
 /// Device-free preparation input. Plans are existing prepare-native outputs.
 #[derive(Deserialize)]

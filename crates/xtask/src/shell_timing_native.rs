@@ -421,6 +421,34 @@ pub fn split_capture(text: &str) -> Result<(String, String), String> {
     Ok((client, host))
 }
 
+/// Normalize environment log prefixes without interpreting facts. Keep
+/// duplicates and unknown environment names so the M5 checker can refuse
+/// them. This does not authenticate the writer; PID custody is runner evidence.
+pub fn environment_capture(text: &str) -> Result<String, String> {
+    if text.len() > 64 * MAX_INPUT as usize || !text.ends_with('\n') {
+        return Err("oversized or truncated session capture".into());
+    }
+    let mut environment = String::new();
+    for (index, line) in text.lines().enumerate() {
+        if index >= 500_000 || line.len() > 65_536 {
+            return Err("capture record bound exceeded".into());
+        }
+        let line = line.trim_start();
+        if line.starts_with('{') {
+            // A peer's JSON string mentioning a record is not a host record.
+            continue;
+        }
+        if let Some(at) = line.find("sophia_shell_environment_") {
+            environment.push_str(&line[at..]);
+            environment.push('\n');
+        }
+    }
+    if environment.is_empty() {
+        return Err("capture lacks host environment records".into());
+    }
+    Ok(environment)
+}
+
 /// Reject a valid journal from a different arm before joining native samples.
 pub fn validate_captured_workload(
     metrics: &crate::shell_timing::Journal,

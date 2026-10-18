@@ -181,9 +181,12 @@ The 120 Hz campaign can freeze its complete arm matrix before any launch:
     cargo xtask shell-timing freeze-campaign REQUEST_JSON /ABS/EXISTING_CAMPAIGN_ROOT
 
 The request contains `manifest` and `plans`. `plans` maps each arm ID to an
-existing `prepare-native` plan path. The manifest has schema `1`, a unique `id`,
+existing `prepare-native` plan path. The manifest has schema `2`, a unique `id`,
 `connector`, `width: 1920`, `height: 1080`, `mode_millihz: 120000`, `vrr: false`,
-`load_workers: 16`, a nonempty `quiet_window` declaration, and `arms`.
+`environment: {card, output, scale_milli}`, `load_workers: 16`, a nonempty
+`quiet_window` declaration, and `arms`. The environment target names the card
+node, nonzero output ID and applied integer scale before the first run; it is
+not selected from whichever capture passes. Schema 1 is refused.
 
 The 108 arms are ordered by condition (`idle`, then `load`), pair (1–3),
 workload (`panel`, then `bulk`), and measurement (`latency`, `cpu-only`, then
@@ -200,6 +203,13 @@ peer executable/config paths and wire choice; panel height is 24 throughout.
 Owner and peer binaries must match within each instrumentation method. It saves
 exact plan bytes under each arm ID and writes `READY` last. An existing campaign
 directory is never overwritten, including after partial failure.
+
+The campaign library provides `claim_attempt` and `read_finished`. Claims and
+results form a checked hash chain in arm order. Each arm can be claimed once;
+an unfinished claim blocks later arms, and a failed result stays in the chain.
+Finishing rechecks the predecessor chain. `Captured` records named evidence
+digests, not a passing measurement. These APIs are not yet wired to an attended
+campaign command.
 
 This command prepares evidence only. It does not launch arms, enforce run order,
 collect actual connector/VRR or load evidence, or establish a cost or latency

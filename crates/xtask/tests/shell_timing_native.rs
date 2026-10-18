@@ -129,6 +129,22 @@ fn capture_accepts_profile_volume_but_keeps_record_bounds() {
 }
 
 #[test]
+fn environment_capture_preserves_unknown_and_duplicate_records_for_validation() {
+    use xtask::shell_timing_native::environment_capture;
+    let output = "sophia_shell_environment_output schema=1\n";
+    let unavailable = "sophia_shell_environment_unavailable schema=1\n";
+    let json = "{\"error\":\"sophia_shell_environment_output schema=1\"}\n";
+    let text = format!("2026 INFO host: {output}{json}2026 WARN host: {unavailable}{output}");
+    assert_eq!(
+        environment_capture(&text).unwrap(),
+        format!("{output}{unavailable}{output}")
+    );
+    assert!(environment_capture(json).is_err());
+    assert!(environment_capture(output.trim_end()).is_err());
+    assert!(environment_capture(&format!("{}\n{output}", "x".repeat(65537))).is_err());
+}
+
+#[test]
 fn instrumentation_modes_are_explicit_and_bounded() {
     for mode in ["rust-global", "cpu-only", "profile", "progress"] {
         let mut f = Fixture::new(mode, "files");

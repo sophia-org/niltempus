@@ -42,13 +42,18 @@ fn manifest() -> Manifest {
         }
     }
     Manifest {
-        schema: 1,
+        schema: 2,
         id: "fixture".into(),
         connector: "DP-test".into(),
         width: 1920,
         height: 1080,
         mode_millihz: 120_000,
         vrr: false,
+        environment: EnvironmentTarget {
+            card: "card0".into(),
+            output: 1,
+            scale_milli: 1000,
+        },
         load_workers: 16,
         quiet_window: "Synthetic manifest; never launched".into(),
         arms,
@@ -67,6 +72,31 @@ fn full_matrix_is_bound_without_requiring_distinct_restart_plan_bytes() {
     let encoded = serde_json::to_vec(&m).unwrap();
     let decoded: Manifest = serde_json::from_slice(&encoded).unwrap();
     assert_eq!(decoded.digest().unwrap(), digest);
+}
+
+#[test]
+fn environment_target_is_frozen_and_legacy_manifests_are_refused() {
+    let original = manifest().digest().unwrap();
+    let mut m = manifest();
+    m.schema = 1;
+    assert!(m.validate().is_err());
+    let mut m = manifest();
+    m.environment.card = "card1".into();
+    assert_ne!(m.digest().unwrap(), original);
+    m.environment.output = 2;
+    assert_ne!(m.digest().unwrap(), original);
+    for card in ["", "card", "../card0", "card01", "renderD128"] {
+        m.environment.card = card.into();
+        assert!(m.validate().is_err());
+    }
+    let mut m = manifest();
+    m.environment.output = 0;
+    assert!(m.validate().is_err());
+    for scale in [0, 999, 1500] {
+        let mut m = manifest();
+        m.environment.scale_milli = scale;
+        assert!(m.validate().is_err());
+    }
 }
 
 #[test]
@@ -276,4 +306,173 @@ fn reopening_requires_the_original_complete_evidence() {
     fs::write(dir.join("manifest.json"), serde_json::to_vec(&m).unwrap()).unwrap();
     assert!(verify_frozen(&dir, &digest).is_err());
     fs::remove_dir_all(root).unwrap();
+}
+
+struct AttemptFixture {
+    root: std::path::PathBuf,
+    directory: std::path::PathBuf,
+    digest: String,
+}
+
+impl AttemptFixture {
+    fn new() -> Self {
+        use sha2::{Digest, Sha256};
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "campaign-attempt-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let mut m = manifest();
+        let plan = b"integrity fixture; no session is executable";
+        for arm in &mut m.arms {
+            arm.plan_sha256 = format!("{:x}", Sha256::digest(plan));
+        }
+        let directory = root.join(&m.id);
+        std::fs::create_dir(&directory).unwrap();
+        for arm in &m.arms {
+            let dir = directory.join(&arm.id);
+            std::fs::create_dir(&dir).unwrap();
+            std::fs::write(dir.join("plan.json"), plan).unwrap();
+        }
+        let digest = m.digest().unwrap();
+        std::fs::write(
+            directory.join("manifest.json"),
+            serde_json::to_vec(&m).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(directory.join("READY"), &digest).unwrap();
+        Self {
+            root,
+            directory,
+            digest,
+        }
+    }
+
+    fn claim(&self, index: usize) -> Result<Attempt, String> {
+        claim_attempt(&self.directory, &self.digest, &format!("arm-{index}"))
+    }
+}
+
+impl Drop for AttemptFixture {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.root).unwrap();
+    }
+}
+
+#[test]
+fn attempts_cannot_skip_retry_or_overlap_and_failures_remain() {
+    let f = AttemptFixture::new();
+    assert!(f.claim(1).is_err());
+    let first = f.claim(0).unwrap();
+    assert_eq!(first.arm().id, "arm-0");
+    assert!(f.claim(0).is_err());
+    assert!(f.claim(1).is_err());
+    first
+        .finish(AttemptOutcome::Failed {
+            error: "fixture launch failure".into(),
+        })
+        .unwrap();
+    let bytes = std::fs::read(f.directory.join("arm-0/attempt/result.json")).unwrap();
+    let (outcome, digest) = read_finished(&f.directory, &f.digest, "arm-0").unwrap();
+    assert!(matches!(outcome, AttemptOutcome::Failed { .. }));
+    use sha2::{Digest, Sha256};
+    assert_eq!(digest, format!("{:x}", Sha256::digest(&bytes)));
+    assert!(f.claim(0).is_err(), "a failed arm cannot be replaced");
+    let next = f.claim(1).unwrap();
+    assert_eq!(
+        std::fs::read(f.directory.join("arm-0/attempt/result.json")).unwrap(),
+        bytes
+    );
+    drop(next);
+    assert!(
+        f.claim(1).is_err(),
+        "dropping a handle does not remove its claim"
+    );
+    assert!(f.claim(2).is_err(), "unfinished arm blocks progression");
+    assert!(read_finished(&f.directory, &f.digest, "arm-1").is_err());
+}
+
+#[test]
+fn attempt_results_are_bound_to_claims_and_previous_results() {
+    let f = AttemptFixture::new();
+    f.claim(0)
+        .unwrap()
+        .finish(AttemptOutcome::Captured {
+            evidence: std::collections::BTreeMap::from([("fixture.json".into(), "a".repeat(64))]),
+        })
+        .unwrap();
+    f.claim(1)
+        .unwrap()
+        .finish(AttemptOutcome::Failed {
+            error: "first cause".into(),
+        })
+        .unwrap();
+    let path = f.directory.join("arm-0/attempt/result.json");
+    let original = std::fs::read(&path).unwrap();
+    let changed = String::from_utf8(original.clone())
+        .unwrap()
+        .replace(&"a".repeat(64), &"b".repeat(64));
+    std::fs::write(&path, changed).unwrap();
+    assert!(read_finished(&f.directory, &f.digest, "arm-1").is_err());
+    assert!(
+        f.claim(2).is_err(),
+        "previous result hash binds the sequence"
+    );
+    std::fs::write(&path, original).unwrap();
+    let third = f.claim(2).unwrap();
+    std::fs::write(f.directory.join("arm-2/attempt/claim.json"), b"replaced").unwrap();
+    assert!(
+        third
+            .finish(AttemptOutcome::Failed {
+                error: "fixture".into()
+            })
+            .is_err()
+    );
+}
+
+#[test]
+fn finishing_refuses_a_predecessor_replaced_during_the_run() {
+    let f = AttemptFixture::new();
+    f.claim(0)
+        .unwrap()
+        .finish(AttemptOutcome::Failed {
+            error: "first".into(),
+        })
+        .unwrap();
+    let second = f.claim(1).unwrap();
+    let path = f.directory.join("arm-0/attempt/result.json");
+    let changed = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("first", "other");
+    std::fs::write(path, changed).unwrap();
+    assert!(
+        second
+            .finish(AttemptOutcome::Failed {
+                error: "second".into()
+            })
+            .is_err()
+    );
+    assert!(!f.directory.join("arm-1/attempt/result.json").exists());
+}
+
+#[test]
+fn concurrent_claimants_cannot_both_start_the_same_arm() {
+    let f = AttemptFixture::new();
+    let barrier = std::sync::Barrier::new(2);
+    std::thread::scope(|scope| {
+        let a = scope.spawn(|| {
+            barrier.wait();
+            f.claim(0)
+        });
+        let b = scope.spawn(|| {
+            barrier.wait();
+            f.claim(0)
+        });
+        let results = [a.join().unwrap(), b.join().unwrap()];
+        assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+    });
+    assert!(f.claim(0).is_err());
 }
