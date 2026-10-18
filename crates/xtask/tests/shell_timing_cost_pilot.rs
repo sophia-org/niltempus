@@ -192,6 +192,14 @@ impl World {
             },
             shape.policy
         );
+        let profile = if shape.height == 512 {
+            profile.replace(
+                "gpu \"denied\";",
+                "gpu \"denied\"; reservation \"top\" 512;",
+            )
+        } else {
+            profile
+        };
         artifacts.insert("peer-config".into(), peer_config);
         artifacts.insert(
             "profile".into(),
@@ -510,7 +518,16 @@ fn retain(frozen: &Path, digest: &str, plans: &[xtask::shell_timing_calibration:
             ),
             (
                 "session.log",
-                capture_workload(1000, plan_index % 3, i >= 6, 100 + i as u64, bulk).into_bytes(),
+                capture_workload(1000, plan_index % 3, i >= 6, 100 + i as u64, bulk)
+                    .replace("\"height\":24", &format!("\"height\":{}", config["height"]))
+                    .replace(
+                        "\"total_bytes\":184320",
+                        &format!(
+                            "\"total_bytes\":{}",
+                            1920 * config["height"].as_u64().unwrap() * 4
+                        ),
+                    )
+                    .into_bytes(),
             ),
             ("environment.json", b"{}".to_vec()),
             ("environment-receipts.json", b"[]".to_vec()),
@@ -822,4 +839,111 @@ fn workload_must_be_explicit_versioned_and_match_the_plans() {
     value["workload"] = serde_json::json!("panel");
     std::fs::write(&request, value.to_string()).unwrap();
     assert!(prepare(&request, &w.root.join("bulk-as-panel")).is_err());
+}
+
+#[test]
+fn large_surface_is_explicitly_frozen_and_rederived_as_presented_pixels() {
+    let w = World::new("large-surface");
+    let plans = PLAN_IDS
+        .iter()
+        .enumerate()
+        .map(|(i, id)| {
+            (
+                id.to_string(),
+                w.plan(
+                    id,
+                    &Shape {
+                        ipc: i % 3 == 0,
+                        sealed: i % 3 == 2,
+                        instrumentation: if i < 3 { "cpu-only" } else { "rust-global" },
+                        height: 512,
+                        probe: 0,
+                        ..Shape::bytes()
+                    },
+                ),
+            )
+        })
+        .collect();
+    let request = w.request(&plans);
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&request).unwrap()).unwrap();
+    value["schema"] = 3.into();
+    value["workload"] = "panel".into();
+    value["presentation_height"] = 512.into();
+    for (i, (schema, height, workload)) in [
+        (1, Some(512), "panel"),
+        (2, Some(512), "panel"),
+        (3, None, "panel"),
+        (3, Some(24), "panel"),
+        (3, Some(1080), "panel"),
+        (3, Some(512), "bulk"),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let mut bad = value.clone();
+        bad["schema"] = (*schema).into();
+        bad["workload"] = (*workload).into();
+        bad["presentation_height"] = serde_json::json!(height);
+        std::fs::write(&request, bad.to_string()).unwrap();
+        assert!(prepare(&request, &w.root.join(format!("bad-large-{i}"))).is_err());
+    }
+    std::fs::write(&request, value.to_string()).unwrap();
+    let frozen = w.root.join("large-frozen");
+    let line = prepare(&request, &frozen).unwrap();
+    let digest = &line.split("sha256=").nth(1).unwrap()[..64];
+    let (_, plans) = verify_descriptor(&frozen, digest).unwrap();
+    retain(&frozen, digest, &plans);
+    let result = report(&frozen, digest, &supplied).unwrap();
+    assert_eq!(result["presentation_height"], 512);
+    for arm in result["arms"].as_array().unwrap() {
+        assert_eq!(
+            arm["cost"]["normalized"]["presentation_bytes"],
+            3_932_160_000u64
+        );
+        assert_eq!(arm["cost"]["normalized"]["transfer_probe_bytes"], 0);
+        let timing = &arm["presentation_timing_diagnostic"];
+        assert_eq!(timing["offered"], 1000);
+        assert_eq!(timing["candidate_to_native_presented"]["count"], 1000);
+        for upload in timing["journal_metrics"]["uploads"].as_array().unwrap() {
+            assert_eq!(upload["purpose"], "presentation");
+            assert_eq!(upload["upload"]["height"], 512);
+        }
+    }
+    // Same byte total but a different shape must not satisfy the frozen surface.
+    let arm_dir = frozen.join(ARM_IDS[0]);
+    let log = arm_dir.join("run/session.log");
+    let original = std::fs::read_to_string(&log).unwrap();
+    let changed = original.replacen(
+        "\"width\":1920,\"height\":512",
+        "\"width\":3840,\"height\":256",
+        1,
+    );
+    assert_ne!(original, changed);
+    std::fs::write(&log, &changed).unwrap();
+    let record = arm_dir.join("attempt.json");
+    let mut attempt: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+    attempt["outcome"]["evidence"]["session.log"] = sha256(changed.as_bytes()).into();
+    std::fs::write(record, attempt.to_string()).unwrap();
+    assert_eq!(
+        report(&frozen, digest, &supplied).unwrap_err(),
+        "presented upload geometry differs from the frozen pilot"
+    );
+
+    // A digest-consistent profile with the old reservation fails before launch.
+    let path = &plans[0].request.artifacts["profile"].path;
+    let changed = std::fs::read_to_string(path)
+        .unwrap()
+        .replace("reservation \"top\" 512", "reservation \"top\" 24");
+    std::fs::write(path, &changed).unwrap();
+    let plan_path = &plans[0].reference.path;
+    let mut plan: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(plan_path).unwrap()).unwrap();
+    plan["request"]["artifacts"]["profile"]["sha256"] = sha256(changed.as_bytes()).into();
+    std::fs::write(plan_path, plan.to_string()).unwrap();
+    assert_eq!(
+        prepare(&request, &w.root.join("bad-reservation")).unwrap_err(),
+        "large presented surface requires reservation top 512"
+    );
 }

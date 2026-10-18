@@ -18,7 +18,7 @@ use crate::shell_timing_campaign_provenance::{ProvenanceTarget, verify_environme
 use crate::shell_timing_cost::{Bounds, Report};
 use crate::shell_timing_environment::environment_record;
 use crate::shell_timing_native::{
-    Request, campaign_profile, launch_prerequisites, run_observed, stage_available,
+    Request, launch_prerequisites, profile_for_height, run_observed, stage_available,
     verify_prepared, verify_sources,
 };
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,9 @@ pub struct PilotRequest {
     pub schema: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workload: Option<Workload>,
+    /// Schema 3 alone declares the 1920x512 actually presented surface.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presentation_height: Option<u32>,
     pub target: ProvenanceTarget,
     pub quiet_window: String,
     /// Exactly PLAN_IDS, each naming a prepared plan.
@@ -71,6 +74,9 @@ pub struct Descriptor {
     pub schema: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workload: Option<Workload>,
+    /// Schema 3 alone declares the 1920x512 actually presented surface.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presentation_height: Option<u32>,
     pub target: ProvenanceTarget,
     pub quiet_window: String,
     pub plans: Vec<PlanRef>,
@@ -81,9 +87,18 @@ fn declared_workload(schema: u8, workload: Option<Workload>) -> Result<Workload,
     match (schema, workload) {
         (1, None) => Ok(Workload::Bulk),
         (2, Some(value)) => Ok(value),
+        (3, Some(Workload::Panel)) => Ok(Workload::Panel),
         _ => Err("schema 1 is legacy bulk; schema 2 requires an explicit workload".into()),
     }
 }
+fn declared_height(schema: u8, height: Option<u32>) -> Result<u32, String> {
+    match (schema, height) {
+        (1 | 2, None) => Ok(24),
+        (3, Some(512)) => Ok(512),
+        _ => Err("legacy pilots have height 24; schema 3 requires presentation_height 512".into()),
+    }
+}
+
 fn probe_bytes(workload: Workload) -> u64 {
     match workload {
         Workload::Panel => 0,
@@ -111,7 +126,7 @@ fn declaration(
 
 /// Sources and policy must match across instrumentation builds. Executable
 /// hashes for Sophia/peer may differ only across the two instrumentation sets.
-fn identity(request: &Request, across_modes: bool) -> Result<Vec<u8>, String> {
+fn identity(request: &Request, across_modes: bool, height: u32) -> Result<Vec<u8>, String> {
     let artifacts: Vec<_> = request
         .artifacts
         .iter()
@@ -128,13 +143,22 @@ fn identity(request: &Request, across_modes: bool) -> Result<Vec<u8>, String> {
         &request.input_seat,
         request.output,
         artifacts,
-        campaign_profile(request)?,
+        profile_for_height(request, height)?,
     ))
     .map_err(|e| e.to_string())
 }
 
 pub fn check_plans(
     workload: Workload,
+    target: &ProvenanceTarget,
+    inputs: Vec<(PlanRef, Vec<u8>)>,
+) -> Result<Vec<VerifiedPlan>, String> {
+    check_plans_height(workload, 24, target, inputs)
+}
+
+fn check_plans_height(
+    workload: Workload,
+    height: u32,
     target: &ProvenanceTarget,
     inputs: Vec<(PlanRef, Vec<u8>)>,
 ) -> Result<Vec<VerifiedPlan>, String> {
@@ -175,7 +199,7 @@ pub fn check_plans(
             || request.frames != 1000
             || request.runtime_ms != 60_000
             || probe != probe_bytes(workload)
-            || config["height"].as_u64() != Some(24)
+            || config["height"].as_u64() != Some(u64::from(height))
             || !request.environment_readback
             || request.mode_millihz != target.mode_millihz
             || request.output != target.output
@@ -186,6 +210,35 @@ pub fn check_plans(
                 workload_name(workload)
             ));
         }
+        if height == 512 {
+            let profile = &request.artifacts["profile"];
+            let bytes = read_bounded(&profile.path, CAP)?;
+            if crate::sha256(&bytes) != profile.sha256 {
+                return Err("pilot profile changed".into());
+            }
+            let document: kdl::KdlDocument = std::str::from_utf8(&bytes)
+                .map_err(|e| e.to_string())?
+                .parse()
+                .map_err(|e: kdl::KdlError| e.to_string())?;
+            let reservations: Vec<_> = document
+                .nodes()
+                .iter()
+                .filter(|n| n.name().value() == "session")
+                .filter_map(|n| n.children())
+                .flat_map(|d| d.nodes())
+                .filter(|n| n.name().value() == "shell-component")
+                .filter_map(|n| n.children())
+                .flat_map(|d| d.nodes())
+                .filter(|n| n.name().value() == "reservation")
+                .collect();
+            if reservations.len() != 1
+                || reservations[0].entries().len() != 2
+                || reservations[0].get(0).and_then(|v| v.as_string()) != Some("top")
+                || reservations[0].get(1).and_then(|v| v.as_integer()) != Some(512)
+            {
+                return Err("large presented surface requires reservation top 512".into());
+            }
+        }
         verify_sources(&request)?;
         plans.push(VerifiedPlan {
             reference,
@@ -194,9 +247,9 @@ pub fn check_plans(
         });
     }
     for group in [0..3, 3..6] {
-        let baseline = identity(&plans[group.start].request, false)?;
+        let baseline = identity(&plans[group.start].request, false, height)?;
         for index in group {
-            if identity(&plans[index].request, false)? != baseline {
+            if identity(&plans[index].request, false, height)? != baseline {
                 return Err(
                     "pilot plans differ beyond their transport within an instrumentation set"
                         .into(),
@@ -204,7 +257,7 @@ pub fn check_plans(
             }
         }
     }
-    if identity(&plans[0].request, true)? != identity(&plans[3].request, true)? {
+    if identity(&plans[0].request, true, height)? != identity(&plans[3].request, true, height)? {
         return Err("pilot instrumentation sets differ in sources or policy".into());
     }
     Ok(plans)
@@ -241,10 +294,12 @@ pub fn prepare(request: &Path, frozen: &Path) -> Result<String, String> {
             ))
         })
         .collect::<Result<Vec<_>, String>>()?;
-    let plans = check_plans(workload, &request.target, inputs)?;
+    let height = declared_height(request.schema, request.presentation_height)?;
+    let plans = check_plans_height(workload, height, &request.target, inputs)?;
     let descriptor = Descriptor {
         schema: request.schema,
         workload: request.workload,
+        presentation_height: request.presentation_height,
         target: request.target,
         quiet_window: request.quiet_window,
         plans: plans.into_iter().map(|p| p.reference).collect(),
@@ -280,7 +335,8 @@ pub fn verify_descriptor(
         .iter()
         .map(|p| Ok((p.clone(), read_bounded(&p.path, CAP)?)))
         .collect::<Result<Vec<_>, String>>()?;
-    let plans = check_plans(workload, &d.target, inputs)?;
+    let height = declared_height(d.schema, d.presentation_height)?;
+    let plans = check_plans_height(workload, height, &d.target, inputs)?;
     Ok((d, plans))
 }
 
@@ -450,6 +506,14 @@ pub fn comparisons_for_workload(
     costs: &[Report],
     workload: Workload,
 ) -> Result<serde_json::Value, String> {
+    comparisons_for_shape(costs, workload, 24)
+}
+
+fn comparisons_for_shape(
+    costs: &[Report],
+    workload: Workload,
+    height: u32,
+) -> Result<serde_json::Value, String> {
     if costs.len() != 9 {
         return Err("cost pilot needs all nine reports".into());
     }
@@ -471,7 +535,7 @@ pub fn comparisons_for_workload(
             let mode = if index < 6 { "cpu-only" } else { "rust-global" };
             if report.instrumentation != mode
                 || n.frame_count != 1000
-                || n.presentation_bytes != 1000 * 1920 * 24 * 4
+                || n.presentation_bytes != 1000 * 1920 * u64::from(height) * 4
                 || n.transfer_probe_bytes != 1000 * probe_bytes(workload)
                 || n.source
                     != if matches!(index, 2 | 3 | 8) {
@@ -531,6 +595,7 @@ pub fn report(
 ) -> Result<serde_json::Value, String> {
     let (descriptor, plans) = verify_descriptor(frozen, digest)?;
     let workload = declared_workload(descriptor.schema, descriptor.workload)?;
+    let height = declared_height(descriptor.schema, descriptor.presentation_height)?;
     let mut previous = None;
     let mut costs = Vec::new();
     let mut arms = Vec::new();
@@ -552,6 +617,31 @@ pub fn report(
             &arm,
             &files,
         )?;
+        let text = std::str::from_utf8(&files.session_log).map_err(|e| e.to_string())?;
+        let (journal, host) = crate::shell_timing_native::split_capture(text)?;
+        let metrics = crate::shell_timing::collect_metrics(&journal, arm.frames)?;
+        if metrics
+            .uploads
+            .iter()
+            .filter(|u| u.purpose == "presentation")
+            .any(|u| {
+                u.upload.width != 1920
+                    || u.upload.height != height
+                    || u.upload.total_bytes != 1920 * u64::from(height) * 4
+            })
+        {
+            return Err("presented upload geometry differs from the frozen pilot".into());
+        }
+        let timing = if descriptor.schema == 3 {
+            Some(crate::shell_timing::latency_report(
+                &host,
+                &journal,
+                descriptor.target.mode_millihz,
+                arm.frames,
+            )?)
+        } else {
+            None
+        };
         let verified = verify(
             &descriptor.target,
             &ArmFiles {
@@ -577,12 +667,19 @@ pub fn report(
             serde_json::json!({"id":arm.id,"attempt_sha256":result_digest,"evidence":evidence,
             "environment":env,"run":rebuilt.run,"cost":cost.report}),
         );
+        if let Some(timing) = timing {
+            arms.last_mut().unwrap()["presentation_timing_diagnostic"] = timing;
+        }
         costs.push(cost.report);
     }
     let mut report = serde_json::json!({"schema":descriptor.schema,"pilot_sha256":digest,"target":descriptor.target,"arms":arms,
-        "summary":comparisons_for_workload(&costs, workload)?,"scope":format!("t331 {} diagnostic; not a campaign condition, B9 verdict or transport selection",workload_name(workload))});
-    if descriptor.schema == 2 {
+        "summary":comparisons_for_shape(&costs, workload, height)?,"scope":format!("t331 {} diagnostic; not a campaign condition, B9 verdict or transport selection",workload_name(workload))});
+    if descriptor.schema >= 2 {
         report["workload"] = serde_json::to_value(workload).map_err(|e| e.to_string())?;
+    }
+    if descriptor.schema == 3 {
+        report["presentation_height"] = height.into();
+        report["scope"] = "t331 large presented-surface diagnostic, 1920x512; timing is instrumented, no warmup, not a latency or cost gate verdict".into();
     }
     Ok(report)
 }

@@ -276,7 +276,7 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
         }
         || peer.output != request.output
         || peer.frames != request.frames
-        || !(1..=128).contains(&peer.height)
+        || !(1..=512).contains(&peer.height)
         || !matches!(peer.probe_bytes, 0 | 4194304)
         || peer.hold_msec != request.runtime_ms
     {
@@ -476,6 +476,15 @@ pub fn validate_captured_workload(
 /// executable/config paths and selected wire to differ. All other KDL values,
 /// properties and nodes remain part of the comparison.
 pub fn campaign_profile(request: &Request) -> Result<String, String> {
+    profile_for_height(request, 24)
+}
+
+/// Diagnostic pilots may declare a larger presented surface; campaign callers
+/// retain their fixed 24px contract through campaign_profile.
+pub(crate) fn profile_for_height(request: &Request, height: u32) -> Result<String, String> {
+    if !matches!(height, 24 | 512) {
+        return Err("unsupported pilot surface height".into());
+    }
     validate(request)?;
     let checked = |key: &str| -> Result<Vec<u8>, String> {
         let artifact = request
@@ -490,8 +499,13 @@ pub fn campaign_profile(request: &Request) -> Result<String, String> {
     };
     let peer: PeerConfig =
         serde_json::from_slice(&checked("peer-config")?).map_err(|e| e.to_string())?;
-    if peer.height != 24 {
-        return Err("campaign panel height must be 24".into());
+    if peer.height != u64::from(height) {
+        return Err(if height == 24 {
+            "campaign panel height must be 24"
+        } else {
+            "pilot surface height must be 512"
+        }
+        .into());
     }
     let mut profile = document(&checked("profile")?)?;
     let session = profile

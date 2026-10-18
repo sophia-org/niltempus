@@ -340,6 +340,80 @@ The mixed gate needs exactly three connected heads and archives with
 `tools/archive_mixed_output_physical_run.sh`. The mirror-group corpus is
 re-verified offline by `cargo xtask verify-archives`.
 
+## Large presented-surface diagnostic and CPU profiles (t331)
+
+Cost-pilot schema 3 uses `"workload":"panel"` and
+`"presentation_height":512`. Its six prepared plans must request a 1920×512
+surface, probe bytes 0, and exactly `reservation "top" 512` in the sole shell
+component. The peer checks the granted geometry and presents that resource;
+it is not the old 4 MiB probe that was retired without presentation. Each
+frame changes all 3,932,160 bytes. This fits the existing 4 MiB resource and
+512 logical-pixel panel limits. It is not fullscreen, a real-client benchmark
+or a production-limit change. Schema 1/2 and the acceptance campaign retain
+24px presentation heights.
+
+The same nine-arm order and separate CPU/allocation builds apply. Schema 3
+reports check every presented upload's shape and include raw native joins and
+all-frame nearest-rank latency distributions. Timing is instrumented and has
+no warmup exclusion. It is not a latency gate. The closed-loop peer waits for
+completion before submitting another frame; slow uploads can reduce achieved
+cadence without generating a rejected candidate. Do not call all such gaps
+"missed deadlines" or treat 1000 successful frames as proof of 120 fps.
+
+For explaining CPU differences, use a separate three-transport diagnostic
+with identical **cpu-only** plans and the same pixels. Prepare one JSON
+request per arm:
+
+```json
+{
+  "schema": 1,
+  "plan": { "path": "/ABS/plan.json", "sha256": "PLAN_SHA256" },
+  "perf": { "path": "/usr/bin/perf", "sha256": "PERF_SHA256" },
+  "target": {
+    "card": "card0", "output": 1, "scale_milli": 1000,
+    "connector": "DP-1", "width": 1920, "height": 1080,
+    "mode_millihz": 120000, "vrr": false
+  }
+}
+```
+
+From the declared active console, with the prepared runner:
+
+```sh
+SOPHIA_SHELL_TIMING_ARM=1 /ABS/xtask shell-timing run-cpu-profile REQUEST NEW_DIR
+/ABS/xtask shell-timing report-cpu-profile NEW_DIR > NEW_REPORT.json
+```
+
+`run-cpu-profile` rechecks the normal attended/source/artifact prerequisites
+before creating its single-use directory. It invokes the pinned perf executable
+with user-space `cpu-clock:u`, 199 Hz, 8192-byte DWARF stacks and the monotonic
+clock, then runs the ordinary observed native runner as its child. Perf inherits
+through descendants and threads. No system-wide recording, privileges or sysctl
+changes are requested. The internal `capture-cpu-profile` command is the child
+entry point; direct use does not produce a complete profile attempt.
+
+Retain `profile.json`, `profile-result.json`, `perf-command.json`,
+`perf-record.log`, `perf.data`, and the normal `run/` evidence. The report
+rechecks hashes and reconstructs the workload and authenticated environment;
+only then does it select the bound Session and peer outer TGIDs and the
+whole-workload counter interval, including pixel preparation. Missing samples
+or a missing/nonzero loss count refuse the report. Unknown leaf symbols and
+all perf diagnostics remain visible. Keep the exact binaries available for
+symbolization; symbol tables alone do not guarantee complete unwinding.
+
+Self percentages are shares within each selected process's sampled user CPU,
+not exclusive combined CPU percentages. Callchains overlap. Sampling perturbs
+the workload, and user-space events cannot explain kernel copy, page-allocation
+or zeroing cost. Never substitute these captures for unprofiled cost arms.
+There is no automated winner or causal conclusion. Compare IPC/files/sealed
+stacks and sample counts before choosing an optimization. This path has
+fixture controls and a device-free real-perf thread/inheritance control;
+protected native-session profiling still needs the attended run.
+
+No builds may overwrite the measured binaries or runner while either diagnostic
+is in progress. Preserve failed runs and use a new directory for any later
+experiment, explicitly labelled as a new attempt.
+
 ## Keyboard independence
 
 The acceptance path is an ordinary installed session: type on the keyboard you

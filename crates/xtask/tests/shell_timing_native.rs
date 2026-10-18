@@ -361,6 +361,24 @@ fn helper_in_private_user_directory_is_refused_even_with_matching_hash() {
 }
 
 #[test]
+fn peer_height_fixture_bound_is_512() {
+    // Fixture bound only: 512 is the large presented panel; 513 must
+    // not imply a larger (fullscreen-class) surface is supported.
+    for wire in ["files", "ipc"] {
+        let mut f = Fixture::new(&format!("height-{wire}"), wire);
+        for (height, accepted) in [(24, true), (512, true), (513, false), (0, false)] {
+            let config = serde_json::json!({"wire":wire,"output":1,"frames":3,"height":height,"hold_msec":60000});
+            f.put("peer-config", config.to_string().as_bytes(), false);
+            assert_eq!(
+                validate(&f.request).is_ok(),
+                accepted,
+                "{wire} height {height}"
+            );
+        }
+    }
+}
+
+#[test]
 fn probe_configuration_is_bounded_and_bound_to_the_plan() {
     for wire in ["files", "ipc"] {
         let mut f = Fixture::new(&format!("probe-{wire}"), wire);

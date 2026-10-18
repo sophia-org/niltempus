@@ -33,6 +33,8 @@ const USAGE: &str = "usage:
   xtask shell-timing report-cost-pilot FROZEN_DIR SHA256
   xtask shell-timing run-campaign-arm CAMPAIGN SHA256 ARM
   xtask shell-timing report-campaign-condition CAMPAIGN SHA256 idle|load
+  xtask shell-timing run-cpu-profile REQUEST NEW_DIR
+  xtask shell-timing report-cpu-profile DIR
   xtask shell-timing cpu-worker DURATION_MS
   xtask shell-timing prepare-native REQUEST_JSON NEW_PLAN
   xtask shell-timing run-native PLAN_JSON PLAN_SHA256 NEW_RUN_DIR
@@ -72,6 +74,12 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
         return xtask::nix_assembly::run(&arguments[1..]);
     }
     if arguments.first().map(String::as_str) == Some("shell-timing") {
+        if matches!(
+            arguments.get(1).map(String::as_str),
+            Some("run-cpu-profile" | "capture-cpu-profile" | "report-cpu-profile")
+        ) {
+            return xtask::shell_timing_cpu_profile::run(&arguments[1..]);
+        }
         if arguments.get(1).map(String::as_str) == Some("cpu-worker") {
             return xtask::shell_timing_cpu_worker::run(&arguments[2..]);
         }
