@@ -405,3 +405,111 @@ fn physical_launch_requires_arm_and_actual_console_before_source_or_process_work
         assert!(!out.exists());
     }
 }
+
+#[test]
+fn campaign_plan_verification_rechecks_argv_and_artifacts_without_execution() {
+    let mut fixture = Fixture::new("campaign-plan", "files");
+    let argv = validate(&fixture.request).unwrap();
+    let mut plan = serde_json::json!({"schema":1,"request":fixture.request,"argv":argv});
+    let bytes = serde_json::to_vec(&plan).unwrap();
+    let (request, probe) = xtask::shell_timing_native::verify_prepared(&bytes).unwrap();
+    assert_eq!(request.wire, "files");
+    assert_eq!(probe, 0);
+    plan["argv"][0] = serde_json::json!("/different-owner");
+    assert!(
+        xtask::shell_timing_native::verify_prepared(&serde_json::to_vec(&plan).unwrap()).is_err()
+    );
+    fixture.put("peer-config", b"changed", false);
+    assert!(xtask::shell_timing_native::verify_prepared(&bytes).is_err());
+}
+
+#[test]
+fn campaign_profiles_allow_wire_paths_but_not_policy_or_panel_size_drift() {
+    use xtask::shell_timing_native::campaign_profile;
+    let mut files = Fixture::new("campaign-profile-files", "files");
+    let ipc = Fixture::new("campaign-profile-ipc", "ipc");
+    validate(&files.request).unwrap();
+    validate(&ipc.request).unwrap();
+    assert_eq!(
+        campaign_profile(&files.request).unwrap(),
+        campaign_profile(&ipc.request).unwrap()
+    );
+    let profile = fs::read_to_string(&files.request.artifacts["profile"].path).unwrap();
+    files.put(
+        "profile",
+        profile
+            .replace("startup", "different-policy 1; startup")
+            .as_bytes(),
+        false,
+    );
+    validate(&files.request).unwrap();
+    assert_ne!(
+        campaign_profile(&files.request).unwrap(),
+        campaign_profile(&ipc.request).unwrap()
+    );
+    let peer = fs::read_to_string(&files.request.artifacts["peer-config"].path).unwrap();
+    files.put(
+        "peer-config",
+        peer.replace("\"height\":24", "\"height\":25").as_bytes(),
+        false,
+    );
+    assert!(campaign_profile(&files.request).is_err());
+}
+
+#[test]
+fn campaign_profile_properties_are_not_erased_with_arm_values() {
+    use xtask::shell_timing_native::campaign_profile;
+    let mut fixture = Fixture::new("campaign-profile-properties", "files");
+    let profile = fs::read_to_string(&fixture.request.artifacts["profile"].path).unwrap();
+    fixture.put(
+        "profile",
+        profile
+            .replace("transport ", "transport extra=1 ")
+            .as_bytes(),
+        false,
+    );
+    validate(&fixture.request).unwrap();
+    let first = campaign_profile(&fixture.request).unwrap();
+    fixture.put(
+        "profile",
+        profile
+            .replace("transport ", "transport extra=2 ")
+            .as_bytes(),
+        false,
+    );
+    validate(&fixture.request).unwrap();
+    assert_ne!(first, campaign_profile(&fixture.request).unwrap());
+}
+
+#[test]
+fn sealed_campaign_policy_signature_tracks_every_adapter_bound() {
+    use xtask::shell_timing_native::campaign_image_bounds;
+    let mut fixture = Fixture::new("campaign-image-bounds", "files");
+    assert!(campaign_image_bounds(&fixture.request).unwrap().is_none());
+    let mut peer: serde_json::Value =
+        serde_json::from_slice(&fs::read(&fixture.request.artifacts["peer-config"].path).unwrap())
+            .unwrap();
+    peer["source"] = serde_json::json!("sealed");
+    peer["image"] = serde_json::json!({"max_resource_bytes":4194304,"max_width":8192,"max_height":4096,"max_admitted_outputs":16,"transfer_slots":4,"transfer_timeout_ms":2000});
+    fixture.request.source = xtask::shell_timing::ImageSource::Sealed;
+    fixture.put("peer-config", &serde_json::to_vec(&peer).unwrap(), false);
+    validate(&fixture.request).unwrap();
+    let expected = campaign_image_bounds(&fixture.request).unwrap();
+    for field in [
+        "max_resource_bytes",
+        "max_width",
+        "max_height",
+        "max_admitted_outputs",
+        "transfer_slots",
+        "transfer_timeout_ms",
+    ] {
+        let mut changed = peer.clone();
+        changed["image"][field] = serde_json::json!(changed["image"][field].as_u64().unwrap() + 1);
+        fixture.put("peer-config", &serde_json::to_vec(&changed).unwrap(), false);
+        assert_ne!(
+            campaign_image_bounds(&fixture.request).unwrap(),
+            expected,
+            "{field}"
+        );
+    }
+}

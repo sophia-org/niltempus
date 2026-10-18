@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 mod journal;
 mod latency;
 pub use journal::{Journal, collect, collect_metrics};
-pub use latency::{Distribution, latency_report};
+pub use latency::{
+    BoundReached, Distribution, Measures, TRANSFER_BOUND_USEC, Window, WindowedLatency,
+    latency_report, latency_window,
+};
 
 /// Payload path recorded by the peer; omission in older evidence means bytes.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]

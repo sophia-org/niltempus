@@ -83,7 +83,7 @@ struct PeerConfig {
 
 /// Caller bounds for the sealed SDK adapter. The peer verifies these against
 /// the negotiated content limits; preparation binds their exact artifact bytes.
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ImageConfig {
     max_resource_bytes: u64,
@@ -434,6 +434,97 @@ pub fn validate_captured_workload(
         return Err("captured upload workload differs from prepared configuration".into());
     }
     Ok(())
+}
+
+/// Compare profile policy across campaign arms while allowing only the peer
+/// executable/config paths and selected wire to differ. All other KDL values,
+/// properties and nodes remain part of the comparison.
+pub fn campaign_profile(request: &Request) -> Result<String, String> {
+    validate(request)?;
+    let checked = |key: &str| -> Result<Vec<u8>, String> {
+        let artifact = request
+            .artifacts
+            .get(key)
+            .ok_or("missing campaign artifact")?;
+        let bytes = bounded(&artifact.path, MAX_INPUT)?;
+        if sha256(&bytes) != artifact.sha256 {
+            return Err(format!("{key} artifact changed"));
+        }
+        Ok(bytes)
+    };
+    let peer: PeerConfig =
+        serde_json::from_slice(&checked("peer-config")?).map_err(|e| e.to_string())?;
+    if peer.height != 24 {
+        return Err("campaign panel height must be 24".into());
+    }
+    let mut profile = document(&checked("profile")?)?;
+    let session = profile
+        .nodes_mut()
+        .iter_mut()
+        .find(|n| n.name().value() == "session")
+        .and_then(|n| n.children_mut().as_mut())
+        .ok_or("missing session")?;
+    let component = session
+        .nodes_mut()
+        .iter_mut()
+        .find(|n| n.name().value() == "shell-component")
+        .and_then(|n| n.children_mut().as_mut())
+        .ok_or("missing component")?;
+    for field in component.nodes_mut() {
+        if matches!(field.name().value(), "executable" | "config" | "transport") {
+            // validate() already checked these values against prepared artifacts.
+            // Retain extra entries/properties so they cannot be hidden here.
+            let entry = field
+                .entries_mut()
+                .iter_mut()
+                .find(|entry| entry.name().is_none())
+                .ok_or("missing component value")?;
+            *entry.value_mut() = kdl::KdlValue::String("campaign-arm-value".into());
+        }
+    }
+    profile.autoformat_no_comments();
+    Ok(profile.to_string())
+}
+
+/// Exact sealed adapter policy; campaign C arms may not silently change it.
+pub fn campaign_image_bounds(request: &Request) -> Result<Option<String>, String> {
+    let artifact = request
+        .artifacts
+        .get("peer-config")
+        .ok_or("missing peer config")?;
+    let bytes = bounded(&artifact.path, MAX_INPUT)?;
+    if sha256(&bytes) != artifact.sha256 {
+        return Err("peer configuration changed".into());
+    }
+    let peer: PeerConfig = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    peer.image
+        .map(|image| serde_json::to_string(&image).map_err(|e| e.to_string()))
+        .transpose()
+}
+
+/// Validate the clean signed source identities bound into a prepared request.
+pub fn verify_sources(request: &Request) -> Result<(), String> {
+    source(&request.sophia_source)?;
+    source(&request.integration_source)
+}
+
+/// Recheck a prepared plan without launching it. Campaign preparation uses the
+/// same artifact and argv checks as an individual native run.
+pub fn verify_prepared(bytes: &[u8]) -> Result<(Request, u64), String> {
+    if bytes.len() > MAX_INPUT as usize {
+        return Err("plan exceeds input bound".into());
+    }
+    let plan: Plan = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+    if plan.schema != 1 || validate(&plan.request)? != plan.argv {
+        return Err("plan arguments differ".into());
+    }
+    let peer_bytes = bounded(&plan.request.artifacts["peer-config"].path, MAX_INPUT)?;
+    // Bind the second read too: never accept workload metadata from a changed file.
+    if sha256(&peer_bytes) != plan.request.artifacts["peer-config"].sha256 {
+        return Err("peer configuration changed during verification".into());
+    }
+    let peer: PeerConfig = serde_json::from_slice(&peer_bytes).map_err(|e| e.to_string())?;
+    Ok((plan.request, peer.probe_bytes))
 }
 
 pub fn run(args: &[String]) -> Result<Vec<String>, String> {

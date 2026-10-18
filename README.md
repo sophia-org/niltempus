@@ -176,6 +176,37 @@ Its `joined_only` result proves sample provenance, not B9 acceptance, artifact
 identity or the completeness of the client recorder. The campaign must bind
 those inputs and compare the paired distributions separately.
 
+The 120 Hz campaign can freeze its complete arm matrix before any launch:
+
+    cargo xtask shell-timing freeze-campaign REQUEST_JSON /ABS/EXISTING_CAMPAIGN_ROOT
+
+The request contains `manifest` and `plans`. `plans` maps each arm ID to an
+existing `prepare-native` plan path. The manifest has schema `1`, a unique `id`,
+`connector`, `width: 1920`, `height: 1080`, `mode_millihz: 120000`, `vrr: false`,
+`load_workers: 16`, a nonempty `quiet_window` declaration, and `arms`.
+
+The 108 arms are ordered by condition (`idle`, then `load`), pair (1–3),
+workload (`panel`, then `bulk`), and measurement (`latency`, `cpu-only`, then
+`rust-global`). Each group has variants A/B/C in order CBA, ABC or BCA for
+pairs 1, 2 or 3. This preserves files-first pairs 1/3 and IPC-first pair 2
+from the accepted method; it is not a Latin-square design. A means IPC bytes, B files bytes, and C files sealed. Every arm
+has a unique `id`, those five labels, `plan_sha256`, `peer_config_sha256`,
+`frames`, `warmup`, and `runtime_ms`. Latency uses 1100 frames with 100 warmup;
+cost uses 1000 with zero warmup; every arm lasts 60,000 ms.
+
+Freeze rechecks plan argv, artifact digests, signed clean source identities,
+workload labels and common campaign inputs. Profiles may differ only in the
+peer executable/config paths and wire choice; panel height is 24 throughout.
+Owner and peer binaries must match within each instrumentation method. It saves
+exact plan bytes under each arm ID and writes `READY` last. An existing campaign
+directory is never overwritten, including after partial failure.
+
+This command prepares evidence only. It does not launch arms, enforce run order,
+collect actual connector/VRR or load evidence, or establish a cost or latency
+verdict. Those execution controls must be in place before this frozen matrix is
+used as an acceptance campaign; `READY` is not acceptance. The physical output
+still needs operator confirmation and runtime verification.
+
 An attended native timing run has two separate commands:
 
     cargo xtask shell-timing prepare-native REQUEST_JSON /ABS/NEW_PLAN.json
