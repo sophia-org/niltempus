@@ -465,6 +465,121 @@ fn produced_capture_satisfies_the_real_m5_record() {
     }
 }
 
+fn calibration_target() -> xtask::shell_timing_campaign_provenance::ProvenanceTarget {
+    xtask::shell_timing_campaign_provenance::ProvenanceTarget {
+        card: "card1".into(),
+        output: 3,
+        scale_milli: 1000,
+        connector: "DP-2".into(),
+        width: 1920,
+        height: 1080,
+        mode_millihz: 120_000,
+        vrr: false,
+    }
+}
+
+#[test]
+fn calibration_target_matches_the_campaign_path() {
+    use xtask::shell_timing_campaign_provenance::verify_environment;
+    use xtask::shell_timing_environment::environment_record;
+    let manifest = manifest();
+    let arm = manifest.arms[0].clone();
+    let provider = TrustedRunnerProvenance::new(manifest).unwrap();
+    let evidence = base_evidence();
+    let receipts = evidence.receipts.clone();
+    let case = make_case(&evidence, &receipts);
+    let files = case.files(&arm, None);
+    let target = calibration_target();
+    target.validate().unwrap();
+    let calibrated = verify_environment(&target, &files).unwrap();
+    let campaigned = provider.environment(&files).unwrap();
+    assert_eq!(calibrated.expect, campaigned.expect);
+    assert_eq!(calibrated.host_starttime, campaigned.host_starttime);
+    assert_eq!(calibrated.peer_starttime, campaigned.peer_starttime);
+    assert_eq!(calibrated.clock, campaigned.clock);
+    assert_eq!(
+        calibrated.capture.sources.len(),
+        campaigned.capture.sources.len()
+    );
+    for (left, right) in calibrated
+        .capture
+        .sources
+        .iter()
+        .zip(&campaigned.capture.sources)
+    {
+        assert_eq!(left.kind, right.kind);
+        assert_eq!(left.origin, right.origin);
+        assert_eq!(left.captured_usec, right.captured_usec);
+        assert_eq!(left.text, right.text);
+    }
+    assert_eq!(
+        environment_record(&calibrated.capture, &calibrated.expect)
+            .unwrap()
+            .verdict,
+        "environment_complete"
+    );
+    // Serde shape: roundtrip equal, unknown fields refused.
+    let json = serde_json::to_string(&target).unwrap();
+    assert_eq!(
+        serde_json::from_str::<xtask::shell_timing_campaign_provenance::ProvenanceTarget>(&json)
+            .unwrap(),
+        target
+    );
+    let mut object: serde_json::Value = serde_json::from_str(&json).unwrap();
+    object
+        .as_object_mut()
+        .unwrap()
+        .insert("extra".into(), serde_json::json!(1));
+    assert!(
+        serde_json::from_value::<xtask::shell_timing_campaign_provenance::ProvenanceTarget>(object)
+            .is_err()
+    );
+}
+
+#[test]
+fn invalid_calibration_targets_refuse() {
+    use xtask::shell_timing_campaign_provenance::verify_environment;
+    let manifest = manifest();
+    let arm = manifest.arms[0].clone();
+    let evidence = base_evidence();
+    let receipts = evidence.receipts.clone();
+    let case = make_case(&evidence, &receipts);
+    let files = case.files(&arm, None);
+    type Mutate = Box<dyn Fn(&mut xtask::shell_timing_campaign_provenance::ProvenanceTarget)>;
+    let invalid: Vec<(&str, Mutate)> = vec![
+        (
+            "card with leading zero",
+            Box::new(|t| t.card = "card01".into()),
+        ),
+        ("card without prefix", Box::new(|t| t.card = "gpu1".into())),
+        ("zero output", Box::new(|t| t.output = 0)),
+        ("fractional scale", Box::new(|t| t.scale_milli = 1500)),
+        ("zero scale", Box::new(|t| t.scale_milli = 0)),
+        ("empty connector", Box::new(|t| t.connector.clear())),
+        (
+            "connector with space",
+            Box::new(|t| t.connector = "DP 2".into()),
+        ),
+        (
+            "connector with dot",
+            Box::new(|t| t.connector = "DP.1".into()),
+        ),
+        ("wrong width", Box::new(|t| t.width = 2560)),
+        ("wrong height", Box::new(|t| t.height = 720)),
+        ("wrong mode", Box::new(|t| t.mode_millihz = 60_000)),
+        ("vrr on", Box::new(|t| t.vrr = true)),
+    ];
+    for (name, mutate) in invalid {
+        let mut target = calibration_target();
+        mutate(&mut target);
+        assert!(target.validate().is_err(), "{name} validated");
+        assert!(
+            verify_environment(&target, &files).is_err(),
+            "{name} was accepted"
+        );
+    }
+}
+
 #[test]
 fn disqualifying_outcomes_and_receipt_mismatches_refuse() {
     for outcome in [

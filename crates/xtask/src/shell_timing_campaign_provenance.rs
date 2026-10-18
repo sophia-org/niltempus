@@ -75,6 +75,66 @@ impl TrustedRunnerProvenance {
     }
 }
 
+/// The environment target a retained arm must have been measured
+/// against. The campaign provider derives it from the frozen
+/// manifest; calibration callers supply it directly.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProvenanceTarget {
+    pub card: String,
+    pub output: u64,
+    pub scale_milli: u32,
+    pub connector: String,
+    pub width: u32,
+    pub height: u32,
+    pub mode_millihz: u64,
+    pub vrr: bool,
+}
+
+impl ProvenanceTarget {
+    pub fn validate(&self) -> Result<(), String> {
+        let card = self.card.strip_prefix("card");
+        if !card.is_some_and(|digits| {
+            digits
+                .parse::<u32>()
+                .is_ok_and(|id| id.to_string() == digits)
+        }) || self.output == 0
+            || self.scale_milli == 0
+            || !self.scale_milli.is_multiple_of(1000)
+            || self.connector.is_empty()
+            || self.connector.len() > 96
+            || !self
+                .connector
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
+            || self.width != 1920
+            || self.height != 1080
+            || self.mode_millihz != 120_000
+            || self.vrr
+        {
+            return Err(
+                "target requires a canonical card, nonzero output, whole scale, \
+                 a valid connector and 1920x1080@120 Hz with VRR off"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+
+    fn from_manifest(manifest: &Manifest) -> Self {
+        Self {
+            card: manifest.environment.card.clone(),
+            output: manifest.environment.output,
+            scale_milli: manifest.environment.scale_milli,
+            connector: manifest.connector.clone(),
+            width: manifest.width,
+            height: manifest.height,
+            mode_millihz: manifest.mode_millihz,
+            vrr: manifest.vrr,
+        }
+    }
+}
+
 fn parse_stat(text: &str, expected_pid: u32) -> Result<(u32, u64, char), String> {
     let line = text.strip_suffix('\n').unwrap_or(text);
     if line.contains('\n') {
@@ -224,415 +284,424 @@ fn static_map(sources: &[SourceRecord]) -> BTreeMap<String, String> {
         .collect()
 }
 
-impl ArmProvenance for TrustedRunnerProvenance {
-    fn environment(&self, files: &ArmFiles<'_>) -> Result<VerifiedEnvironment, String> {
-        let (host_path, peer_path, _runner_path) = self.plan(files)?;
-        let evidence: MonitorEvidence =
-            serde_json::from_slice(files.environment).map_err(|e| e.to_string())?;
-        if evidence.schema != 1 {
-            return Err("unknown monitor evidence schema".into());
-        }
-        if evidence.receipts.len() > 64 || evidence.batches.len() > 64 {
-            return Err("environment evidence exceeds the receipt or batch bound".into());
-        }
-        let receipts_file: Vec<EnvironmentReceipt> =
-            serde_json::from_slice(files.environment_receipts).map_err(|e| e.to_string())?;
-        if evidence.finish_error.is_some() {
-            return Err("environment evidence carries a finish error".into());
-        }
-        if !matches!(
-            evidence.outcome,
-            MonitorOutcome::Bound | MonitorOutcome::EndedAfterEvidence
-        ) {
-            return Err("environment outcome cannot qualify".into());
-        }
-        if receipts_file.len() != evidence.receipts.len()
-            || receipts_file
-                .iter()
-                .zip(&evidence.receipts)
-                .any(|(file, retained)| {
-                    file.pid != retained.pid
-                        || file.uid != retained.uid
-                        || file.gid != retained.gid
-                        || file.received_usec != retained.received_usec
-                        || file.record != retained.record
-                        || file.sender_fdinfo != retained.sender_fdinfo
-                })
-        {
-            return Err("environment receipts file differs from the monitor evidence".into());
-        }
-        if evidence.card != self.manifest.environment.card {
-            return Err("monitor card differs from the frozen campaign".into());
-        }
-        if !Path::new(&evidence.environment_socket).is_absolute() {
-            return Err("environment socket path is not absolute".into());
-        }
-        let capture_window = evidence
-            .capture_window
-            .ok_or("environment evidence has no capture window")?;
-        if capture_window.start_usec > capture_window.end_usec {
-            return Err("capture window is inverted".into());
-        }
-        let binding: &BindingRecord = evidence.binding.as_ref().ok_or("environment never bound")?;
+/// Verify one retained arm's environment against `target`. This is
+/// the campaign provider's environment implementation, reusable for
+/// target-bound calibration; every check is identical.
+pub fn verify_environment(
+    target: &ProvenanceTarget,
+    files: &ArmFiles<'_>,
+) -> Result<VerifiedEnvironment, String> {
+    target.validate()?;
+    let (host_path, peer_path, _runner_path) = plan_artifacts(files.plan)?;
+    let evidence: MonitorEvidence =
+        serde_json::from_slice(files.environment).map_err(|e| e.to_string())?;
+    if evidence.schema != 1 {
+        return Err("unknown monitor evidence schema".into());
+    }
+    if evidence.receipts.len() > 64 || evidence.batches.len() > 64 {
+        return Err("environment evidence exceeds the receipt or batch bound".into());
+    }
+    let receipts_file: Vec<EnvironmentReceipt> =
+        serde_json::from_slice(files.environment_receipts).map_err(|e| e.to_string())?;
+    if evidence.finish_error.is_some() {
+        return Err("environment evidence carries a finish error".into());
+    }
+    if !matches!(
+        evidence.outcome,
+        MonitorOutcome::Bound | MonitorOutcome::EndedAfterEvidence
+    ) {
+        return Err("environment outcome cannot qualify".into());
+    }
+    if receipts_file.len() != evidence.receipts.len()
+        || receipts_file
+            .iter()
+            .zip(&evidence.receipts)
+            .any(|(file, retained)| {
+                file.pid != retained.pid
+                    || file.uid != retained.uid
+                    || file.gid != retained.gid
+                    || file.received_usec != retained.received_usec
+                    || file.record != retained.record
+                    || file.sender_fdinfo != retained.sender_fdinfo
+            })
+    {
+        return Err("environment receipts file differs from the monitor evidence".into());
+    }
+    if evidence.card != target.card {
+        return Err("monitor card differs from the frozen campaign".into());
+    }
+    if !Path::new(&evidence.environment_socket).is_absolute() {
+        return Err("environment socket path is not absolute".into());
+    }
+    let capture_window = evidence
+        .capture_window
+        .ok_or("environment evidence has no capture window")?;
+    if capture_window.start_usec > capture_window.end_usec {
+        return Err("capture window is inverted".into());
+    }
+    let binding: &BindingRecord = evidence.binding.as_ref().ok_or("environment never bound")?;
 
-        // Binding chain and identities.
-        let chain = &binding.chain;
-        if chain.len() < 3
-            || chain.first().map(|node| node.identity) != Some(binding.wrapper)
-            || chain.last().map(|node| node.identity) != Some(binding.peer)
+    // Binding chain and identities.
+    let chain = &binding.chain;
+    if chain.len() < 3
+        || chain.first().map(|node| node.identity) != Some(binding.wrapper)
+        || chain.last().map(|node| node.identity) != Some(binding.peer)
+    {
+        return Err("binding chain does not run from wrapper to peer".into());
+    }
+    let host_at = chain
+        .iter()
+        .position(|node| node.identity == binding.host)
+        .ok_or("binding chain lacks the host")?;
+    let peer_at = chain
+        .iter()
+        .position(|node| node.identity == binding.peer)
+        .ok_or("binding chain lacks the peer")?;
+    if host_at == 0 || peer_at <= host_at {
+        return Err("binding host is not below the wrapper and peer below host".into());
+    }
+    for pair in chain.windows(2) {
+        if pair[1].parent_pid != pair[0].identity.pid {
+            return Err("binding chain parent links are not contiguous".into());
+        }
+    }
+    if binding.wrapper.pid == binding.host.pid
+        || binding.host.pid == binding.peer.pid
+        || binding.wrapper.pid == binding.peer.pid
+    {
+        return Err("binding pids are not distinct".into());
+    }
+    for (record, expected, role) in [
+        (&binding.host_executable, &host_path, "host"),
+        (&binding.peer_executable, &peer_path, "peer"),
+    ] {
+        if record.prepared_path != *expected
+            || record.dev == 0
+            || record.ino == 0
+            || !Path::new(&record.observed_link).is_absolute()
+            || record.observed_link.ends_with(" (deleted)")
         {
-            return Err("binding chain does not run from wrapper to peer".into());
+            return Err(format!(
+                "bound {role} executable differs from the frozen plan"
+            ));
         }
-        let host_at = chain
-            .iter()
-            .position(|node| node.identity == binding.host)
-            .ok_or("binding chain lacks the host")?;
-        let peer_at = chain
-            .iter()
-            .position(|node| node.identity == binding.peer)
-            .ok_or("binding chain lacks the peer")?;
-        if host_at == 0 || peer_at <= host_at {
-            return Err("binding host is not below the wrapper and peer below host".into());
-        }
-        for pair in chain.windows(2) {
-            if pair[1].parent_pid != pair[0].identity.pid {
-                return Err("binding chain parent links are not contiguous".into());
-            }
-        }
-        if binding.wrapper.pid == binding.host.pid
-            || binding.host.pid == binding.peer.pid
-            || binding.wrapper.pid == binding.peer.pid
+    }
+
+    // Clock domain, reparsed from the raw retained texts.
+    let time = &binding.time;
+    let inodes = [
+        parse_namespace(&time.reference)?,
+        parse_namespace(&time.host)?,
+        parse_namespace(&time.peer)?,
+        parse_namespace(&time.capturer)?,
+    ];
+    if inodes.iter().any(|&inode| inode != inodes[0]) {
+        return Err("time namespace inodes differ".into());
+    }
+    if (
+        time.reference.pid,
+        time.host.pid,
+        time.peer.pid,
+        time.capturer.pid,
+    ) != (1, binding.host.pid, binding.peer.pid, time.capturer.pid)
+        || time.host.identity != binding.host
+        || time.peer.identity != binding.peer
+    {
+        return Err("namespace evidence names other processes".into());
+    }
+    for record in [&time.reference, &time.host, &time.peer, &time.capturer] {
+        if record.pid != record.identity.pid
+            || record.origin.is_empty()
+            || !(capture_window.start_usec..=capture_window.end_usec)
+                .contains(&record.captured_usec)
         {
-            return Err("binding pids are not distinct".into());
+            return Err("namespace evidence provenance is inconsistent".into());
         }
-        for (record, expected, role) in [
-            (&binding.host_executable, &host_path, "host"),
-            (&binding.peer_executable, &peer_path, "peer"),
-        ] {
-            if record.prepared_path != *expected
-                || record.dev == 0
-                || record.ino == 0
-                || !Path::new(&record.observed_link).is_absolute()
-                || record.observed_link.ends_with(" (deleted)")
-            {
+    }
+    if time.capturer.identity.pid != time.capturer.pid
+        || time.capturer_timens_offsets_origin.is_empty()
+    {
+        return Err("capturer namespace evidence is unprovenanced".into());
+    }
+    let offset = parse_offsets(&time.capturer_timens_offsets)?;
+    if offset != (0, 0)
+        || offset
+            != (
+                time.monotonic_offset_seconds,
+                time.monotonic_offset_nanoseconds,
+            )
+    {
+        return Err("timens_offsets monotonic offset is not exactly zero".into());
+    }
+
+    // Proven-alive bound and measurement end.
+    let proven = evidence
+        .last_proven_alive
+        .ok_or("environment has no proven-alive bracket")?;
+    if proven.host_start_time_ticks != binding.host.start_time_ticks
+        || proven.peer_start_time_ticks != binding.peer.start_time_ticks
+        || proven.interval.start_usec > proven.interval.end_usec
+        || proven.interval.start_usec < capture_window.start_usec
+        || proven.interval.end_usec > capture_window.end_usec
+        || proven.interval.start_usec <= capture_window.start_usec
+    {
+        return Err("proven-alive bracket is inconsistent".into());
+    }
+
+    // Start evidence: identities, raw stat/status, windows.
+    let start = evidence.start.as_ref().ok_or("environment has no start")?;
+    if start.host != binding.host || start.peer != binding.peer {
+        return Err("start capture identities differ from the binding".into());
+    }
+    if start.window.start_usec < capture_window.start_usec
+        || start.window.end_usec > capture_window.end_usec
+        || start.window.start_usec > start.window.end_usec
+    {
+        return Err("start window lies outside the capture window".into());
+    }
+    let mut seen: Vec<&SourceKindRecord> = Vec::new();
+    for source in &start.sources {
+        if seen.contains(&&source.kind) {
+            return Err("start sources duplicate a kind".into());
+        }
+        seen.push(&source.kind);
+        if matches!(
+            source.kind,
+            SourceKindRecord::HostLog | SourceKindRecord::Note
+        ) {
+            return Err("start sources carry a raw-log kind".into());
+        }
+        if !(start.window.start_usec..=start.window.end_usec).contains(&source.captured_usec) {
+            return Err("start source stamp lies outside its window".into());
+        }
+    }
+    let one = |kind: &SourceKindRecord| -> Result<&SourceRecord, String> {
+        start
+            .sources
+            .iter()
+            .find(|source| &source.kind == kind)
+            .ok_or_else(|| format!("start sources lack {kind:?}"))
+    };
+    let (host_parent, host_start, _) = {
+        let stat = one(&SourceKindRecord::ProcStat {
+            pid: binding.host.pid,
+        })?;
+        parse_stat(&stat.text, binding.host.pid)?
+    };
+    let (peer_parent, peer_start, _) = {
+        let stat = one(&SourceKindRecord::ProcStat {
+            pid: binding.peer.pid,
+        })?;
+        parse_stat(&stat.text, binding.peer.pid)?
+    };
+    if host_start != binding.host.start_time_ticks
+        || peer_start != binding.peer.start_time_ticks
+        || chain[host_at].parent_pid != host_parent
+        || chain[peer_at].parent_pid != peer_parent
+    {
+        return Err("start stat facts differ from the binding".into());
+    }
+    let host_status = one(&SourceKindRecord::ProcStatus {
+        pid: binding.host.pid,
+    })?;
+    one(&SourceKindRecord::ProcStatus {
+        pid: binding.peer.pid,
+    })?;
+    let (uid, gid) = (evidence.host_uid, evidence.host_gid);
+    let (uid, gid) = match (uid, gid) {
+        (Some(uid), Some(gid)) => (uid, gid),
+        _ => return Err("environment lacks host uid/gid".into()),
+    };
+    if parse_status_id(&host_status.text, "Uid")? != uid
+        || parse_status_id(&host_status.text, "Gid")? != gid
+    {
+        return Err("host status real ids differ from the receipt metadata".into());
+    }
+    if start.closing_stats.len() != 2
+        || start.closing_stats[0].kind
+            != (SourceKindRecord::ProcStat {
+                pid: binding.host.pid,
+            })
+        || start.closing_stats[1].kind
+            != (SourceKindRecord::ProcStat {
+                pid: binding.peer.pid,
+            })
+    {
+        return Err("closing stats are not the host and peer brackets".into());
+    }
+    for (closing, (expected, opening_parent)) in start
+        .closing_stats
+        .iter()
+        .zip([(binding.host, host_parent), (binding.peer, peer_parent)])
+    {
+        let (parent, start_ticks, _) = parse_stat(&closing.text, expected.pid)?;
+        if start_ticks != expected.start_time_ticks
+            || parent != opening_parent
+            || !(start.window.start_usec..=start.window.end_usec).contains(&closing.captured_usec)
+        {
+            return Err("closing stat differs from the bound identity".into());
+        }
+    }
+
+    // End evidence: static equality and honest rechecks.
+    let end = &evidence.end;
+    let end_window = end.window.ok_or("environment end has no window")?;
+    if end_window.start_usec > end_window.end_usec
+        || end_window.start_usec < capture_window.start_usec
+        || end_window.end_usec > capture_window.end_usec
+    {
+        return Err("end window lies outside the capture window".into());
+    }
+    if end_window.start_usec < proven.interval.end_usec {
+        return Err("end window does not follow the proven-alive bracket".into());
+    }
+    let end_sources = end
+        .static_sources
+        .as_ref()
+        .map_err(|error| format!("end static capture failed: {error}"))?;
+    let mut end_seen: Vec<&SourceKindRecord> = Vec::new();
+    for source in end_sources {
+        if end_seen.contains(&&source.kind) {
+            return Err("end sources duplicate a kind".into());
+        }
+        end_seen.push(&source.kind);
+        if !is_static(&source.kind)
+            || matches!(
+                source.kind,
+                SourceKindRecord::HostLog | SourceKindRecord::Note
+            )
+            || !(end_window.start_usec..=end_window.end_usec).contains(&source.captured_usec)
+        {
+            return Err("end sources are not windowed static facts".into());
+        }
+    }
+    if static_map(&start.sources) != static_map(end_sources) {
+        return Err("static environment changed between start and end".into());
+    }
+    for (recheck, expected, role) in [
+        (&end.host_recheck, &binding.host, "host"),
+        (&end.peer_recheck, &binding.peer, "peer"),
+    ] {
+        match recheck {
+            Some(RecheckRecord::Alive(identity)) if identity == expected => {}
+            Some(RecheckRecord::Exited) => {}
+            _ => {
                 return Err(format!(
-                    "bound {role} executable differs from the frozen plan"
+                    "end {role} recheck is missing or does not match the binding"
                 ));
             }
         }
+    }
 
-        // Clock domain, reparsed from the raw retained texts.
-        let time = &binding.time;
-        let inodes = [
-            parse_namespace(&time.reference)?,
-            parse_namespace(&time.host)?,
-            parse_namespace(&time.peer)?,
-            parse_namespace(&time.capturer)?,
-        ];
-        if inodes.iter().any(|&inode| inode != inodes[0]) {
-            return Err("time namespace inodes differ".into());
-        }
-        if (
-            time.reference.pid,
-            time.host.pid,
-            time.peer.pid,
-            time.capturer.pid,
-        ) != (1, binding.host.pid, binding.peer.pid, time.capturer.pid)
-            || time.host.identity != binding.host
-            || time.peer.identity != binding.peer
+    // Batches cover every receipt exactly once, in order.
+    if evidence.receipts.is_empty() || evidence.batches.is_empty() {
+        return Err("environment accepted no receipts".into());
+    }
+    let mut covered = 0usize;
+    let mut previous_end = 0u64;
+    for batch in &evidence.batches {
+        let batch_end_receipt = batch
+            .first_receipt
+            .checked_add(batch.receipt_count)
+            .ok_or("accepted batch coverage overflows")?;
+        if batch.first_receipt != covered
+            || batch.receipt_count == 0
+            || batch_end_receipt > evidence.receipts.len()
+            || batch.interval.start_usec > batch.interval.end_usec
+            || batch.interval.start_usec < previous_end
+            || batch.interval.start_usec < start.window.end_usec
+            || batch.interval.end_usec > proven.interval.end_usec
+            || !(capture_window.start_usec..=capture_window.end_usec)
+                .contains(&batch.interval.start_usec)
+            || !(capture_window.start_usec..=capture_window.end_usec)
+                .contains(&batch.interval.end_usec)
+            || batch.host_start_time_ticks != binding.host.start_time_ticks
+            || batch.peer_start_time_ticks != binding.peer.start_time_ticks
         {
-            return Err("namespace evidence names other processes".into());
+            return Err("accepted batches do not cover the receipts contiguously".into());
         }
-        for record in [&time.reference, &time.host, &time.peer, &time.capturer] {
-            if record.pid != record.identity.pid
-                || record.origin.is_empty()
-                || !(capture_window.start_usec..=capture_window.end_usec)
-                    .contains(&record.captured_usec)
+        previous_end = batch.interval.end_usec;
+        for receipt in
+            &evidence.receipts[batch.first_receipt..batch.first_receipt + batch.receipt_count]
+        {
+            receipt.require_host(binding.host.pid, uid, gid)?;
+            if !(batch.interval.start_usec..=batch.interval.end_usec)
+                .contains(&receipt.received_usec)
             {
-                return Err("namespace evidence provenance is inconsistent".into());
+                return Err("receipt lies outside its batch interval".into());
+            }
+            if fdinfo_pid(&receipt.sender_fdinfo)? != binding.host.pid {
+                return Err("receipt pidfd does not name the bound host".into());
             }
         }
-        if time.capturer.identity.pid != time.capturer.pid
-            || time.capturer_timens_offsets_origin.is_empty()
-        {
-            return Err("capturer namespace evidence is unprovenanced".into());
-        }
-        let offset = parse_offsets(&time.capturer_timens_offsets)?;
-        if offset != (0, 0)
-            || offset
-                != (
-                    time.monotonic_offset_seconds,
-                    time.monotonic_offset_nanoseconds,
-                )
-        {
-            return Err("timens_offsets monotonic offset is not exactly zero".into());
-        }
+        covered += batch.receipt_count;
+    }
+    if covered != evidence.receipts.len() {
+        return Err("accepted batches do not cover every receipt".into());
+    }
 
-        // Proven-alive bound and measurement end.
-        let proven = evidence
-            .last_proven_alive
-            .ok_or("environment has no proven-alive bracket")?;
-        if proven.host_start_time_ticks != binding.host.start_time_ticks
-            || proven.peer_start_time_ticks != binding.peer.start_time_ticks
-            || proven.interval.start_usec > proven.interval.end_usec
-            || proven.interval.start_usec < capture_window.start_usec
-            || proven.interval.end_usec > capture_window.end_usec
-            || proven.interval.start_usec <= capture_window.start_usec
-        {
-            return Err("proven-alive bracket is inconsistent".into());
-        }
-
-        // Start evidence: identities, raw stat/status, windows.
-        let start = evidence.start.as_ref().ok_or("environment has no start")?;
-        if start.host != binding.host || start.peer != binding.peer {
-            return Err("start capture identities differ from the binding".into());
-        }
-        if start.window.start_usec < capture_window.start_usec
-            || start.window.end_usec > capture_window.end_usec
-            || start.window.start_usec > start.window.end_usec
-        {
-            return Err("start window lies outside the capture window".into());
-        }
-        let mut seen: Vec<&SourceKindRecord> = Vec::new();
-        for source in &start.sources {
-            if seen.contains(&&source.kind) {
-                return Err("start sources duplicate a kind".into());
-            }
-            seen.push(&source.kind);
-            if matches!(
-                source.kind,
-                SourceKindRecord::HostLog | SourceKindRecord::Note
-            ) {
-                return Err("start sources carry a raw-log kind".into());
-            }
-            if !(start.window.start_usec..=start.window.end_usec).contains(&source.captured_usec) {
-                return Err("start source stamp lies outside its window".into());
-            }
-        }
-        let one = |kind: &SourceKindRecord| -> Result<&SourceRecord, String> {
-            start
-                .sources
-                .iter()
-                .find(|source| &source.kind == kind)
-                .ok_or_else(|| format!("start sources lack {kind:?}"))
-        };
-        let (host_parent, host_start, _) = {
-            let stat = one(&SourceKindRecord::ProcStat {
-                pid: binding.host.pid,
-            })?;
-            parse_stat(&stat.text, binding.host.pid)?
-        };
-        let (peer_parent, peer_start, _) = {
-            let stat = one(&SourceKindRecord::ProcStat {
-                pid: binding.peer.pid,
-            })?;
-            parse_stat(&stat.text, binding.peer.pid)?
-        };
-        if host_start != binding.host.start_time_ticks
-            || peer_start != binding.peer.start_time_ticks
-            || chain[host_at].parent_pid != host_parent
-            || chain[peer_at].parent_pid != peer_parent
-        {
-            return Err("start stat facts differ from the binding".into());
-        }
-        let host_status = one(&SourceKindRecord::ProcStatus {
-            pid: binding.host.pid,
-        })?;
-        one(&SourceKindRecord::ProcStatus {
-            pid: binding.peer.pid,
-        })?;
-        let (uid, gid) = (evidence.host_uid, evidence.host_gid);
-        let (uid, gid) = match (uid, gid) {
-            (Some(uid), Some(gid)) => (uid, gid),
-            _ => return Err("environment lacks host uid/gid".into()),
-        };
-        if parse_status_id(&host_status.text, "Uid")? != uid
-            || parse_status_id(&host_status.text, "Gid")? != gid
-        {
-            return Err("host status real ids differ from the receipt metadata".into());
-        }
-        if start.closing_stats.len() != 2
-            || start.closing_stats[0].kind
-                != (SourceKindRecord::ProcStat {
-                    pid: binding.host.pid,
-                })
-            || start.closing_stats[1].kind
-                != (SourceKindRecord::ProcStat {
-                    pid: binding.peer.pid,
-                })
-        {
-            return Err("closing stats are not the host and peer brackets".into());
-        }
-        for (closing, (expected, opening_parent)) in start
-            .closing_stats
-            .iter()
-            .zip([(binding.host, host_parent), (binding.peer, peer_parent)])
-        {
-            let (parent, start_ticks, _) = parse_stat(&closing.text, expected.pid)?;
-            if start_ticks != expected.start_time_ticks
-                || parent != opening_parent
-                || !(start.window.start_usec..=start.window.end_usec)
-                    .contains(&closing.captured_usec)
-            {
-                return Err("closing stat differs from the bound identity".into());
-            }
-        }
-
-        // End evidence: static equality and honest rechecks.
-        let end = &evidence.end;
-        let end_window = end.window.ok_or("environment end has no window")?;
-        if end_window.start_usec > end_window.end_usec
-            || end_window.start_usec < capture_window.start_usec
-            || end_window.end_usec > capture_window.end_usec
-        {
-            return Err("end window lies outside the capture window".into());
-        }
-        if end_window.start_usec < proven.interval.end_usec {
-            return Err("end window does not follow the proven-alive bracket".into());
-        }
-        let end_sources = end
-            .static_sources
-            .as_ref()
-            .map_err(|error| format!("end static capture failed: {error}"))?;
-        let mut end_seen: Vec<&SourceKindRecord> = Vec::new();
-        for source in end_sources {
-            if end_seen.contains(&&source.kind) {
-                return Err("end sources duplicate a kind".into());
-            }
-            end_seen.push(&source.kind);
-            if !is_static(&source.kind)
-                || matches!(
-                    source.kind,
-                    SourceKindRecord::HostLog | SourceKindRecord::Note
-                )
-                || !(end_window.start_usec..=end_window.end_usec).contains(&source.captured_usec)
-            {
-                return Err("end sources are not windowed static facts".into());
-            }
-        }
-        if static_map(&start.sources) != static_map(end_sources) {
-            return Err("static environment changed between start and end".into());
-        }
-        for (recheck, expected, role) in [
-            (&end.host_recheck, &binding.host, "host"),
-            (&end.peer_recheck, &binding.peer, "peer"),
-        ] {
-            match recheck {
-                Some(RecheckRecord::Alive(identity)) if identity == expected => {}
-                Some(RecheckRecord::Exited) => {}
-                _ => {
-                    return Err(format!(
-                        "end {role} recheck is missing or does not match the binding"
-                    ));
-                }
-            }
-        }
-
-        // Batches cover every receipt exactly once, in order.
-        if evidence.receipts.is_empty() || evidence.batches.is_empty() {
-            return Err("environment accepted no receipts".into());
-        }
-        let mut covered = 0usize;
-        let mut previous_end = 0u64;
-        for batch in &evidence.batches {
-            let batch_end_receipt = batch
-                .first_receipt
-                .checked_add(batch.receipt_count)
-                .ok_or("accepted batch coverage overflows")?;
-            if batch.first_receipt != covered
-                || batch.receipt_count == 0
-                || batch_end_receipt > evidence.receipts.len()
-                || batch.interval.start_usec > batch.interval.end_usec
-                || batch.interval.start_usec < previous_end
-                || batch.interval.start_usec < start.window.end_usec
-                || batch.interval.end_usec > proven.interval.end_usec
-                || !(capture_window.start_usec..=capture_window.end_usec)
-                    .contains(&batch.interval.start_usec)
-                || !(capture_window.start_usec..=capture_window.end_usec)
-                    .contains(&batch.interval.end_usec)
-                || batch.host_start_time_ticks != binding.host.start_time_ticks
-                || batch.peer_start_time_ticks != binding.peer.start_time_ticks
-            {
-                return Err("accepted batches do not cover the receipts contiguously".into());
-            }
-            previous_end = batch.interval.end_usec;
-            for receipt in
-                &evidence.receipts[batch.first_receipt..batch.first_receipt + batch.receipt_count]
-            {
-                receipt.require_host(binding.host.pid, uid, gid)?;
-                if !(batch.interval.start_usec..=batch.interval.end_usec)
-                    .contains(&receipt.received_usec)
-                {
-                    return Err("receipt lies outside its batch interval".into());
-                }
-                if fdinfo_pid(&receipt.sender_fdinfo)? != binding.host.pid {
-                    return Err("receipt pidfd does not name the bound host".into());
-                }
-            }
-            covered += batch.receipt_count;
-        }
-        if covered != evidence.receipts.len() {
-            return Err("accepted batches do not cover every receipt".into());
-        }
-
-        // Canonical capture: start sources plus the receipt-derived
-        // host log, and nothing else.
-        let mut sources: Vec<SourceText> = start
-            .sources
-            .iter()
-            .map(|source| SourceText {
-                kind: source_kind(&source.kind),
-                origin: source.origin.clone(),
-                captured_usec: source.captured_usec,
-                text: source.text.clone(),
-            })
-            .collect();
-        let host_log = evidence
-            .receipts
-            .iter()
-            .map(|receipt| receipt.record.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        sources.push(SourceText {
-            kind: SourceKind::HostLog,
-            origin: evidence.environment_socket.clone(),
-            captured_usec: evidence.batches.last().unwrap().interval.end_usec,
-            text: format!("{host_log}\n"),
-        });
-        let target = &self.manifest.environment;
-        Ok(VerifiedEnvironment {
-            capture: Capture { sources },
-            expect: crate::shell_timing_environment::Expect {
-                output: target.output,
-                card: target.card.clone(),
-                connector: self.manifest.connector.clone(),
-                width: self.manifest.width,
-                height: self.manifest.height,
-                refresh_millihz: self.manifest.mode_millihz,
-                scale_milli: target.scale_milli,
-                vrr: if self.manifest.vrr { Vrr::On } else { Vrr::Off },
-                host_pid: binding.host.pid,
-                peer_pid: binding.peer.pid,
-                capture: Interval {
-                    start_usec: capture_window.start_usec,
-                    end_usec: capture_window.end_usec,
-                },
-                measurement: Interval {
-                    start_usec: capture_window.start_usec,
-                    end_usec: proven.interval.start_usec,
-                },
-            },
-            host_starttime: binding.host.start_time_ticks,
-            peer_starttime: binding.peer.start_time_ticks,
-            clock: MonotonicDomain {
-                reference: inodes[0],
-                host: inodes[1],
-                peer: inodes[2],
-                capturer: inodes[3],
-                monotonic_offset_seconds: offset.0,
-                monotonic_offset_nanoseconds: offset.1,
-            },
+    // Canonical capture: start sources plus the receipt-derived
+    // host log, and nothing else.
+    let mut sources: Vec<SourceText> = start
+        .sources
+        .iter()
+        .map(|source| SourceText {
+            kind: source_kind(&source.kind),
+            origin: source.origin.clone(),
+            captured_usec: source.captured_usec,
+            text: source.text.clone(),
         })
+        .collect();
+    let host_log = evidence
+        .receipts
+        .iter()
+        .map(|receipt| receipt.record.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    sources.push(SourceText {
+        kind: SourceKind::HostLog,
+        origin: evidence.environment_socket.clone(),
+        captured_usec: evidence.batches.last().unwrap().interval.end_usec,
+        text: format!("{host_log}\n"),
+    });
+    Ok(VerifiedEnvironment {
+        capture: Capture { sources },
+        expect: crate::shell_timing_environment::Expect {
+            output: target.output,
+            card: target.card.clone(),
+            connector: target.connector.clone(),
+            width: target.width,
+            height: target.height,
+            refresh_millihz: target.mode_millihz,
+            scale_milli: target.scale_milli,
+            vrr: if target.vrr { Vrr::On } else { Vrr::Off },
+            host_pid: binding.host.pid,
+            peer_pid: binding.peer.pid,
+            capture: Interval {
+                start_usec: capture_window.start_usec,
+                end_usec: capture_window.end_usec,
+            },
+            measurement: Interval {
+                start_usec: capture_window.start_usec,
+                end_usec: proven.interval.start_usec,
+            },
+        },
+        host_starttime: binding.host.start_time_ticks,
+        peer_starttime: binding.peer.start_time_ticks,
+        clock: MonotonicDomain {
+            reference: inodes[0],
+            host: inodes[1],
+            peer: inodes[2],
+            capturer: inodes[3],
+            monotonic_offset_seconds: offset.0,
+            monotonic_offset_nanoseconds: offset.1,
+        },
+    })
+}
+
+impl ArmProvenance for TrustedRunnerProvenance {
+    fn environment(&self, files: &ArmFiles<'_>) -> Result<VerifiedEnvironment, String> {
+        verify_environment(&ProvenanceTarget::from_manifest(&self.manifest), files)
     }
 
     fn load(
