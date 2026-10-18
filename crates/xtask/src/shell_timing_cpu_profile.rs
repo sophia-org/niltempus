@@ -14,9 +14,31 @@ use crate::shell_timing_native::{self, Artifact, Request};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, path::Path, process::Command};
 
+pub mod kernel_syscalls;
+pub use kernel_syscalls::*;
+
 const CAP: u64 = 1024 * 1024;
 const PERF_CAP: u64 = 512 * CAP;
 const SCOPE: &str = "diagnostic user-space samples only; no kernel CPU attribution, no cost or latency gate verdict; sampling perturbs execution";
+
+/// Descriptors written before modes existed have no `mode` and keep the
+/// original user-only capture.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CaptureMode {
+    #[default]
+    UserCpu,
+    KernelSyscalls,
+}
+
+impl CaptureMode {
+    pub fn scope(self) -> &'static str {
+        match self {
+            Self::UserCpu => SCOPE,
+            Self::KernelSyscalls => KERNEL_SYSCALLS_SCOPE,
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -25,6 +47,8 @@ pub struct Profile {
     pub plan: Artifact,
     pub perf: Artifact,
     pub target: ProvenanceTarget,
+    #[serde(default)]
+    pub mode: CaptureMode,
 }
 
 fn digest(path: &Path, cap: u64) -> Result<String, String> {
@@ -150,6 +174,9 @@ pub fn report_arguments(data: &Path, pid: u32, interval: &Interval) -> Result<Ve
         "--stdio".into(),
         "--stdio-color=never".into(),
         "--no-children".into(),
+        // Inline expansion can repeatedly invoke addr2line for every frame.
+        // Keep recorded callchains and symbol names without that expansion.
+        "--no-inline".into(),
         "--show-nr-samples".into(),
         "--percent-limit=0".into(),
         "--percentage=relative".into(),
@@ -222,28 +249,7 @@ pub fn sample_counts(text: &str, pid: u32, interval: &Interval) -> Result<(usize
         {
             return Err("perf sample identity or event differs".into());
         }
-        let (seconds, nanos) = fields[1]
-            .trim_end_matches(':')
-            .split_once('.')
-            .ok_or("invalid perf timestamp")?;
-        if seconds.is_empty()
-            || !seconds.bytes().all(|b| b.is_ascii_digit())
-            || nanos.len() != 9
-            || !nanos.bytes().all(|b| b.is_ascii_digit())
-        {
-            return Err("invalid perf timestamp".into());
-        }
-        let stamp = seconds
-            .parse::<u128>()
-            .map_err(|_| "invalid perf timestamp")?
-            .checked_mul(1_000_000_000)
-            .and_then(|v| v.checked_add(nanos.parse::<u128>().ok()?))
-            .ok_or("invalid perf timestamp")?;
-        if stamp < u128::from(interval.start_usec) * 1000
-            || stamp > u128::from(interval.end_usec) * 1000
-        {
-            return Err("perf sample lies outside the selected interval".into());
-        }
+        check_sample_time(fields[1], interval)?;
         count += 1;
         unknown += usize::from(line.contains("[unknown]"));
     }
@@ -251,6 +257,33 @@ pub fn sample_counts(text: &str, pid: u32, interval: &Interval) -> Result<(usize
         return Err("no samples for the bound process in the measured interval".into());
     }
     Ok((count, unknown))
+}
+
+/// A `--ns` sample timestamp lies within the interval, inclusive.
+fn check_sample_time(field: &str, interval: &Interval) -> Result<(), String> {
+    let (seconds, nanos) = field
+        .trim_end_matches(':')
+        .split_once('.')
+        .ok_or("invalid perf timestamp")?;
+    if seconds.is_empty()
+        || !seconds.bytes().all(|b| b.is_ascii_digit())
+        || nanos.len() != 9
+        || !nanos.bytes().all(|b| b.is_ascii_digit())
+    {
+        return Err("invalid perf timestamp".into());
+    }
+    let stamp = seconds
+        .parse::<u128>()
+        .map_err(|_| "invalid perf timestamp")?
+        .checked_mul(1_000_000_000)
+        .and_then(|v| v.checked_add(nanos.parse::<u128>().ok()?))
+        .ok_or("invalid perf timestamp")?;
+    if stamp < u128::from(interval.start_usec) * 1000
+        || stamp > u128::from(interval.end_usec) * 1000
+    {
+        return Err("perf sample lies outside the selected interval".into());
+    }
+    Ok(())
 }
 
 fn write_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
@@ -302,7 +335,11 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
                 .create_new(true)
                 .open(output.join("perf-record.log"))
                 .map_err(|e| e.to_string())?;
-            let argv = record_arguments(
+            let record = match profile.mode {
+                CaptureMode::UserCpu => record_arguments,
+                CaptureMode::KernelSyscalls => kernel_record_arguments,
+            };
+            let argv = record(
                 &data,
                 &plan.artifacts["runner"].path,
                 &descriptor,
@@ -337,8 +374,10 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
             write_json(&output.join("profile-result.json"), &finished)?;
             result?;
             Ok(vec![format!(
-                "captured {}; run report-cpu-profile before interpretation ({SCOPE})",
-                output.display()
+                "captured {} in {:?} mode; run report-cpu-profile before interpretation ({})",
+                output.display(),
+                profile.mode,
+                profile.mode.scope()
             )])
         }
         [command, descriptor, sha, stage] if command == "capture-cpu-profile" => {
@@ -408,6 +447,18 @@ fn report(directory: &Path) -> Result<Vec<String>, String> {
         end_usec: cost.report.whole_workload.outer_end_usec,
     };
     check_measured_interval(&verified, interval)?;
+    if profile.mode == CaptureMode::KernelSyscalls {
+        return kernel_report(KernelReport {
+            perf: &profile.perf.path,
+            data: &data,
+            finished: &finished,
+            request: &request,
+            interval,
+            environment,
+            cost: &cost.report,
+            pids: [verified.expect.host_pid, verified.expect.peer_pid],
+        });
+    }
     let time = time_filter(&interval)?;
     let mut reports = BTreeMap::new();
     for (role, pid) in [
@@ -462,7 +513,71 @@ fn report(directory: &Path) -> Result<Vec<String>, String> {
         "schema":2, "scope":SCOPE, "profile_sha256":finished.profile_sha256,
         "perf_sha256":finished.perf_sha256, "wire":request.wire, "source":request.source,
         "interval":interval, "environment":environment, "cost_diagnostic":cost.report,
-        "reports":reports,
+        "mode":CaptureMode::UserCpu, "reports":reports,
         "interpretation":"Review sample counts, lost-event warnings and unresolved stacks before attribution. Histogram rows retain thread identity within the selected outer TGID and must total its independently checked raw samples. Relative self percentages use that process's samples, not combined CPU. Fractal callchain percentages are conditional shares of their parent branch, not process CPU percentages; callchains overlap. Schema 1 reports grouped shared symbols across processes and must be regenerated from retained perf.data. No kernel samples were collected."
+    })).map_err(|e| e.to_string())?])
+}
+
+struct KernelReport<'a, C: Serialize, E: Serialize> {
+    perf: &'a Path,
+    data: &'a Path,
+    finished: &'a Finished,
+    request: &'a Request,
+    interval: Interval,
+    environment: E,
+    cost: &'a C,
+    pids: [u32; 2],
+}
+
+/// Kernel-syscalls reports check the recorded attributes first, then keep the
+/// CPU histogram and the per-syscall entry counts as separate quantities.
+fn kernel_report<C: Serialize, E: Serialize>(
+    report: KernelReport<'_, C, E>,
+) -> Result<Vec<String>, String> {
+    let run = |argv: &[String]| -> Result<(String, String), String> {
+        let output = Command::new(report.perf)
+            .env("LC_ALL", "C")
+            .args(argv)
+            .output()
+            .map_err(|e| e.to_string())?;
+        let stdout = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
+        let stderr = String::from_utf8(output.stderr).map_err(|e| e.to_string())?;
+        if !output.status.success() {
+            return Err(format!("perf {} failed: {stderr}", argv[0]));
+        }
+        Ok((stdout, stderr))
+    };
+    let evlist_argv = evlist_arguments(report.data);
+    let (evlist, _) = run(&evlist_argv)?;
+    check_evlist(&evlist)?;
+    let mut reports = BTreeMap::new();
+    for (role, pid) in [("session", report.pids[0]), ("peer", report.pids[1])] {
+        let argv = report_arguments(report.data, pid, &report.interval)?;
+        let (output, stderr) = run(&argv)?;
+        check_losses(&output)?;
+        check_lost_chunks(&stderr)?;
+        let sample_argv = kernel_script_arguments(report.data, pid, &report.interval)?;
+        let (samples, sample_stderr) = run(&sample_argv)?;
+        check_lost_chunks(&sample_stderr)?;
+        let counts = kernel_sample_counts(&samples, pid, &report.interval)?;
+        check_report_samples(cpu_report_section(&output)?, counts.cpu_samples)?;
+        reports.insert(
+            role,
+            serde_json::json!({"pid":pid, "argv":argv,
+            "sample_argv":sample_argv, "cpu_event":CPU_EVENT,
+            "cpu_samples":counts.cpu_samples,
+            "unknown_leaf_samples":counts.unknown_leaf_samples,
+            "syscall_entries":counts.syscall_entries,
+            "sample_stderr":sample_stderr, "stdout":output, "stderr":stderr}),
+        );
+    }
+    Ok(vec![serde_json::to_string_pretty(&serde_json::json!({
+        "schema":2, "mode":CaptureMode::KernelSyscalls, "scope":KERNEL_SYSCALLS_SCOPE,
+        "profile_sha256":report.finished.profile_sha256,
+        "perf_sha256":report.finished.perf_sha256, "wire":report.request.wire,
+        "source":report.request.source, "interval":report.interval,
+        "environment":report.environment, "cost_diagnostic":report.cost,
+        "evlist_argv":evlist_argv, "evlist":evlist, "reports":reports,
+        "interpretation":"Review CPU sample counts, lost-event checks and unresolved stacks before attribution. CPU rows include kernel and user samples of the selected outer TGID at 997 Hz and must total its independently checked raw CPU samples; the syscall sections are excluded from that total. Syscall entries count every entry of the 26 listed syscalls by that TGID within the interval, with no callchain; unlisted syscalls are not counted. Entry counts are not durations. Tracepoints and sampling perturb execution; this is not an acceptance measurement."
     })).map_err(|e| e.to_string())?])
 }

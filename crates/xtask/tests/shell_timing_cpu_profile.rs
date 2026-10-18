@@ -102,6 +102,7 @@ fn report_filters_require_a_process_and_a_nonempty_interval() {
         "--sort=pid,dso,symbol",
         "--percentage=relative",
         "--call-graph=fractal,0,callee",
+        "--no-inline",
         "--percent-limit=0",
     ] {
         assert!(args.iter().any(|arg| arg == required));

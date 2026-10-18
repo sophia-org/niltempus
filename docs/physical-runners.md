@@ -397,6 +397,17 @@ through descendants and threads. No system-wide recording, privileges or sysctl
 changes are requested. The internal `capture-cpu-profile` command is the child
 entry point; direct use does not produce a complete profile attempt.
 
+Descriptors may explicitly select `"mode":"kernel-syscalls"`. Omitted mode
+means `user-cpu` and preserves the original capture policy. The kernel mode
+samples user and kernel CPU at 997 Hz with 8192-byte DWARF user stacks and records
+a fixed set of 26 syscall-entry tracepoints at period one, without stack dumps
+on those tracepoints. It requires host permission for kernel sampling and
+readable tracefs metadata; verify a small record/read control before attendance.
+The runner never changes those permissions. Reports verify recorded event
+attributes, reject lost-event warnings, and count entries for the bound TGIDs
+inside the workload interval. Entry counts are not syscall durations; unlisted
+syscalls are uncounted. Both modes remain diagnostic only.
+
 Retain `profile.json`, `profile-result.json`, `perf-command.json`,
 `perf-record.log`, `perf.data`, and the normal `run/` evidence. The report
 rechecks hashes and reconstructs the workload and authenticated environment;
@@ -405,6 +416,8 @@ whole-workload counter interval, including pixel preparation. Missing samples
 or a missing/nonzero loss count refuse the report. Unknown leaf symbols and
 all perf diagnostics remain visible. Keep the exact binaries available for
 symbolization; symbol tables alone do not guarantee complete unwinding.
+Reports disable inline expansion to avoid repeated addr2line work, while
+retaining the recorded callchains and symbol names.
 
 Report schema 2 retains process/thread identity in perf's histogram grouping
 (`--sort=pid,dso,symbol`) and requests `--percentage=relative`. TGID filtering
@@ -413,7 +426,8 @@ from other processes, and its percentages used a broader denominator. Regenerate
 those reports from retained `perf.data`; the capture format is unchanged and no
 new native run is needed. Preserve the earlier reports as superseded evidence.
 
-Self percentages are shares within each selected process's sampled user CPU;
+Self percentages are shares within each selected process's sampled CPU domain
+(user only by default, user and kernel in `kernel-syscalls` mode);
 individual rows can name its worker threads. They are not exclusive combined
 CPU percentages. Self-row counts must sum to the independently checked raw
 sample count. Fractal callchain percentages are conditional shares of the parent
