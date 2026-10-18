@@ -12,8 +12,8 @@ use xtask::shell_timing_campaign_provenance::TrustedRunnerProvenance;
 use xtask::shell_timing_environment::{Capture, Interval, SourceKind, SourceText, Vrr};
 use xtask::shell_timing_environment_monitor::{
     BatchEvidence, BindingRecord, ChainRecord, EndEvidence, ExecutableRecord, IdentityRecord,
-    IntervalRecord, MonitorEvidence, MonitorOutcome, NamespaceRecord, ProvenAlive, RecheckRecord,
-    SourceKindRecord, SourceRecord, StartEvidence, TimeRecord,
+    InitialTimeNamespaceRecord, IntervalRecord, MonitorEvidence, MonitorOutcome, NamespaceRecord,
+    ProvenAlive, RecheckRecord, SourceKindRecord, SourceRecord, StartEvidence, TimeRecord,
 };
 use xtask::shell_timing_environment_socket::EnvironmentReceipt;
 use xtask::shell_timing_load::{EndReason, LoadEvidence, WorkerEvidence};
@@ -21,8 +21,9 @@ use xtask::shell_timing_load_qualify::{
     LoadRecord, OnlineObservation, RunnerObservation, WorkerObservation,
 };
 
-const NS: u64 = 4_026_531_840;
+const NS: u64 = 0xEFFFFFFA;
 const HOST: u32 = 4100;
+const SUPERVISOR: u32 = 4150;
 const PEER: u32 = 4200;
 const HOST_START: u64 = 4242;
 const PEER_START: u64 = 3000;
@@ -193,7 +194,7 @@ fn base_evidence() -> MonitorEvidence {
     ));
     start_sources.push(source(
         SourceKindRecord::ProcStat { pid: PEER },
-        &stat(PEER, HOST, PEER_START),
+        &stat(PEER, SUPERVISOR, PEER_START),
         1200,
     ));
     start_sources.push(source(
@@ -215,6 +216,7 @@ fn base_evidence() -> MonitorEvidence {
         binding: Some(BindingRecord {
             wrapper: identity(100, 1000),
             host: identity(HOST, HOST_START),
+            supervisor: identity(SUPERVISOR, 4300),
             peer: identity(PEER, PEER_START),
             chain: vec![
                 ChainRecord {
@@ -230,8 +232,12 @@ fn base_evidence() -> MonitorEvidence {
                     parent_pid: 110,
                 },
                 ChainRecord {
-                    identity: identity(PEER, PEER_START),
+                    identity: identity(SUPERVISOR, 4300),
                     parent_pid: HOST,
+                },
+                ChainRecord {
+                    identity: identity(PEER, PEER_START),
+                    parent_pid: SUPERVISOR,
                 },
             ],
             host_executable: ExecutableRecord {
@@ -246,8 +252,16 @@ fn base_evidence() -> MonitorEvidence {
                 dev: 5,
                 ino: 7,
             },
+            supervisor_executable: ExecutableRecord {
+                prepared_path: "/usr/bin/bwrap".into(),
+                observed_link: "/usr/bin/bwrap".into(),
+                dev: 5,
+                ino: 8,
+            },
+            unexamined: vec![],
+            uniqueness: xtask::shell_timing_process_binding::UNIQUENESS_SCOPE.to_owned(),
             time: TimeRecord {
-                reference: namespace(1, identity(1, 10), 150),
+                reference: InitialTimeNamespaceRecord { inode: NS },
                 host: namespace(HOST, identity(HOST, HOST_START), 150),
                 peer: namespace(PEER, identity(PEER, PEER_START), 150),
                 capturer: namespace(900, identity(900, 9000), 150),
@@ -281,7 +295,7 @@ fn base_evidence() -> MonitorEvidence {
                 ),
                 source(
                     SourceKindRecord::ProcStat { pid: PEER },
-                    &stat(PEER, HOST, PEER_START),
+                    &stat(PEER, SUPERVISOR, PEER_START),
                     1400,
                 ),
             ],
@@ -417,6 +431,88 @@ fn bound_and_ended_after_evidence_qualify() {
     ended.end.peer_recheck = Some(RecheckRecord::Exited);
     let receipts = ended.receipts.clone();
     let case = make_case(&ended, &receipts);
+    provider.environment(&case.files(&arm, None)).unwrap();
+}
+
+#[test]
+fn explicit_supervisor_and_initial_clock_reference_are_required() {
+    for parent in [100, 110, SUPERVISOR, PEER] {
+        assert_eq!(
+            run(|evidence, _| {
+                evidence
+                    .binding
+                    .as_mut()
+                    .unwrap()
+                    .unexamined
+                    .push(ChainRecord {
+                        identity: identity(4400, 4500),
+                        parent_pid: parent,
+                    });
+            }),
+            "unexamined node has a forbidden parent in the binding chain"
+        );
+    }
+    assert_eq!(
+        run(|evidence, _| {
+            evidence.binding.as_mut().unwrap().uniqueness = "global uniqueness".into();
+        }),
+        "binding uniqueness scope is unknown"
+    );
+    assert_eq!(
+        run(|evidence, _| {
+            evidence.binding.as_mut().unwrap().supervisor.pid += 1;
+        }),
+        "binding must contain host, supervisor and peer as direct children"
+    );
+    assert_eq!(
+        run(|evidence, _| {
+            evidence
+                .binding
+                .as_mut()
+                .unwrap()
+                .supervisor_executable
+                .prepared_path = "/fixture/other".into();
+        }),
+        "bound supervisor executable differs from the frozen plan"
+    );
+    assert_eq!(
+        run(|evidence, _| {
+            let binding = evidence.binding.as_mut().unwrap();
+            binding.unexamined.push(ChainRecord {
+                identity: binding.peer,
+                parent_pid: SUPERVISOR,
+            });
+        }),
+        "unexamined nodes overlap the binding or repeat a pid"
+    );
+    assert_eq!(
+        run(|evidence, _| {
+            let time = &mut evidence.binding.as_mut().unwrap().time;
+            time.reference.inode = NS + 1;
+            for record in [&mut time.host, &mut time.peer, &mut time.capturer] {
+                record.time_namespace_inode = NS + 1;
+                record.observed_target = format!("time:[{}]", NS + 1);
+            }
+        }),
+        "time namespace inodes differ"
+    );
+
+    // Explicitly limited selection permits a retained opaque sibling, without
+    // claiming that its executable or descendants have been authenticated.
+    let manifest = manifest();
+    let arm = manifest.arms[0].clone();
+    let provider = TrustedRunnerProvenance::new(manifest).unwrap();
+    let mut evidence = base_evidence();
+    evidence
+        .binding
+        .as_mut()
+        .unwrap()
+        .unexamined
+        .push(ChainRecord {
+            identity: identity(4400, 4500),
+            parent_pid: HOST,
+        });
+    let case = make_case(&evidence, &evidence.receipts);
     provider.environment(&case.files(&arm, None)).unwrap();
 }
 
@@ -734,27 +830,13 @@ fn retained_json_bounds_provenance_and_deleted_exe_refuse() {
     );
     assert!(
         run(|evidence, _| {
-            evidence
-                .binding
-                .as_mut()
-                .unwrap()
-                .time
-                .reference
-                .origin
-                .clear();
+            evidence.binding.as_mut().unwrap().time.host.origin.clear();
         })
         .contains("namespace")
     );
     assert!(
         run(|evidence, _| {
-            evidence
-                .binding
-                .as_mut()
-                .unwrap()
-                .time
-                .reference
-                .identity
-                .pid = 2;
+            evidence.binding.as_mut().unwrap().time.host.identity.pid = 2;
         })
         .contains("namespace")
     );

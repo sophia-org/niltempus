@@ -73,10 +73,10 @@ pub struct VerifiedEnvironment {
 }
 
 /// Evidence that the peer journal, the host's kernel completion stamps and
-/// the capture all read one unshifted CLOCK_MONOTONIC. The inodes are of
-/// `/proc/<pid>/ns/time` for a reference process, the host, the peer and the
-/// capturer; equal inodes alone could be a shared shifted namespace, so the
-/// capturer's retained `timens_offsets` monotonic offset must also be zero.
+/// the capture all read one unshifted CLOCK_MONOTONIC. The reference is Linux's
+/// initial time namespace inode, not a read of PID 1. Host, peer and capturer
+/// `/proc/<pid>/ns/time` reads must match it; the capturer's retained
+/// `timens_offsets` monotonic offset must also be zero.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MonotonicDomain {
     pub reference: u64,
@@ -466,7 +466,7 @@ pub fn check_measured_interval(
 ) -> Result<(), String> {
     let clock = verified.clock;
     let inodes = [clock.reference, clock.host, clock.peer, clock.capturer];
-    if inodes.contains(&0)
+    if clock.reference != crate::shell_timing_process_binding::INITIAL_TIME_NAMESPACE_INODE
         || inodes.iter().any(|&inode| inode != clock.reference)
         || clock.monotonic_offset_seconds != 0
         || clock.monotonic_offset_nanoseconds != 0

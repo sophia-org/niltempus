@@ -248,6 +248,9 @@ impl CampaignObserver for LiveCampaignObserver {
         self.monitor = Some(EnvironmentMonitor::new(
             MonitorConfig {
                 host_executable: request.artifacts["sophia"].path.clone(),
+                // Prepared native argv has no bubblewrap override; Sophia uses
+                // this default. Binder retains and rechecks its device/inode.
+                supervisor_executable: PathBuf::from("/usr/bin/bwrap"),
                 peer_executable: request.artifacts["peer"].path.clone(),
                 card: self.card.clone(),
                 environment_socket: socket.clone(),

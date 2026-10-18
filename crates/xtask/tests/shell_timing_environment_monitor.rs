@@ -23,8 +23,9 @@ const REF: u32 = 1;
 const WRAPPER: u32 = 100;
 const SHELL: u32 = 110;
 const PEER: u32 = 300;
+const SUPERVISOR: u32 = 250;
 const CAPTURER: u32 = 900;
-const NS: u64 = 4_026_531_840;
+const NS: u64 = 0xEFFFFFFA;
 
 static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
 
@@ -92,6 +93,7 @@ impl Fixture {
         EnvironmentMonitor::new(
             MonitorConfig {
                 host_executable: std::env::current_exe().unwrap(),
+                supervisor_executable: PathBuf::from("/usr/bin/bwrap"),
                 peer_executable: self.peer_file.clone(),
                 card: "card1".into(),
                 environment_socket: self.socket.clone(),
@@ -153,9 +155,16 @@ fn fixture(host_ready: bool) -> Fixture {
         SHELL,
         4242,
         if host_ready { Some(&host_exe) } else { None },
+        &[SUPERVISOR],
+    );
+    fx.process(
+        SUPERVISOR,
+        host(),
+        2500,
+        Some(Path::new("/usr/bin/bwrap")),
         &[PEER],
     );
-    fx.process(PEER, host(), 3000, Some(&fx.peer_file.clone()), &[]);
+    fx.process(PEER, SUPERVISOR, 3000, Some(&fx.peer_file.clone()), &[]);
     let uid = rustix::process::getuid().as_raw();
     let gid = rustix::process::getgid().as_raw();
     write(

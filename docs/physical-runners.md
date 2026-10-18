@@ -96,6 +96,21 @@ process and sender provenance, the environment and kernel timestamp bindings,
 then reports the sealed-minus-bytes cost difference. It supplies no IPC +10%
 gate or campaign-condition verdict and launches no load workers.
 
+Environment binding selects a verified host, its direct `/usr/bin/bwrap`
+supervisor and that supervisor's sole peer child. Executable device/inode,
+process start times and parent links are checked again around receipt intake.
+Same-user non-dumpable processes such as Factotum may deny executable reads;
+they are retained as unexamined and must be outside the selected chain and
+supervisor subtree. Uniqueness is limited to examined candidates, not every
+process in those opaque subtrees. No process is made dumpable for measurement.
+The clock proof compares host, peer and capturer namespace links with Linux's
+initial time namespace inode and requires zero monotonic offset; it does not
+need permission to inspect the host's PID 1.
+
+Use a short private run-directory path: `run/environment.sock` must fit the
+Unix socket pathname limit. Binding or socket failures invalidate a run even
+when the compositor completed its workload and restored the console.
+
 ### Frozen shell timing campaigns
 
 The campaign commands run one explicitly selected arm at a time. They do not

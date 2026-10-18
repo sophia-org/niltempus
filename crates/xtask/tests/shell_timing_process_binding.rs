@@ -8,17 +8,18 @@ use std::{
 };
 use xtask::shell_timing_environment_capture::CaptureRoots;
 use xtask::shell_timing_process_binding::{
-    Binder, BindingRecheck, MAX_CHILDREN_PER_PROCESS, MAX_TASKS_PER_PROCESS, PendingStage,
-    ResolveOutcome,
+    Binder, BindingRecheck, Executables, INITIAL_TIME_NAMESPACE_INODE, MAX_CHILDREN_PER_PROCESS,
+    MAX_TASKS_PER_PROCESS, PendingReason, PendingStage, ResolveOutcome, UNIQUENESS_SCOPE,
 };
 
 const REF: u32 = 1;
 const WRAPPER: u32 = 100;
 const SHELL: u32 = 110;
 const HOST: u32 = 200;
+const SUPERVISOR: u32 = 250;
 const PEER: u32 = 300;
 const CAPTURER: u32 = 900;
-const NS: u64 = 4_026_531_840;
+const NS: u64 = INITIAL_TIME_NAMESPACE_INODE;
 const OFFSETS: &str = "monotonic 0 0\nboottime 0 0\n";
 
 static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
@@ -28,11 +29,21 @@ struct Fixture {
     proc_root: PathBuf,
     binder: Binder,
     host_file: PathBuf,
+    supervisor_file: PathBuf,
     peer_file: PathBuf,
 }
 
 impl Drop for Fixture {
     fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        // Sealed directories must be searchable again before removal.
+        if let Ok(entries) = fs::read_dir(&self.root) {
+            for entry in entries.flatten() {
+                if entry.file_name().to_string_lossy().starts_with("sealed-") {
+                    let _ = fs::set_permissions(entry.path(), fs::Permissions::from_mode(0o700));
+                }
+            }
+        }
         let _ = fs::remove_dir_all(&self.root);
     }
 }
@@ -104,12 +115,34 @@ impl Fixture {
         );
     }
 
+    fn exes(&self) -> Executables<'_> {
+        Executables {
+            host: &self.host_file,
+            supervisor: &self.supervisor_file,
+            peer: &self.peer_file,
+        }
+    }
+
+    fn resolve(&self) -> Result<ResolveOutcome, String> {
+        self.binder.resolve(WRAPPER, self.exes())
+    }
+
+    /// Make `pid`'s executable unreadable the way a non-dumpable process
+    /// is: the `exe` link resolves through an unsearchable directory, so
+    /// the identity read fails with EACCES while stat stays readable.
+    fn opaque(&self, pid: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        let sealed = self.root.join(format!("sealed-{pid}"));
+        fs::create_dir_all(&sealed).unwrap();
+        fs::set_permissions(&sealed, fs::Permissions::from_mode(0o000)).unwrap();
+        link(
+            &sealed.join("exe"),
+            &self.proc_root.join(format!("{pid}/exe")),
+        );
+    }
+
     fn bound(&self) -> xtask::shell_timing_process_binding::ProcessBinding {
-        match self
-            .binder
-            .resolve(WRAPPER, &self.host_file, &self.peer_file)
-            .unwrap()
-        {
+        match self.resolve().unwrap() {
             ResolveOutcome::Bound(binding) => *binding,
             other => panic!("expected Bound, got {other:?}"),
         }
@@ -123,8 +156,10 @@ fn fixture() -> Fixture {
     let _ = fs::remove_dir_all(&root);
     let proc_root = root.join("proc");
     let host_file = root.join("bin/host-bin");
+    let supervisor_file = root.join("bin/supervisor-bin");
     let peer_file = root.join("bin/peer-bin");
     write(&host_file, "host executable fixture\n");
+    write(&supervisor_file, "supervisor executable fixture\n");
     write(&peer_file, "peer executable fixture\n");
     let binder = Binder::new(
         &CaptureRoots::new(proc_root.clone(), root.join("sys")),
@@ -135,6 +170,7 @@ fn fixture() -> Fixture {
         proc_root,
         binder,
         host_file,
+        supervisor_file,
         peer_file,
     };
     // Reference and capturer live outside the wrapper tree.
@@ -144,29 +180,53 @@ fn fixture() -> Fixture {
         &fx.proc_root.join(format!("{CAPTURER}/timens_offsets")),
         OFFSETS,
     );
-    // wrapper -> shell -> host -> peer.
+    // wrapper -> shell -> host -> supervisor -> peer.
     fx.process(WRAPPER, CAPTURER, 1000, None, &[SHELL]);
     fx.process(SHELL, WRAPPER, 1100, None, &[HOST]);
-    fx.process(HOST, SHELL, 2000, Some(&fx.host_file.clone()), &[PEER]);
-    fx.process(PEER, HOST, 3000, Some(&fx.peer_file.clone()), &[]);
+    fx.process(
+        HOST,
+        SHELL,
+        2000,
+        Some(&fx.host_file.clone()),
+        &[SUPERVISOR],
+    );
+    fx.process(
+        SUPERVISOR,
+        HOST,
+        2500,
+        Some(&fx.supervisor_file.clone()),
+        &[PEER],
+    );
+    fx.process(PEER, SUPERVISOR, 3000, Some(&fx.peer_file.clone()), &[]);
     fx
 }
 
 #[test]
-fn binds_host_below_wrapper_and_peer_below_host_with_proof() {
+fn binds_host_below_wrapper_and_supervised_peer_below_host_with_proof() {
     let fx = fixture();
     let binding = fx.bound();
     assert_eq!(
-        (binding.wrapper.pid, binding.host.pid, binding.peer.pid),
-        (WRAPPER, HOST, PEER)
+        (
+            binding.wrapper.pid,
+            binding.host.pid,
+            binding.supervisor.pid,
+            binding.peer.pid
+        ),
+        (WRAPPER, HOST, SUPERVISOR, PEER)
     );
+    assert_eq!(
+        binding.supervisor_executable.prepared_path,
+        fx.supervisor_file
+    );
+    assert!(binding.unexamined.is_empty());
+    assert_eq!(binding.uniqueness, UNIQUENESS_SCOPE);
     assert_eq!(
         binding
             .chain
             .iter()
             .map(|node| node.identity.pid)
             .collect::<Vec<_>>(),
-        [WRAPPER, SHELL, HOST, PEER]
+        [WRAPPER, SHELL, HOST, SUPERVISOR, PEER]
     );
     assert_eq!(binding.host.start_time_ticks, 2000);
     assert_eq!(binding.peer.start_time_ticks, 3000);
@@ -177,10 +237,11 @@ fn binds_host_below_wrapper_and_peer_below_host_with_proof() {
     assert_eq!(binding.host_executable.identity, host_id);
     assert_eq!(binding.host_executable.observed_link, fx.host_file);
     assert_eq!(binding.host_executable.prepared_path, fx.host_file);
-    // Namespace proof: all four inodes equal and nonzero, raw offsets
-    // retained, monotonic offset exactly zero, provenance present.
+    // Namespace proof: host, peer and capturer in the initial time
+    // namespace, raw offsets retained, monotonic offset exactly zero.
     let time = &binding.time;
-    for evidence in [&time.reference, &time.host, &time.peer, &time.capturer] {
+    assert_eq!(time.reference.inode, INITIAL_TIME_NAMESPACE_INODE);
+    for evidence in [&time.host, &time.peer, &time.capturer] {
         assert_eq!(evidence.time_namespace_inode, NS);
         assert_eq!(evidence.observed_target, format!("time:[{NS}]"));
         assert!(
@@ -190,7 +251,6 @@ fn binds_host_below_wrapper_and_peer_below_host_with_proof() {
         );
         assert!(evidence.captured_usec > 0);
     }
-    assert_eq!(time.reference.pid, REF);
     assert_eq!(time.capturer.pid, CAPTURER);
     assert_eq!(time.capturer_timens_offsets, OFFSETS);
     assert!(
@@ -219,27 +279,25 @@ fn zero_matches_are_pending_not_errors() {
     write(&other, "other\n");
     link(&other, &fx.proc_root.join(format!("{HOST}/exe")));
     assert_eq!(
-        fx.binder
-            .resolve(WRAPPER, &fx.host_file, &fx.peer_file)
-            .unwrap(),
+        fx.resolve().unwrap(),
         ResolveOutcome::Pending {
             stage: PendingStage::Host,
-            host: None
+            host: None,
+            reason: PendingReason::NoMatch,
         }
     );
     // Host present, peer not yet: Pending names the bound host.
     let fx = fixture();
     link(&other_or(&fx), &fx.proc_root.join(format!("{PEER}/exe")));
     assert_eq!(
-        fx.binder
-            .resolve(WRAPPER, &fx.host_file, &fx.peer_file)
-            .unwrap(),
+        fx.resolve().unwrap(),
         ResolveOutcome::Pending {
             stage: PendingStage::Peer,
             host: Some(xtask::shell_timing_environment_capture::ProcessIdentity {
                 pid: HOST,
                 start_time_ticks: 2000
-            })
+            }),
+            reason: PendingReason::NoMatch,
         }
     );
 }
@@ -259,11 +317,7 @@ fn peer_outside_the_host_subtree_does_not_bind() {
     link(&other, &fx.proc_root.join(format!("{PEER}/exe")));
     fx.process(310, SHELL, 3100, Some(&fx.peer_file.clone()), &[]);
     fx.set_children(SHELL, &[HOST, 310]);
-    match fx
-        .binder
-        .resolve(WRAPPER, &fx.host_file, &fx.peer_file)
-        .unwrap()
-    {
+    match fx.resolve().unwrap() {
         ResolveOutcome::Pending {
             stage: PendingStage::Peer,
             ..
@@ -277,10 +331,7 @@ fn ambiguous_host_is_an_error() {
     let fx = fixture();
     fx.process(210, SHELL, 2100, Some(&fx.host_file.clone()), &[]);
     fx.set_children(SHELL, &[HOST, 210]);
-    let err = fx
-        .binder
-        .resolve(WRAPPER, &fx.host_file, &fx.peer_file)
-        .unwrap_err();
+    let err = fx.resolve().unwrap_err();
     assert!(err.contains("ambiguous"), "{err}");
 }
 
@@ -289,10 +340,7 @@ fn children_and_stat_parent_disagreement_is_an_error() {
     let fx = fixture();
     // Listed under the shell, but its stat names another parent.
     fx.set_stat(HOST, 999, 2000);
-    let err = fx
-        .binder
-        .resolve(WRAPPER, &fx.host_file, &fx.peer_file)
-        .unwrap_err();
+    let err = fx.resolve().unwrap_err();
     assert!(err.contains("stat names parent"), "{err}");
 }
 
@@ -305,12 +353,11 @@ fn deleted_executable_cannot_bind_even_though_stat_can_succeed() {
     let deleted = PathBuf::from("/nonexistent/host-bin (deleted)");
     link(&deleted, &fx.proc_root.join(format!("{HOST}/exe")));
     assert_eq!(
-        fx.binder
-            .resolve(WRAPPER, &fx.host_file, &fx.peer_file)
-            .unwrap(),
+        fx.resolve().unwrap(),
         ResolveOutcome::Pending {
             stage: PendingStage::Host,
-            host: None
+            host: None,
+            reason: PendingReason::NoMatch,
         }
     );
 }
@@ -323,12 +370,11 @@ fn zombie_host_does_not_bind() {
         &stat(HOST, SHELL, 2000, "Z"),
     );
     assert_eq!(
-        fx.binder
-            .resolve(WRAPPER, &fx.host_file, &fx.peer_file)
-            .unwrap(),
+        fx.resolve().unwrap(),
         ResolveOutcome::Pending {
             stage: PendingStage::Host,
-            host: None
+            host: None,
+            reason: PendingReason::NoMatch,
         }
     );
 }
@@ -337,18 +383,12 @@ fn zombie_host_does_not_bind() {
 fn namespace_mismatch_and_nonzero_offset_are_errors() {
     let fx = fixture();
     fx.set_ns(PEER, NS + 1);
-    let err = fx
-        .binder
-        .resolve(WRAPPER, &fx.host_file, &fx.peer_file)
-        .unwrap_err();
+    let err = fx.resolve().unwrap_err();
     assert!(err.contains("inodes differ"), "{err}");
 
     let fx = fixture();
     fx.set_ns(HOST, NS + 159);
-    let err = fx
-        .binder
-        .resolve(WRAPPER, &fx.host_file, &fx.peer_file)
-        .unwrap_err();
+    let err = fx.resolve().unwrap_err();
     assert!(err.contains("inodes differ"), "{err}");
 
     let fx = fixture();
@@ -356,10 +396,7 @@ fn namespace_mismatch_and_nonzero_offset_are_errors() {
         &fx.proc_root.join(format!("{CAPTURER}/timens_offsets")),
         "monotonic 1 0\nboottime 0 0\n",
     );
-    let err = fx
-        .binder
-        .resolve(WRAPPER, &fx.host_file, &fx.peer_file)
-        .unwrap_err();
+    let err = fx.resolve().unwrap_err();
     assert!(err.contains("exactly zero"), "{err}");
 }
 
@@ -370,10 +407,7 @@ fn duplicate_and_trailing_monotonic_offsets_are_refused() {
         &fx.proc_root.join(format!("{CAPTURER}/timens_offsets")),
         "monotonic 0 0\nmonotonic 0 0\nboottime 0 0\n",
     );
-    let err = fx
-        .binder
-        .resolve(WRAPPER, &fx.host_file, &fx.peer_file)
-        .unwrap_err();
+    let err = fx.resolve().unwrap_err();
     assert!(err.contains("duplicate monotonic"), "{err}");
 
     let fx = fixture();
@@ -381,10 +415,7 @@ fn duplicate_and_trailing_monotonic_offsets_are_refused() {
         &fx.proc_root.join(format!("{CAPTURER}/timens_offsets")),
         "monotonic 0 0 0\nboottime 0 0\n",
     );
-    let err = fx
-        .binder
-        .resolve(WRAPPER, &fx.host_file, &fx.peer_file)
-        .unwrap_err();
+    let err = fx.resolve().unwrap_err();
     assert!(err.contains("trailing fields"), "{err}");
 }
 
@@ -401,10 +432,7 @@ fn task_and_child_enumeration_are_bounded() {
         &fx.proc_root.join(format!("{WRAPPER}/task/1/children")),
         &format!("{children}\n"),
     );
-    let err = fx
-        .binder
-        .resolve(WRAPPER, &fx.host_file, &fx.peer_file)
-        .unwrap_err();
+    let err = fx.resolve().unwrap_err();
     assert!(err.contains("child count exceeds"), "{err}");
 
     // Task entries past the bound are refused while streaming the
@@ -413,10 +441,7 @@ fn task_and_child_enumeration_are_bounded() {
     for task in 2..=MAX_TASKS_PER_PROCESS + 1 {
         fs::create_dir_all(fx.proc_root.join(format!("{WRAPPER}/task/{task}"))).unwrap();
     }
-    let err = fx
-        .binder
-        .resolve(WRAPPER, &fx.host_file, &fx.peer_file)
-        .unwrap_err();
+    let err = fx.resolve().unwrap_err();
     assert!(err.contains("task count exceeds"), "{err}");
 }
 
@@ -425,10 +450,7 @@ fn zero_namespace_inode_is_refused() {
     let fx = fixture();
     let target = PathBuf::from("time:[0]");
     link(&target, &fx.proc_root.join(format!("{PEER}/ns/time")));
-    let err = fx
-        .binder
-        .resolve(WRAPPER, &fx.host_file, &fx.peer_file)
-        .unwrap_err();
+    let err = fx.resolve().unwrap_err();
     assert!(err.contains("nonzero"), "{err}");
 }
 
@@ -481,4 +503,216 @@ fn recheck_detects_exit_reuse_and_broken_links() {
         err.contains("inodes differ") || err.contains("proof changed"),
         "{err}"
     );
+}
+
+fn pending(fx: &Fixture) -> (PendingStage, PendingReason) {
+    match fx.resolve().unwrap() {
+        ResolveOutcome::Pending { stage, reason, .. } => (stage, reason),
+        other => panic!("expected Pending, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_opaque_process_below_the_host_is_listed_not_compared() {
+    // A Factotum-like child of the host and its helper child.
+    let fx = fixture();
+    fx.process(260, HOST, 2600, None, &[261]);
+    fx.process(261, 260, 2610, None, &[]);
+    fx.set_children(HOST, &[SUPERVISOR, 260]);
+    fx.opaque(260);
+    fx.opaque(261);
+    let binding = fx.bound();
+    assert_eq!(
+        binding
+            .unexamined
+            .iter()
+            .map(|node| (node.identity.pid, node.parent_pid))
+            .collect::<Vec<_>>(),
+        [(260, HOST), (261, 260)]
+    );
+    assert_eq!(binding.uniqueness, UNIQUENESS_SCOPE);
+    assert_eq!(fx.binder.recheck(&binding).unwrap(), BindingRecheck::Bound);
+}
+
+#[test]
+fn an_opaque_process_outside_the_host_or_on_its_lineage_is_pending() {
+    // Beside the host, under the shell.
+    let fx = fixture();
+    fx.process(120, SHELL, 1200, None, &[]);
+    fx.set_children(SHELL, &[HOST, 120]);
+    fx.opaque(120);
+    assert_eq!(
+        pending(&fx),
+        (PendingStage::Host, PendingReason::UnexaminedOutsideHost)
+    );
+    // On the wrapper-to-host lineage.
+    let fx = fixture();
+    fx.opaque(SHELL);
+    assert_eq!(
+        pending(&fx),
+        (PendingStage::Host, PendingReason::UnexaminedOutsideHost)
+    );
+}
+
+#[test]
+fn an_opaque_process_in_the_selected_supervisor_subtree_is_pending() {
+    // Below the peer.
+    let fx = fixture();
+    fx.process(310, PEER, 3100, None, &[]);
+    fx.set_children(PEER, &[310]);
+    fx.opaque(310);
+    assert_eq!(
+        pending(&fx),
+        (
+            PendingStage::Peer,
+            PendingReason::UnexaminedInSelectedSubtree
+        )
+    );
+    // The supervisor itself.
+    let fx = fixture();
+    fx.opaque(SUPERVISOR);
+    assert_eq!(
+        pending(&fx),
+        (
+            PendingStage::Peer,
+            PendingReason::UnexaminedInSelectedSubtree
+        )
+    );
+    // The peer itself: no supervisor is selected without an examined
+    // peer, so this is the ordinary no-match wait.
+    let fx = fixture();
+    fx.opaque(PEER);
+    assert_eq!(pending(&fx), (PendingStage::Peer, PendingReason::NoMatch));
+}
+
+#[test]
+fn a_supervisor_child_before_exec_is_pending() {
+    // Bubblewrap's child still runs the supervisor file.
+    let fx = fixture();
+    link(
+        &fx.supervisor_file.clone(),
+        &fx.proc_root.join(format!("{PEER}/exe")),
+    );
+    assert_eq!(pending(&fx), (PendingStage::Peer, PendingReason::NoMatch));
+}
+
+#[test]
+fn a_host_fork_before_exec_is_pending_and_a_third_host_is_an_error() {
+    let fx = fixture();
+    fx.process(270, HOST, 2700, Some(&fx.host_file.clone()), &[]);
+    fx.set_children(HOST, &[SUPERVISOR, 270]);
+    assert_eq!(
+        pending(&fx),
+        (PendingStage::Host, PendingReason::ForkBeforeExec)
+    );
+    // After exec the child runs the supervisor file and is not a host.
+    link(&fx.supervisor_file.clone(), &fx.proc_root.join("270/exe"));
+    assert_eq!(fx.bound().host.pid, HOST);
+    // Two host matches that are not parent and child.
+    let fx = fixture();
+    fx.process(271, SUPERVISOR, 2710, Some(&fx.host_file.clone()), &[]);
+    fx.set_children(SUPERVISOR, &[PEER, 271]);
+    let err = fx.resolve().unwrap_err();
+    assert!(err.contains("ambiguous"), "{err}");
+    // Three host matches, even if a fork pair is among them.
+    let fx = fixture();
+    fx.process(270, HOST, 2700, Some(&fx.host_file.clone()), &[272]);
+    fx.process(272, 270, 2720, Some(&fx.host_file.clone()), &[]);
+    fx.set_children(HOST, &[SUPERVISOR, 270]);
+    let err = fx.resolve().unwrap_err();
+    assert!(err.contains("3 examined descendants"), "{err}");
+}
+
+#[test]
+fn a_peer_outside_the_supervised_position_is_an_error() {
+    let message = "outside a supervised position";
+    // A direct child of the host.
+    let fx = fixture();
+    fx.process(280, HOST, 2800, Some(&fx.peer_file.clone()), &[]);
+    fx.set_children(HOST, &[SUPERVISOR, 280]);
+    let err = fx.resolve().unwrap_err();
+    assert!(err.contains(message), "{err}");
+    // A supervisor with a second child.
+    let fx = fixture();
+    fx.process(301, SUPERVISOR, 3010, None, &[]);
+    fx.set_children(SUPERVISOR, &[PEER, 301]);
+    let err = fx.resolve().unwrap_err();
+    assert!(err.contains(message), "{err}");
+    // A supervisor that is not the host's direct child.
+    let fx = fixture();
+    fx.process(255, HOST, 2550, None, &[SUPERVISOR]);
+    fx.set_children(HOST, &[255]);
+    fx.set_stat(SUPERVISOR, 255, 2500);
+    let err = fx.resolve().unwrap_err();
+    assert!(err.contains(message), "{err}");
+}
+
+#[test]
+fn two_supervised_peers_are_an_error() {
+    let fx = fixture();
+    fx.process(251, HOST, 2510, Some(&fx.supervisor_file.clone()), &[302]);
+    fx.process(302, 251, 3020, Some(&fx.peer_file.clone()), &[]);
+    fx.set_children(HOST, &[SUPERVISOR, 251]);
+    let err = fx.resolve().unwrap_err();
+    assert!(err.contains("2 supervised peers"), "{err}");
+}
+
+#[test]
+fn the_three_prepared_files_must_differ() {
+    let fx = fixture();
+    let err = fx
+        .binder
+        .resolve(
+            WRAPPER,
+            Executables {
+                host: &fx.host_file,
+                supervisor: &fx.host_file,
+                peer: &fx.peer_file,
+            },
+        )
+        .unwrap_err();
+    assert!(err.contains("different files"), "{err}");
+}
+
+#[test]
+fn equal_namespaces_other_than_the_initial_one_are_refused() {
+    let fx = fixture();
+    for pid in [HOST, PEER, CAPTURER] {
+        fx.set_ns(pid, NS - 1);
+    }
+    let err = fx.resolve().unwrap_err();
+    assert!(err.contains("inodes differ"), "{err}");
+}
+
+#[test]
+fn recheck_holds_the_exact_supervised_position_and_executable() {
+    // A second supervisor child after binding.
+    let fx = fixture();
+    let binding = fx.bound();
+    fx.process(301, SUPERVISOR, 3010, None, &[]);
+    fx.set_children(SUPERVISOR, &[PEER, 301]);
+    let err = fx.binder.recheck(&binding).unwrap_err();
+    assert!(err.contains("only child"), "{err}");
+    // The supervisor runs something else.
+    let fx = fixture();
+    let binding = fx.bound();
+    link(
+        &other_or(&fx),
+        &fx.proc_root.join(format!("{SUPERVISOR}/exe")),
+    );
+    let err = fx.binder.recheck(&binding).unwrap_err();
+    assert!(err.contains("no longer runs"), "{err}");
+    // The prepared supervisor file was replaced.
+    let fx = fixture();
+    let binding = fx.bound();
+    fs::remove_file(&fx.supervisor_file).unwrap();
+    write(&fx.supervisor_file, "replacement\n");
+    let err = fx.binder.recheck(&binding).unwrap_err();
+    assert!(err.contains("changed since binding"), "{err}");
+    // A bound process that turns opaque.
+    let fx = fixture();
+    let binding = fx.bound();
+    fx.opaque(PEER);
+    let err = fx.binder.recheck(&binding).unwrap_err();
+    assert!(err.contains("no longer readable"), "{err}");
 }

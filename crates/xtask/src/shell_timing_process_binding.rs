@@ -1,5 +1,6 @@
-//! Resolve the supervised host and peer processes beneath an owned
-//! wrapper pid, from fixture or live `/proc` roots.
+//! Resolve the supervised host, its Bubblewrap supervisor and the
+//! protected peer beneath an owned wrapper pid, from fixture or live
+//! `/proc` roots.
 //!
 //! Traversal follows only the owned wrapper's descendants, through
 //! `proc/<pid>/task/*/children`, cross-checked against each child's
@@ -8,25 +9,46 @@
 //! A candidate matches only when the device and inode of
 //! `proc/<pid>/exe` equal the prepared file's device and inode; the
 //! link text is retained as evidence but is never the match key, and
-//! the command name is never consulted. Zero matching host or peer
-//! processes is `Pending`, the normal state while the tree starts;
-//! more than one match is an ambiguity error.
+//! the command name is never consulted.
+//!
+//! Positions are explicit. Exactly one examined process below the
+//! wrapper runs the host file. The peer must be the only child of a
+//! process running the prepared supervisor file, and that supervisor
+//! must be the host's direct child. Zero matches at a level are
+//! `Pending`, the normal state while the tree starts; the caller's run
+//! deadline bounds the retries. Two host matches where one is the
+//! other's direct child are a fork before exec and also `Pending`; any
+//! other duplicate host, a peer match outside a supervised position
+//! below the host, or two supervised peers is an error.
+//!
+//! Some processes cannot be examined. A process that made itself
+//! non-dumpable outside a user namespace the capturer owns (Factotum
+//! and its PAM helper, for example) refuses `exe` and `ns/*` reads with
+//! EACCES, while its stat and children stay readable. Such a process is
+//! never a candidate and is listed as unexamined in the binding. It is
+//! accepted only strictly below the host and outside the selected
+//! supervisor's subtree; anywhere else the pass is `Pending`. So the
+//! binding claims uniqueness only among examined processes
+//! ([`UNIQUENESS_SCOPE`]), never across the whole tree.
 //!
 //! The binding retains the whole ancestor chain from wrapper to peer,
 //! each node pinned to `(pid, start_time_ticks)`. `recheck` re-reads
-//! every node's identity and parent link, the host and peer executable
+//! every node's identity and parent link, the supervisor's direct
+//! parent and sole child, the host, supervisor and peer executable
 //! identities, and the time-namespace proof, so a reused pid, a broken
 //! parent link or an ended ancestor cannot keep a stale binding alive.
 //!
-//! Clock comparability is part of the proof: the `ns/time` inode of
-//! pid 1 (the reference), the host, the peer and the capturer must be
-//! equal and nonzero, and the capturer's `timens_offsets` monotonic
-//! offset must be exactly zero. Pid 1's namespace alone would not
-//! prove this under pid namespaces, so all four are read. The
-//! namespace reads for the host and peer sit between their stat reads,
-//! so the proof is bound to the same start-time bracket as the
-//! identities it covers. This module makes no credential claim about
-//! any pid; peer credentials are the runner's separate check.
+//! Clock comparability is part of the proof: the `ns/time` inodes of
+//! the host, the peer and the capturer must all equal the kernel's
+//! initial time namespace inode, and the capturer's `timens_offsets`
+//! monotonic offset must be exactly zero. The initial namespace is
+//! named by the kernel constant, not read from pid 1: an unprivileged
+//! capturer cannot read init's namespace links, and under pid
+//! namespaces pid 1 need not be init. The namespace reads for the host
+//! and peer sit between their stat reads, so the proof is bound to the
+//! same start-time bracket as the identities it covers. This module
+//! makes no credential claim about any pid; peer credentials are the
+//! runner's separate check.
 use crate::shell_timing_environment_capture::{CaptureRoots, ProcessIdentity};
 use serde::Serialize;
 use std::{
@@ -48,6 +70,23 @@ pub const MAX_CHILDREN_PER_PROCESS: usize = MAX_NODES;
 pub const MAX_DEPTH: usize = 32;
 /// Bound on one stat, children or offsets read.
 pub const MAX_READ_BYTES: u64 = 65_536;
+/// Inode of the kernel's initial time namespace: `TIME_NS_INIT_INO` in
+/// `include/uapi/linux/nsfs.h` (checked against the 6.18.55_1 headers).
+pub const INITIAL_TIME_NAMESPACE_INODE: u64 = 0xEFFF_FFFA;
+/// The only uniqueness a binding claims.
+pub const UNIQUENESS_SCOPE: &str = "exactly one host below the wrapper and one supervised peer \
+     below the host among examined processes; unexamined processes below the host were not \
+     compared";
+
+/// The three prepared files a binding matches, by device and inode.
+#[derive(Clone, Copy, Debug)]
+pub struct Executables<'a> {
+    pub host: &'a Path,
+    /// The protection-domain supervisor (Bubblewrap) the host runs the
+    /// peer under.
+    pub supervisor: &'a Path,
+    pub peer: &'a Path,
+}
 
 /// Device and inode identity of one executable file.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -85,6 +124,13 @@ pub struct BoundNode {
     pub parent_pid: u32,
 }
 
+/// The kernel's initial time namespace, named by its fixed inode. No
+/// process, stat read or capture time stands behind it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct InitialTimeNamespace {
+    pub inode: u64,
+}
+
 /// Time-namespace evidence for one pid.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct NamespaceEvidence {
@@ -110,11 +156,11 @@ fn monotonic_usec() -> Result<u64, String> {
         .ok_or_else(|| "monotonic clock overflow".into())
 }
 
-/// Proof that reference, host, peer and capturer share one time
-/// namespace with a zero monotonic offset.
+/// Proof that host, peer and capturer share the initial time namespace
+/// with a zero monotonic offset.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TimeNamespaceProof {
-    pub reference: NamespaceEvidence,
+    pub reference: InitialTimeNamespace,
     pub host: NamespaceEvidence,
     pub peer: NamespaceEvidence,
     pub capturer: NamespaceEvidence,
@@ -132,11 +178,20 @@ pub struct TimeNamespaceProof {
 pub struct ProcessBinding {
     pub wrapper: ProcessIdentity,
     pub host: ProcessIdentity,
+    /// The host's direct child whose only child is the peer.
+    pub supervisor: ProcessIdentity,
     pub peer: ProcessIdentity,
-    /// Wrapper first, peer last; host appears exactly once.
+    /// Wrapper first, then host, supervisor and peer last; each once.
     pub chain: Vec<BoundNode>,
     pub host_executable: ExecutableEvidence,
+    pub supervisor_executable: ExecutableEvidence,
     pub peer_executable: ExecutableEvidence,
+    /// Processes below the host whose executable the kernel refused to
+    /// show, by pid. Never candidates; listed so the binding states what
+    /// it did not compare.
+    pub unexamined: Vec<BoundNode>,
+    /// Always [`UNIQUENESS_SCOPE`].
+    pub uniqueness: &'static str,
     pub time: TimeNamespaceProof,
 }
 
@@ -147,14 +202,31 @@ pub enum PendingStage {
     Peer,
 }
 
+/// Why a level is not yet bindable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PendingReason {
+    /// No examined process runs the file in its position yet.
+    NoMatch,
+    /// A host and its direct child both run the host file: a fork not
+    /// yet followed by exec.
+    ForkBeforeExec,
+    /// An unexamined process sits outside the host's subtree, so the
+    /// host's uniqueness cannot be stated.
+    UnexaminedOutsideHost,
+    /// An unexamined process sits inside the selected supervisor's
+    /// subtree.
+    UnexaminedInSelectedSubtree,
+}
+
 /// Outcome of one resolve pass over the owned tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ResolveOutcome {
-    /// No matching process yet at this level; poll again.
+    /// Not bindable yet at this level; poll again.
     Pending {
         stage: PendingStage,
-        /// The bound host, when only the peer is still missing.
+        /// The bound host, when only the peer level is still open.
         host: Option<ProcessIdentity>,
+        reason: PendingReason,
     },
     Bound(Box<ProcessBinding>),
 }
@@ -168,11 +240,27 @@ pub enum BindingRecheck {
     Ended,
 }
 
+const HOST: usize = 0;
+const SUPERVISOR: usize = 1;
+const PEER: usize = 2;
+
 #[derive(Clone, Copy, Debug)]
 struct StatFacts {
     identity: ProcessIdentity,
     parent_pid: u32,
     state: char,
+}
+
+/// What one process's `exe` link showed.
+enum Observed {
+    File {
+        link: PathBuf,
+        identity: ExecutableIdentity,
+    },
+    /// Gone, or a deleted target.
+    Absent,
+    /// The kernel refused the read (EACCES).
+    Opaque,
 }
 
 fn ended(state: char) -> bool {
@@ -362,41 +450,57 @@ impl Binder {
         Ok(children.into_iter().collect())
     }
 
-    /// Executable evidence when `pid` runs `expected`, or `None` when
-    /// it provably runs something else (including a deleted target,
-    /// which cannot prove identity).
+    /// What `proc/<pid>/exe` shows. Only EACCES makes a process opaque;
+    /// any other unexpected error is an error.
+    fn observe_executable(&self, pid: u32) -> Result<Observed, String> {
+        let exe = self.proc_path(&format!("{pid}/exe"));
+        let denied =
+            |e: &io::Error| e.raw_os_error() == Some(rustix::io::Errno::ACCESS.raw_os_error());
+        let link = match fs::read_link(&exe) {
+            Ok(target) => target,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Observed::Absent),
+            Err(e) if denied(&e) => return Ok(Observed::Opaque),
+            Err(e) => return Err(format!("{}: {e}", exe.display())),
+        };
+        if link.to_string_lossy().ends_with(" (deleted)") {
+            return Ok(Observed::Absent);
+        }
+        let meta = match fs::metadata(&exe) {
+            Ok(meta) => meta,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Observed::Absent),
+            Err(e) if denied(&e) => return Ok(Observed::Opaque),
+            Err(e) => return Err(format!("{}: {e}", exe.display())),
+        };
+        Ok(Observed::File {
+            link,
+            identity: ExecutableIdentity {
+                dev: meta.dev(),
+                ino: meta.ino(),
+            },
+        })
+    }
+
+    /// Executable evidence when a bound `pid` still runs `expected`, or
+    /// `None` when it provably runs something else (including a deleted
+    /// target, which cannot prove identity). A bound process that turned
+    /// opaque is an error.
     fn executable_match(
         &self,
         pid: u32,
         prepared: &Path,
         expected: &ExecutableIdentity,
     ) -> Result<Option<ExecutableEvidence>, String> {
-        let exe = self.proc_path(&format!("{pid}/exe"));
-        let observed = match fs::read_link(&exe) {
-            Ok(target) => target,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(format!("{}: {e}", exe.display())),
-        };
-        if observed.to_string_lossy().ends_with(" (deleted)") {
-            return Ok(None);
+        match self.observe_executable(pid)? {
+            Observed::File { link, identity } if identity == *expected => {
+                Ok(Some(ExecutableEvidence {
+                    prepared_path: prepared.to_path_buf(),
+                    observed_link: link,
+                    identity,
+                }))
+            }
+            Observed::File { .. } | Observed::Absent => Ok(None),
+            Observed::Opaque => Err(format!("pid {pid}: executable is no longer readable")),
         }
-        let meta = match fs::metadata(&exe) {
-            Ok(meta) => meta,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(format!("{}: {e}", exe.display())),
-        };
-        let identity = ExecutableIdentity {
-            dev: meta.dev(),
-            ino: meta.ino(),
-        };
-        if identity != *expected {
-            return Ok(None);
-        }
-        Ok(Some(ExecutableEvidence {
-            prepared_path: prepared.to_path_buf(),
-            observed_link: observed,
-            identity,
-        }))
     }
 
     fn namespace_evidence(&self, stat: &StatFacts) -> Result<NamespaceEvidence, String> {
@@ -434,10 +538,7 @@ impl Binder {
     /// stat reads bracketing the namespace reads must still name the
     /// bound identities, so the proof covers the same processes.
     fn time_proof(&self, host: &StatFacts, peer: &StatFacts) -> Result<TimeNamespaceProof, String> {
-        let reference_pid = 1;
-        let reference_stat = self.live_stat(reference_pid, "reference")?;
         let capturer_stat = self.live_stat(self.capturer_pid, "capturer")?;
-        let reference = self.namespace_evidence(&reference_stat)?;
         let host_evidence = self.namespace_evidence(host)?;
         let peer_evidence = self.namespace_evidence(peer)?;
         let capturer_evidence = self.namespace_evidence(&capturer_stat)?;
@@ -448,18 +549,15 @@ impl Binder {
         if host_close.identity != host.identity || peer_close.identity != peer.identity {
             return Err("host or peer identity changed during namespace capture".into());
         }
-        let (reference_inode, host_inode, peer_inode, capturer_inode) = (
-            reference.time_namespace_inode,
+        let initial = INITIAL_TIME_NAMESPACE_INODE;
+        let (host_inode, peer_inode, capturer_inode) = (
             host_evidence.time_namespace_inode,
             peer_evidence.time_namespace_inode,
             capturer_evidence.time_namespace_inode,
         );
-        if !(reference_inode == host_inode
-            && host_inode == peer_inode
-            && peer_inode == capturer_inode)
-        {
+        if [host_inode, peer_inode, capturer_inode] != [initial; 3] {
             return Err(format!(
-                "time namespace inodes differ: reference {reference_inode}, host {host_inode}, \
+                "time namespace inodes differ: initial {initial}, host {host_inode}, \
                  peer {peer_inode}, capturer {capturer_inode}"
             ));
         }
@@ -494,7 +592,7 @@ impl Binder {
             ));
         }
         Ok(TimeNamespaceProof {
-            reference,
+            reference: InitialTimeNamespace { inode: initial },
             host: host_evidence,
             peer: peer_evidence,
             capturer: capturer_evidence,
@@ -508,17 +606,23 @@ impl Binder {
     pub fn resolve(
         &self,
         wrapper_pid: u32,
-        host_executable: &Path,
-        peer_executable: &Path,
+        executables: Executables<'_>,
     ) -> Result<ResolveOutcome, String> {
         if wrapper_pid == 0 || wrapper_pid == 1 {
             return Err("wrapper pid must be nonzero and not pid 1".into());
         }
-        if host_executable == peer_executable {
-            return Err("host and peer executables must be different files".into());
+        let files = [executables.host, executables.supervisor, executables.peer];
+        let expected = [
+            ExecutableIdentity::of_file(files[HOST])?,
+            ExecutableIdentity::of_file(files[SUPERVISOR])?,
+            ExecutableIdentity::of_file(files[PEER])?,
+        ];
+        if expected[HOST] == expected[SUPERVISOR]
+            || expected[HOST] == expected[PEER]
+            || expected[SUPERVISOR] == expected[PEER]
+        {
+            return Err("host, supervisor and peer executables must be different files".into());
         }
-        let host_expected = ExecutableIdentity::of_file(host_executable)?;
-        let peer_expected = ExecutableIdentity::of_file(peer_executable)?;
         let wrapper = self.live_stat(wrapper_pid, "wrapper")?;
 
         // Breadth-first walk of the owned tree only.
@@ -561,61 +665,124 @@ impl Binder {
             }
         }
 
-        // Host: any descendant of the wrapper running the host file.
-        let mut hosts: Vec<(StatFacts, ExecutableEvidence)> = Vec::new();
+        // Classify every examined node once; opaque nodes are only listed.
+        let mut matches: [Vec<(StatFacts, ExecutableEvidence)>; 3] = Default::default();
+        let mut opaque: Vec<u32> = Vec::new();
         for (&pid, (facts, _)) in &nodes {
             if pid == wrapper_pid {
                 continue;
             }
-            if let Some(evidence) = self.executable_match(pid, host_executable, &host_expected)? {
-                hosts.push((*facts, evidence));
+            match self.observe_executable(pid)? {
+                Observed::File { link, identity } => {
+                    if let Some(role) = expected.iter().position(|e| *e == identity) {
+                        matches[role].push((
+                            *facts,
+                            ExecutableEvidence {
+                                prepared_path: files[role].to_path_buf(),
+                                observed_link: link,
+                                identity,
+                            },
+                        ));
+                    }
+                }
+                Observed::Absent => {}
+                Observed::Opaque => opaque.push(pid),
             }
         }
-        let (host, host_evidence) = match hosts.len() {
-            0 => {
-                return Ok(ResolveOutcome::Pending {
-                    stage: PendingStage::Host,
-                    host: None,
-                });
+        let pending = |stage, host, reason| {
+            Ok(ResolveOutcome::Pending {
+                stage,
+                host,
+                reason,
+            })
+        };
+
+        // Host: one examined descendant of the wrapper, or a fork pair.
+        let (host, host_evidence) = match matches[HOST].as_slice() {
+            [] => return pending(PendingStage::Host, None, PendingReason::NoMatch),
+            [one] => one.clone(),
+            [a, b] if b.0.parent_pid == a.0.identity.pid || a.0.parent_pid == b.0.identity.pid => {
+                return pending(PendingStage::Host, None, PendingReason::ForkBeforeExec);
             }
-            1 => hosts.pop().unwrap(),
-            n => {
+            many => {
                 return Err(format!(
-                    "{n} descendants of wrapper {wrapper_pid} run the host executable; \
-                     the host is ambiguous"
+                    "{} examined descendants of wrapper {wrapper_pid} run the host executable; \
+                     the host is ambiguous",
+                    many.len()
                 ));
             }
         };
+        let host_pid = host.identity.pid;
+        if opaque
+            .iter()
+            .any(|&pid| !is_descendant(&nodes, pid, host_pid))
+        {
+            return pending(
+                PendingStage::Host,
+                None,
+                PendingReason::UnexaminedOutsideHost,
+            );
+        }
 
-        // Peer: descendants of the host running the peer file.
-        let mut peers: Vec<(StatFacts, ExecutableEvidence)> = Vec::new();
-        for (&pid, (facts, _)) in &nodes {
-            if pid == host.identity.pid || !is_descendant(&nodes, pid, host.identity.pid) {
+        // Peer: the only child of a supervisor that is the host's direct
+        // child. Peer matches outside the host's subtree are not examined.
+        let mut supervised = Vec::new();
+        for (facts, evidence) in &matches[PEER] {
+            let pid = facts.identity.pid;
+            if !is_descendant(&nodes, pid, host_pid) {
                 continue;
             }
-            if let Some(evidence) = self.executable_match(pid, peer_executable, &peer_expected)? {
-                peers.push((*facts, evidence));
+            if opaque.contains(&facts.parent_pid) {
+                // The would-be supervisor itself is unexamined.
+                return pending(
+                    PendingStage::Peer,
+                    Some(host.identity),
+                    PendingReason::UnexaminedInSelectedSubtree,
+                );
+            }
+            let supervisor = matches[SUPERVISOR]
+                .iter()
+                .find(|(s, _)| s.identity.pid == facts.parent_pid && s.parent_pid == host_pid);
+            match supervisor {
+                Some(supervisor) if self.children_of(facts.parent_pid)? == [pid] => {
+                    supervised.push((supervisor.clone(), (*facts, evidence.clone())));
+                }
+                _ => {
+                    return Err(format!(
+                        "pid {pid} runs the peer executable outside a supervised position \
+                         below host {host_pid}"
+                    ));
+                }
             }
         }
-        let (peer, peer_evidence) = match peers.len() {
+        let ((supervisor, supervisor_evidence), (peer, peer_evidence)) = match supervised.len() {
             0 => {
-                return Ok(ResolveOutcome::Pending {
-                    stage: PendingStage::Peer,
-                    host: Some(host.identity),
-                });
+                return pending(
+                    PendingStage::Peer,
+                    Some(host.identity),
+                    PendingReason::NoMatch,
+                );
             }
-            1 => peers.pop().unwrap(),
+            1 => supervised.pop().unwrap(),
             n => {
                 return Err(format!(
-                    "{n} descendants of host {} run the peer executable; \
-                     the peer is ambiguous",
-                    host.identity.pid
+                    "{n} supervised peers below host {host_pid}; the peer is ambiguous"
                 ));
             }
         };
+        let supervisor_pid = supervisor.identity.pid;
+        if opaque
+            .iter()
+            .any(|&pid| is_descendant(&nodes, pid, supervisor_pid))
+        {
+            return pending(
+                PendingStage::Peer,
+                Some(host.identity),
+                PendingReason::UnexaminedInSelectedSubtree,
+            );
+        }
 
-        // Retain the full chain wrapper -> ... -> host -> ... -> peer.
-        // The peer's lineage already passes through the host.
+        // Retain the full chain wrapper -> ... -> host -> supervisor -> peer.
         let mut chain: Vec<BoundNode> = Vec::new();
         for pid in lineage(&nodes, peer.identity.pid) {
             let (facts, _) = nodes[&pid];
@@ -624,14 +791,32 @@ impl Binder {
                 parent_pid: facts.parent_pid,
             });
         }
+        let tail: Vec<u32> = chain.iter().rev().take(3).map(|n| n.identity.pid).collect();
+        if tail != [peer.identity.pid, supervisor_pid, host_pid] {
+            return Err("retained chain does not end host, supervisor, peer".into());
+        }
+        let unexamined = opaque
+            .iter()
+            .map(|pid| {
+                let (facts, _) = nodes[pid];
+                BoundNode {
+                    identity: facts.identity,
+                    parent_pid: facts.parent_pid,
+                }
+            })
+            .collect();
         let time = self.time_proof(&host, &peer)?;
         let binding = ProcessBinding {
             wrapper: wrapper.identity,
             host: host.identity,
+            supervisor: supervisor.identity,
             peer: peer.identity,
             chain,
             host_executable: host_evidence,
+            supervisor_executable: supervisor_evidence,
             peer_executable: peer_evidence,
+            unexamined,
+            uniqueness: UNIQUENESS_SCOPE,
             time,
         };
         // Close the full retained chain before reporting success: an
@@ -686,11 +871,35 @@ impl Binder {
                 }
             }
         }
+        // Exact protected position: the supervisor is the host's direct
+        // child and the peer is its only child.
+        let supervisor = self.live_stat(binding.supervisor.pid, "supervisor")?;
+        if supervisor.identity != binding.supervisor || supervisor.parent_pid != binding.host.pid {
+            return Err(format!(
+                "supervisor pid {} is no longer the host's direct child",
+                binding.supervisor.pid
+            ));
+        }
+        let peer = self.live_stat(binding.peer.pid, "peer")?;
+        if peer.identity != binding.peer
+            || peer.parent_pid != binding.supervisor.pid
+            || self.children_of(binding.supervisor.pid)? != [binding.peer.pid]
+        {
+            return Err(format!(
+                "supervisor pid {} no longer has peer pid {} as its only child",
+                binding.supervisor.pid, binding.peer.pid
+            ));
+        }
         for (identity, evidence, prepared) in [
             (
                 binding.host,
                 &binding.host_executable,
                 &binding.host_executable.prepared_path,
+            ),
+            (
+                binding.supervisor,
+                &binding.supervisor_executable,
+                &binding.supervisor_executable.prepared_path,
             ),
             (
                 binding.peer,
@@ -742,7 +951,7 @@ fn proof_matches(a: &TimeNamespaceProof, b: &TimeNamespaceProof) -> bool {
             && a.origin == b.origin
             && a.observed_target == b.observed_target
     }
-    evidence_matches(&a.reference, &b.reference)
+    a.reference == b.reference
         && evidence_matches(&a.host, &b.host)
         && evidence_matches(&a.peer, &b.peer)
         && evidence_matches(&a.capturer, &b.capturer)

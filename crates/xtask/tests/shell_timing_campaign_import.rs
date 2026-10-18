@@ -216,10 +216,10 @@ fn expect() -> Expect {
 
 fn domain() -> MonotonicDomain {
     MonotonicDomain {
-        reference: 7,
-        host: 7,
-        peer: 7,
-        capturer: 7,
+        reference: 0xEFFFFFFA,
+        host: 0xEFFFFFFA,
+        peer: 0xEFFFFFFA,
+        capturer: 0xEFFFFFFA,
         monotonic_offset_seconds: 0,
         monotonic_offset_nanoseconds: 0,
     }

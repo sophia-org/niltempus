@@ -43,6 +43,13 @@ fn plan_artifacts(plan_bytes: &[u8]) -> Result<(String, String, String), String>
     if plan.schema != 1 || plan.argv.is_empty() || plan.argv.iter().any(|arg| arg.is_empty()) {
         return Err("frozen native plan has an unknown schema or argv".into());
     }
+    if plan
+        .argv
+        .iter()
+        .any(|arg| arg == "--bubblewrap" || arg.starts_with("--bubblewrap="))
+    {
+        return Err("environment binding requires the default bubblewrap executable".into());
+    }
     let artifact = |name: &str| -> Result<String, String> {
         plan.request
             .artifacts
@@ -340,10 +347,13 @@ pub fn verify_environment(
         return Err("capture window is inverted".into());
     }
     let binding: &BindingRecord = evidence.binding.as_ref().ok_or("environment never bound")?;
+    if binding.uniqueness != crate::shell_timing_process_binding::UNIQUENESS_SCOPE {
+        return Err("binding uniqueness scope is unknown".into());
+    }
 
     // Binding chain and identities.
     let chain = &binding.chain;
-    if chain.len() < 3
+    if chain.len() < 4
         || chain.first().map(|node| node.identity) != Some(binding.wrapper)
         || chain.last().map(|node| node.identity) != Some(binding.peer)
     {
@@ -360,6 +370,33 @@ pub fn verify_environment(
     if host_at == 0 || peer_at <= host_at {
         return Err("binding host is not below the wrapper and peer below host".into());
     }
+    if peer_at != host_at + 2 || chain[host_at + 1].identity != binding.supervisor {
+        return Err("binding must contain host, supervisor and peer as direct children".into());
+    }
+    let mut chain_pids = std::collections::BTreeSet::new();
+    if chain
+        .iter()
+        .any(|node| node.identity.pid == 0 || !chain_pids.insert(node.identity.pid))
+    {
+        return Err("binding chain repeats a pid or contains zero".into());
+    }
+    let mut opaque_pids = std::collections::BTreeSet::new();
+    if binding.unexamined.len() > crate::shell_timing_process_binding::MAX_NODES
+        || binding.unexamined.iter().any(|node| {
+            node.identity.pid == 0
+                || chain_pids.contains(&node.identity.pid)
+                || !opaque_pids.insert(node.identity.pid)
+        })
+    {
+        return Err("unexamined nodes overlap the binding or repeat a pid".into());
+    }
+    if binding
+        .unexamined
+        .iter()
+        .any(|node| chain_pids.contains(&node.parent_pid) && node.parent_pid != binding.host.pid)
+    {
+        return Err("unexamined node has a forbidden parent in the binding chain".into());
+    }
     for pair in chain.windows(2) {
         if pair[1].parent_pid != pair[0].identity.pid {
             return Err("binding chain parent links are not contiguous".into());
@@ -373,6 +410,11 @@ pub fn verify_environment(
     }
     for (record, expected, role) in [
         (&binding.host_executable, &host_path, "host"),
+        (
+            &binding.supervisor_executable,
+            &"/usr/bin/bwrap".to_owned(),
+            "supervisor",
+        ),
         (&binding.peer_executable, &peer_path, "peer"),
     ] {
         if record.prepared_path != *expected
@@ -390,26 +432,24 @@ pub fn verify_environment(
     // Clock domain, reparsed from the raw retained texts.
     let time = &binding.time;
     let inodes = [
-        parse_namespace(&time.reference)?,
+        time.reference.inode,
         parse_namespace(&time.host)?,
         parse_namespace(&time.peer)?,
         parse_namespace(&time.capturer)?,
     ];
-    if inodes.iter().any(|&inode| inode != inodes[0]) {
+    if inodes[0] != crate::shell_timing_process_binding::INITIAL_TIME_NAMESPACE_INODE
+        || inodes.iter().any(|&inode| inode != inodes[0])
+    {
         return Err("time namespace inodes differ".into());
     }
-    if (
-        time.reference.pid,
-        time.host.pid,
-        time.peer.pid,
-        time.capturer.pid,
-    ) != (1, binding.host.pid, binding.peer.pid, time.capturer.pid)
+    if (time.host.pid, time.peer.pid, time.capturer.pid)
+        != (binding.host.pid, binding.peer.pid, time.capturer.pid)
         || time.host.identity != binding.host
         || time.peer.identity != binding.peer
     {
         return Err("namespace evidence names other processes".into());
     }
-    for record in [&time.reference, &time.host, &time.peer, &time.capturer] {
+    for record in [&time.host, &time.peer, &time.capturer] {
         if record.pid != record.identity.pid
             || record.origin.is_empty()
             || !(capture_window.start_usec..=capture_window.end_usec)

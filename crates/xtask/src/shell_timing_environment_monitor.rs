@@ -47,6 +47,7 @@ fn monotonic_usec() -> Result<u64, String> {
 #[derive(Clone, Debug)]
 pub struct MonitorConfig {
     pub host_executable: PathBuf,
+    pub supervisor_executable: PathBuf,
     pub peer_executable: PathBuf,
     pub card: String,
     /// Inside the runner's private stage directory.
@@ -152,7 +153,7 @@ pub struct NamespaceRecord {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimeRecord {
-    pub reference: NamespaceRecord,
+    pub reference: InitialTimeNamespaceRecord,
     pub host: NamespaceRecord,
     pub peer: NamespaceRecord,
     pub capturer: NamespaceRecord,
@@ -160,6 +161,13 @@ pub struct TimeRecord {
     pub capturer_timens_offsets_origin: String,
     pub monotonic_offset_seconds: i64,
     pub monotonic_offset_nanoseconds: i64,
+}
+
+/// Linux's initial time namespace identity, not a proc read of PID 1.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InitialTimeNamespaceRecord {
+    pub inode: u64,
 }
 
 /// Serializable mirror of `ProcessBinding` (the original is
@@ -170,10 +178,14 @@ pub struct TimeRecord {
 pub struct BindingRecord {
     pub wrapper: IdentityRecord,
     pub host: IdentityRecord,
+    pub supervisor: IdentityRecord,
     pub peer: IdentityRecord,
     pub chain: Vec<ChainRecord>,
     pub host_executable: ExecutableRecord,
+    pub supervisor_executable: ExecutableRecord,
     pub peer_executable: ExecutableRecord,
+    pub unexamined: Vec<ChainRecord>,
+    pub uniqueness: String,
     pub time: TimeRecord,
 }
 
@@ -210,6 +222,7 @@ impl From<&ProcessBinding> for BindingRecord {
         Self {
             wrapper: binding.wrapper.into(),
             host: binding.host.into(),
+            supervisor: binding.supervisor.into(),
             peer: binding.peer.into(),
             chain: binding
                 .chain
@@ -220,9 +233,21 @@ impl From<&ProcessBinding> for BindingRecord {
                 })
                 .collect(),
             host_executable: executable(&binding.host_executable),
+            supervisor_executable: executable(&binding.supervisor_executable),
             peer_executable: executable(&binding.peer_executable),
+            unexamined: binding
+                .unexamined
+                .iter()
+                .map(|node| ChainRecord {
+                    identity: node.identity.into(),
+                    parent_pid: node.parent_pid,
+                })
+                .collect(),
+            uniqueness: binding.uniqueness.to_owned(),
             time: TimeRecord {
-                reference: namespace(&binding.time.reference),
+                reference: InitialTimeNamespaceRecord {
+                    inode: binding.time.reference.inode,
+                },
                 host: namespace(&binding.time.host),
                 peer: namespace(&binding.time.peer),
                 capturer: namespace(&binding.time.capturer),
@@ -431,8 +456,11 @@ impl EnvironmentMonitor {
             State::Ended | State::Failed => Ok(MonitorTurn::Ended),
             State::AwaitingBinding => match self.binder.resolve(
                 wrapper_pid,
-                &self.config.host_executable,
-                &self.config.peer_executable,
+                crate::shell_timing_process_binding::Executables {
+                    host: &self.config.host_executable,
+                    supervisor: &self.config.supervisor_executable,
+                    peer: &self.config.peer_executable,
+                },
             ) {
                 Err(error) => self.fail(error),
                 Ok(ResolveOutcome::Pending { .. }) => Ok(MonitorTurn::Pending),
