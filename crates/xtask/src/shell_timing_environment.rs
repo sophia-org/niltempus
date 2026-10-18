@@ -522,7 +522,7 @@ fn policy_name(policy: u64) -> Option<&'static str> {
 
 /// Leader-thread scheduling from `/proc/<pid>/stat`. The command name may
 /// contain spaces and parentheses, so fields are counted from the last `)`.
-fn scheduling(text: &str, pid: u32) -> Result<Scheduling, String> {
+pub(crate) fn scheduling(text: &str, pid: u32) -> Result<Scheduling, String> {
     let line = single_line(text, "stat")?;
     let open = line.find(" (").ok_or("stat: no command name")?;
     let close = line.rfind(") ").ok_or("stat: no command name")?;
@@ -560,7 +560,7 @@ fn scheduling(text: &str, pid: u32) -> Result<Scheduling, String> {
 }
 
 /// `Cpus_allowed_list` from `/proc/<pid>/status`, after checking `Pid`.
-fn affinity(text: &str, pid: u32) -> Result<CpuList, String> {
+pub(crate) fn affinity(text: &str, pid: u32) -> Result<CpuList, String> {
     let mut found_pid = None;
     let mut list = None;
     for line in text.lines() {

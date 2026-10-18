@@ -79,7 +79,7 @@ fn ended(state: char) -> bool {
 
 /// The state letters Linux writes in stat field 3. Anything else is a
 /// malformed record, never a live process.
-fn known_state(state: char) -> bool {
+pub(crate) fn known_state(state: char) -> bool {
     matches!(
         state,
         'R' | 'S' | 'D' | 'T' | 't' | 'Z' | 'X' | 'x' | 'K' | 'W' | 'P' | 'I'
@@ -137,7 +137,7 @@ pub struct Capturer {
     roots: CaptureRoots,
 }
 
-fn monotonic_usec() -> Result<u64, String> {
+pub(crate) fn monotonic_usec() -> Result<u64, String> {
     let now = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
     let seconds = u64::try_from(now.tv_sec).map_err(|_| "monotonic clock before boot")?;
     let nanos = u64::try_from(now.tv_nsec).map_err(|_| "monotonic clock nanoseconds")?;

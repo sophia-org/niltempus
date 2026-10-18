@@ -90,12 +90,18 @@ pub struct VerifiedLoad {
     pub workers: u8,
     pub interval: Interval,
     pub measurement: Interval,
+    /// Each worker's utime+stime ticks between its two observations.
+    pub worker_cpu_ticks: Vec<u64>,
 }
 
 pub trait ArmProvenance {
     fn environment(&self, files: &ArmFiles<'_>) -> Result<VerifiedEnvironment, String>;
-    /// Called only for load arms.
-    fn load(&self, files: &ArmFiles<'_>) -> Result<VerifiedLoad, String>;
+    /// Called only for load arms, after the environment verified.
+    fn load(
+        &self,
+        files: &ArmFiles<'_>,
+        environment: &VerifiedEnvironment,
+    ) -> Result<VerifiedLoad, String>;
 }
 
 /// One arm rebuilt from its retained capture.
@@ -163,7 +169,7 @@ pub fn import_condition(
         let environment = environment_record(&verified.capture, &verified.expect).map_err(fail)?;
         let load = match arm.condition {
             Condition::Load => {
-                let load = provenance.load(&files).map_err(fail)?;
+                let load = provenance.load(&files, &verified).map_err(fail)?;
                 check_load(&manifest, &verified.expect, &load).map_err(fail)?;
                 Some(load)
             }

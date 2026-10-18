@@ -538,6 +538,7 @@ fn qualified_load_must_cover_the_measurement_with_the_declared_workers() {
             end_usec: 95_000_000,
         },
         measurement: e.measurement,
+        worker_cpu_ticks: vec![1; 16],
     };
     assert!(check_load(&m, &e, &load()).is_ok());
     let mut workers = load();
@@ -857,6 +858,7 @@ fn prepared_plan(
             ImageSource::Bytes
         },
         output: E2E_OUTPUT,
+        environment_readback: true,
         frames: arm.frames,
         mode_millihz: 120_000,
         instrumentation: match arm.measurement {
@@ -1163,7 +1165,7 @@ impl ArmProvenance for Supplied {
         })
     }
 
-    fn load(&self, _: &ArmFiles<'_>) -> Result<VerifiedLoad, String> {
+    fn load(&self, _: &ArmFiles<'_>, _: &VerifiedEnvironment) -> Result<VerifiedLoad, String> {
         Err("the idle fixture supplies no load".into())
     }
 }
