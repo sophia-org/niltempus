@@ -335,6 +335,18 @@ fn kernel_completions_only(host: &str) -> Result<(), String> {
 
 /// Rebuild one arm from its retained session capture.
 pub fn derive_arm(manifest: &Manifest, arm: &Arm, run: &RunFiles) -> Result<Rebuilt, String> {
+    derive_arm_for_output(manifest.environment.output, manifest.mode_millihz, arm, run)
+}
+
+/// Rebuild a frozen arm for an explicit output and nominal mode. Calibration
+/// callers validate their own two-arm descriptor before using this shared path;
+/// this does not validate or substitute for a campaign manifest.
+pub fn derive_arm_for_output(
+    output: u64,
+    mode_millihz: u64,
+    arm: &Arm,
+    run: &RunFiles,
+) -> Result<Rebuilt, String> {
     let text = std::str::from_utf8(&run.session_log).map_err(|e| e.to_string())?;
     let (client, host) = crate::shell_timing_native::split_capture(text)?;
     let metrics = crate::shell_timing::collect_metrics(&client, arm.frames)?;
@@ -343,19 +355,14 @@ pub fn derive_arm(manifest: &Manifest, arm: &Arm, run: &RunFiles) -> Result<Rebu
     if metrics.wire != wire || metrics.source != source || metrics.probe_bytes != probe_bytes {
         return Err("captured upload workload differs from the arm".into());
     }
-    if metrics
-        .offers
-        .iter()
-        .any(|offer| offer.output != manifest.environment.output)
-    {
+    if metrics.offers.iter().any(|offer| offer.output != output) {
         return Err("captured output differs from the frozen output".into());
     }
     if text.contains("sophia_comparator_progress ") {
         return Err("progress diagnostics cannot supply cost or latency arms".into());
     }
     kernel_completions_only(&host)?;
-    let samples =
-        crate::shell_timing::join(&host, &metrics.offers, manifest.mode_millihz, arm.frames)?;
+    let samples = crate::shell_timing::join(&host, &metrics.offers, mode_millihz, arm.frames)?;
     let start = metrics
         .uploads
         .iter()
@@ -386,7 +393,7 @@ pub fn derive_arm(manifest: &Manifest, arm: &Arm, run: &RunFiles) -> Result<Rebu
                 measured,
             };
             let latency =
-                crate::shell_timing::latency_window(&host, &client, manifest.mode_millihz, window)?;
+                crate::shell_timing::latency_window(&host, &client, mode_millihz, window)?;
             DerivedArm::Latency(Box::new(LatencyArm {
                 label,
                 wire: wire.into(),
