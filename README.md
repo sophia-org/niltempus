@@ -207,6 +207,24 @@ verdict. Those execution controls must be in place before this frozen matrix is
 used as an acceptance campaign; `READY` is not acceptance. The physical output
 still needs operator confirmation and runtime verification.
 
+The load controller uses an explicit worker command:
+
+    cargo xtask shell-timing cpu-worker DURATION_MS
+
+This starts one CPU worker, not a campaign. It performs integer work without
+forking or opening devices and checks a monotonic deadline every 1024 iterations.
+The duration must be 1–600,000 ms; scheduling delays can extend wall time. It
+inherits scheduling and affinity, which the campaign must verify independently.
+Its JSON report is execution evidence, not a performance or load-validity verdict.
+The campaign controller must also record every worker's lifetime and reject an
+early exit; successful cleanup alone does not prove maintained load.
+
+The `shell_timing_environment` library checks supplied captures and returns
+`environment_complete` only when all required facts match their declared sources
+and expectations. It neither captures the machine nor authenticates those sources.
+Output mode, scale and VRR require host observations; renderer identity requires
+the active host GL context. Configuration values cannot replace either record.
+
 An attended native timing run has two separate commands:
 
     cargo xtask shell-timing prepare-native REQUEST_JSON /ABS/NEW_PLAN.json
