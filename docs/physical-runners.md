@@ -401,8 +401,18 @@ or a missing/nonzero loss count refuse the report. Unknown leaf symbols and
 all perf diagnostics remain visible. Keep the exact binaries available for
 symbolization; symbol tables alone do not guarantee complete unwinding.
 
-Self percentages are shares within each selected process's sampled user CPU,
-not exclusive combined CPU percentages. Callchains overlap. Sampling perturbs
+Report schema 2 retains process/thread identity in perf's histogram grouping
+(`--sort=pid,dso,symbol`) and requests `--percentage=relative`. TGID filtering
+alone is insufficient: schema 1 could merge shared-symbol samples and callchains
+from other processes, and its percentages used a broader denominator. Regenerate
+those reports from retained `perf.data`; the capture format is unchanged and no
+new native run is needed. Preserve the earlier reports as superseded evidence.
+
+Self percentages are shares within each selected process's sampled user CPU;
+individual rows can name its worker threads. They are not exclusive combined
+CPU percentages. Self-row counts must sum to the independently checked raw
+sample count. Fractal callchain percentages are conditional shares of the parent
+branch, not percentages of process CPU; callchains overlap. Sampling perturbs
 the workload, and user-space events cannot explain kernel copy, page-allocation
 or zeroing cost. Never substitute these captures for unprofiled cost arms.
 There is no automated winner or causal conclusion. Compare IPC/files/sealed

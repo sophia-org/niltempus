@@ -137,6 +137,31 @@ pub fn time_filter(interval: &Interval) -> Result<String, String> {
     ))
 }
 
+/// Keep thread identity in the histogram key: filtering by TGID alone does
+/// not prevent perf from merging shared-symbol callchains across processes.
+/// Relative percentages use only the selected process's samples. All entries
+/// remain visible so the sample total can be checked against `perf script`.
+pub fn report_arguments(data: &Path, pid: u32, interval: &Interval) -> Result<Vec<String>, String> {
+    if pid == 0 {
+        return Err("invalid profile process".into());
+    }
+    Ok(vec![
+        "report".into(),
+        "--stdio".into(),
+        "--stdio-color=never".into(),
+        "--no-children".into(),
+        "--show-nr-samples".into(),
+        "--percent-limit=0".into(),
+        "--percentage=relative".into(),
+        "--sort=pid,dso,symbol".into(),
+        "--call-graph=fractal,0,callee".into(),
+        format!("--pid={pid}"),
+        format!("--time={}", time_filter(interval)?),
+        "--input".into(),
+        data.display().to_string(),
+    ])
+}
+
 /// Inspect the exact perf report header. Loss makes attribution incomplete.
 pub fn check_losses(text: &str) -> Result<(), String> {
     let values = text
@@ -145,6 +170,36 @@ pub fn check_losses(text: &str) -> Result<(), String> {
         .collect::<Vec<_>>();
     if values != ["0"] {
         return Err("perf loss count is missing, duplicated or nonzero".into());
+    }
+    Ok(())
+}
+
+/// The unthresholded self rows must account for exactly the independently
+/// filtered raw samples. Callchain annotations are not additional samples.
+pub fn check_report_samples(text: &str, sample_count: usize) -> Result<(), String> {
+    let mut total = 0usize;
+    for line in text.lines() {
+        let mut fields = line.split_whitespace();
+        if !fields.next().is_some_and(|value| value.ends_with('%')) {
+            continue;
+        }
+        let count = fields
+            .next()
+            .and_then(|value| value.parse::<usize>().ok())
+            .ok_or("invalid perf histogram sample row")?;
+        let thread = fields
+            .next()
+            .and_then(|value| value.split_once(':'))
+            .and_then(|(pid, _)| pid.parse::<u32>().ok());
+        if thread.is_none_or(|pid| pid == 0) {
+            return Err("perf histogram lacks thread identity".into());
+        }
+        total = total
+            .checked_add(count)
+            .ok_or("perf histogram sample count overflow")?;
+    }
+    if sample_count == 0 || total != sample_count {
+        return Err("perf histogram differs from the selected process's raw sample count".into());
     }
     Ok(())
 }
@@ -359,19 +414,7 @@ fn report(directory: &Path) -> Result<Vec<String>, String> {
         ("session", verified.expect.host_pid),
         ("peer", verified.expect.peer_pid),
     ] {
-        let argv = vec![
-            "report".into(),
-            "--stdio".into(),
-            "--stdio-color=never".into(),
-            "--no-children".into(),
-            "--show-nr-samples".into(),
-            "--percent-limit=0.5".into(),
-            "--sort=dso,symbol".into(),
-            format!("--pid={pid}"),
-            format!("--time={time}"),
-            "--input".into(),
-            data.display().to_string(),
-        ];
+        let argv = report_arguments(&data, pid, &interval)?;
         let result = Command::new(&profile.perf.path)
             .env("LC_ALL", "C")
             .args(&argv)
@@ -408,6 +451,7 @@ fn report(directory: &Path) -> Result<Vec<String>, String> {
             pid,
             &interval,
         )?;
+        check_report_samples(&output, sample_count)?;
         reports.insert(role, serde_json::json!({"pid":pid, "argv":argv,
             "sample_argv":sample_argv, "sample_count":sample_count, "unknown_leaf_samples":unknown_leaf_samples,
             "sample_stderr":String::from_utf8(samples.stderr).map_err(|e| e.to_string())?,
@@ -415,10 +459,10 @@ fn report(directory: &Path) -> Result<Vec<String>, String> {
             "stderr":String::from_utf8(result.stderr).map_err(|e| e.to_string())?}));
     }
     Ok(vec![serde_json::to_string_pretty(&serde_json::json!({
-        "schema":1, "scope":SCOPE, "profile_sha256":finished.profile_sha256,
+        "schema":2, "scope":SCOPE, "profile_sha256":finished.profile_sha256,
         "perf_sha256":finished.perf_sha256, "wire":request.wire, "source":request.source,
         "interval":interval, "environment":environment, "cost_diagnostic":cost.report,
         "reports":reports,
-        "interpretation":"Review sample counts, lost-event warnings and unresolved stacks before attribution. Self percentages are within each filtered process, not percentages of combined CPU. Callchains overlap. No kernel samples were collected."
+        "interpretation":"Review sample counts, lost-event warnings and unresolved stacks before attribution. Histogram rows retain thread identity within the selected outer TGID and must total its independently checked raw samples. Relative self percentages use that process's samples, not combined CPU. Fractal callchain percentages are conditional shares of their parent branch, not process CPU percentages; callchains overlap. Schema 1 reports grouped shared symbols across processes and must be regenerated from retained perf.data. No kernel samples were collected."
     })).map_err(|e| e.to_string())?])
 }
