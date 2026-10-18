@@ -16,10 +16,12 @@
 //! process running the prepared supervisor file, and that supervisor
 //! must be the host's direct child. Zero matches at a level are
 //! `Pending`, the normal state while the tree starts; the caller's run
-//! deadline bounds the retries. Two host matches where one is the
-//! other's direct child are a fork before exec and also `Pending`; any
-//! other duplicate host, a peer match outside a supervised position
-//! below the host, or two supervised peers is an error.
+//! deadline bounds the retries. Host matches that all descend from one
+//! of them are forks before exec and also `Pending`; the binder never
+//! selects among them, so a permanent nested duplicate never binds.
+//! Host matches with separate roots are an error, as are a peer match
+//! outside a supervised position below the host and two supervised
+//! peers.
 //!
 //! Some processes cannot be examined. A process that made itself
 //! non-dumpable outside a user namespace the capturer owns (Factotum
@@ -59,6 +61,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod time;
+use time::proof_matches;
+
 /// Bound on processes visited in one traversal.
 pub const MAX_NODES: usize = 512;
 /// Bound on task entries enumerated for one process.
@@ -82,6 +87,10 @@ pub const UNIQUENESS_SCOPE: &str = "exactly one host below the wrapper and one s
 #[derive(Clone, Copy, Debug)]
 pub struct Executables<'a> {
     pub host: &'a Path,
+    /// The prepared host command line, argv0 included. Other processes
+    /// running the host file (the input guard, launch checks, the metadata
+    /// broker) carry other arguments and are not hosts.
+    pub host_argv: &'a [String],
     /// The protection-domain supervisor (Bubblewrap) the host runs the
     /// peer under.
     pub supervisor: &'a Path,
@@ -146,16 +155,6 @@ pub struct NamespaceEvidence {
     pub captured_usec: u64,
 }
 
-fn monotonic_usec() -> Result<u64, String> {
-    let now = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
-    let seconds = u64::try_from(now.tv_sec).map_err(|_| "monotonic clock before boot")?;
-    let nanos = u64::try_from(now.tv_nsec).map_err(|_| "monotonic clock nanoseconds")?;
-    seconds
-        .checked_mul(1_000_000)
-        .and_then(|usec| usec.checked_add(nanos / 1000))
-        .ok_or_else(|| "monotonic clock overflow".into())
-}
-
 /// Proof that host, peer and capturer share the initial time namespace
 /// with a zero monotonic offset.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -184,6 +183,9 @@ pub struct ProcessBinding {
     /// Wrapper first, then host, supervisor and peer last; each once.
     pub chain: Vec<BoundNode>,
     pub host_executable: ExecutableEvidence,
+    /// The host's `proc/<pid>/cmdline`, which matched the prepared argv
+    /// exactly.
+    pub host_argv: Vec<String>,
     pub supervisor_executable: ExecutableEvidence,
     pub peer_executable: ExecutableEvidence,
     /// Processes below the host whose executable the kernel refused to
@@ -207,8 +209,8 @@ pub enum PendingStage {
 pub enum PendingReason {
     /// No examined process runs the file in its position yet.
     NoMatch,
-    /// A host and its direct child both run the host file: a fork not
-    /// yet followed by exec.
+    /// Several processes in one rooted tree run the host file with the
+    /// prepared argv: forks not yet followed by exec.
     ForkBeforeExec,
     /// An unexamined process sits outside the host's subtree, so the
     /// host's uniqueness cannot be stated.
@@ -285,6 +287,43 @@ fn read_bounded(path: &Path, limit: u64) -> Result<String, String> {
         return Err(format!("{}: exceeds {limit} byte bound", path.display()));
     }
     String::from_utf8(bytes).map_err(|_| format!("{}: not UTF-8", path.display()))
+}
+
+/// `argv` as `proc/<pid>/cmdline` stores it: every argument NUL-terminated.
+fn cmdline_bytes(argv: &[String]) -> Result<Vec<u8>, String> {
+    if argv.is_empty() || argv.iter().any(|arg| arg.contains('\0')) {
+        return Err("host argv must be nonempty without NUL bytes".into());
+    }
+    Ok(argv.iter().flat_map(|arg| arg.bytes().chain([0])).collect())
+}
+
+/// The matches with no other match among their ancestors.
+fn host_roots<'m, T>(
+    nodes: &BTreeMap<u32, (StatFacts, usize)>,
+    matches: &'m [(StatFacts, T)],
+) -> Vec<&'m (StatFacts, T)> {
+    matches
+        .iter()
+        .filter(|(facts, _)| {
+            !matches
+                .iter()
+                .any(|(other, _)| is_descendant(nodes, facts.identity.pid, other.identity.pid))
+        })
+        .collect()
+}
+
+/// Pid, parent and start time of each candidate, for refusals.
+fn candidates<T>(matches: &[(StatFacts, T)]) -> String {
+    matches
+        .iter()
+        .map(|(facts, _)| {
+            format!(
+                "pid {} (ppid {}, start {})",
+                facts.identity.pid, facts.parent_pid, facts.identity.start_time_ticks
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Stat facts binding needs: identity, parent pid and state. Fields are
@@ -480,6 +519,30 @@ impl Binder {
         })
     }
 
+    /// Whether `pid`'s command line is exactly `expected` bytes, or `None`
+    /// when the process is gone. The command line selects a role among
+    /// processes already matched by executable identity; it authenticates
+    /// nothing, and Sophia never rewrites its own arguments.
+    fn cmdline_matches(&self, pid: u32, expected: &[u8]) -> Result<Option<bool>, String> {
+        let path = self.proc_path(&format!("{pid}/cmdline"));
+        let file = match fs::File::open(&path) {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(format!("{}: {e}", path.display())),
+        };
+        let mut bytes = Vec::new();
+        file.take(MAX_READ_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        if bytes.len() as u64 > MAX_READ_BYTES {
+            return Err(format!(
+                "{}: exceeds {MAX_READ_BYTES} byte bound",
+                path.display()
+            ));
+        }
+        Ok(Some(bytes == expected))
+    }
+
     /// Executable evidence when a bound `pid` still runs `expected`, or
     /// `None` when it provably runs something else (including a deleted
     /// target, which cannot prove identity). A bound process that turned
@@ -503,105 +566,6 @@ impl Binder {
         }
     }
 
-    fn namespace_evidence(&self, stat: &StatFacts) -> Result<NamespaceEvidence, String> {
-        let pid = stat.identity.pid;
-        let link = self.proc_path(&format!("{pid}/ns/time"));
-        let target = fs::read_link(&link).map_err(|e| format!("{}: {e}", link.display()))?;
-        let text = target.to_string_lossy().into_owned();
-        let inode: u64 = text
-            .strip_prefix("time:[")
-            .and_then(|rest| rest.strip_suffix(']'))
-            .and_then(|digits| digits.parse().ok())
-            .ok_or_else(|| {
-                format!(
-                    "{}: unexpected time namespace target {text:?}",
-                    link.display()
-                )
-            })?;
-        if inode == 0 {
-            return Err(format!(
-                "{}: time namespace inode must be nonzero",
-                link.display()
-            ));
-        }
-        Ok(NamespaceEvidence {
-            pid,
-            identity: stat.identity,
-            time_namespace_inode: inode,
-            origin: link.display().to_string(),
-            observed_target: text,
-            captured_usec: monotonic_usec()?,
-        })
-    }
-
-    /// Namespace proof for a selected host and peer. The host and peer
-    /// stat reads bracketing the namespace reads must still name the
-    /// bound identities, so the proof covers the same processes.
-    fn time_proof(&self, host: &StatFacts, peer: &StatFacts) -> Result<TimeNamespaceProof, String> {
-        let capturer_stat = self.live_stat(self.capturer_pid, "capturer")?;
-        let host_evidence = self.namespace_evidence(host)?;
-        let peer_evidence = self.namespace_evidence(peer)?;
-        let capturer_evidence = self.namespace_evidence(&capturer_stat)?;
-        // Closing bracket: the namespace reads above must not have
-        // raced a host or peer replacement.
-        let host_close = self.live_stat(host.identity.pid, "host")?;
-        let peer_close = self.live_stat(peer.identity.pid, "peer")?;
-        if host_close.identity != host.identity || peer_close.identity != peer.identity {
-            return Err("host or peer identity changed during namespace capture".into());
-        }
-        let initial = INITIAL_TIME_NAMESPACE_INODE;
-        let (host_inode, peer_inode, capturer_inode) = (
-            host_evidence.time_namespace_inode,
-            peer_evidence.time_namespace_inode,
-            capturer_evidence.time_namespace_inode,
-        );
-        if [host_inode, peer_inode, capturer_inode] != [initial; 3] {
-            return Err(format!(
-                "time namespace inodes differ: initial {initial}, host {host_inode}, \
-                 peer {peer_inode}, capturer {capturer_inode}"
-            ));
-        }
-        let offsets_path = self.proc_path(&format!("{}/timens_offsets", self.capturer_pid));
-        let offsets = read_bounded(&offsets_path, MAX_READ_BYTES)?;
-        let mut monotonic: Option<(i64, i64)> = None;
-        for line in offsets.lines() {
-            let mut parts = line.split_whitespace();
-            if parts.next() == Some("monotonic") {
-                if monotonic.is_some() {
-                    return Err("timens_offsets: duplicate monotonic line".into());
-                }
-                let seconds: i64 = parts
-                    .next()
-                    .and_then(|v| v.parse().ok())
-                    .ok_or("timens_offsets: bad monotonic seconds")?;
-                let nanos: i64 = parts
-                    .next()
-                    .and_then(|v| v.parse().ok())
-                    .ok_or("timens_offsets: bad monotonic nanoseconds")?;
-                if parts.next().is_some() {
-                    return Err("timens_offsets: trailing fields on monotonic line".into());
-                }
-                monotonic = Some((seconds, nanos));
-            }
-        }
-        let monotonic = monotonic.ok_or("timens_offsets: no monotonic line")?;
-        if monotonic != (0, 0) {
-            return Err(format!(
-                "timens_offsets: monotonic offset must be exactly zero, got {} {}",
-                monotonic.0, monotonic.1
-            ));
-        }
-        Ok(TimeNamespaceProof {
-            reference: InitialTimeNamespace { inode: initial },
-            host: host_evidence,
-            peer: peer_evidence,
-            capturer: capturer_evidence,
-            capturer_timens_offsets_origin: offsets_path.display().to_string(),
-            capturer_timens_offsets: offsets,
-            monotonic_offset: monotonic,
-        })
-    }
-
     /// One resolve pass. See the module docs for the matching rules.
     pub fn resolve(
         &self,
@@ -611,6 +575,7 @@ impl Binder {
         if wrapper_pid == 0 || wrapper_pid == 1 {
             return Err("wrapper pid must be nonzero and not pid 1".into());
         }
+        let host_cmdline = cmdline_bytes(executables.host_argv)?;
         let files = [executables.host, executables.supervisor, executables.peer];
         let expected = [
             ExecutableIdentity::of_file(files[HOST])?,
@@ -675,6 +640,10 @@ impl Binder {
             match self.observe_executable(pid)? {
                 Observed::File { link, identity } => {
                     if let Some(role) = expected.iter().position(|e| *e == identity) {
+                        // Another mode of the host file is not a host.
+                        if role == HOST && self.cmdline_matches(pid, &host_cmdline)? != Some(true) {
+                            continue;
+                        }
                         matches[role].push((
                             *facts,
                             ExecutableEvidence {
@@ -701,14 +670,18 @@ impl Binder {
         let (host, host_evidence) = match matches[HOST].as_slice() {
             [] => return pending(PendingStage::Host, None, PendingReason::NoMatch),
             [one] => one.clone(),
-            [a, b] if b.0.parent_pid == a.0.identity.pid || a.0.parent_pid == b.0.identity.pid => {
+            // Several exact matches in one rooted tree are forks not yet
+            // followed by exec. Never select among them; a permanent nested
+            // duplicate stays Pending until the caller's deadline.
+            many if host_roots(&nodes, many).len() == 1 => {
                 return pending(PendingStage::Host, None, PendingReason::ForkBeforeExec);
             }
             many => {
                 return Err(format!(
-                    "{} examined descendants of wrapper {wrapper_pid} run the host executable; \
-                     the host is ambiguous",
-                    many.len()
+                    "{} examined descendants of wrapper {wrapper_pid} run the host executable \
+                     with the prepared argv; the host is ambiguous: {}",
+                    many.len(),
+                    candidates(many)
                 ));
             }
         };
@@ -765,8 +738,10 @@ impl Binder {
             }
             1 => supervised.pop().unwrap(),
             n => {
+                let peers: Vec<_> = supervised.iter().map(|(_, peer)| peer.clone()).collect();
                 return Err(format!(
-                    "{n} supervised peers below host {host_pid}; the peer is ambiguous"
+                    "{n} supervised peers below host {host_pid}; the peer is ambiguous: {}",
+                    candidates(&peers)
                 ));
             }
         };
@@ -813,6 +788,7 @@ impl Binder {
             peer: peer.identity,
             chain,
             host_executable: host_evidence,
+            host_argv: executables.host_argv.to_vec(),
             supervisor_executable: supervisor_evidence,
             peer_executable: peer_evidence,
             unexamined,
@@ -890,6 +866,16 @@ impl Binder {
                 binding.supervisor.pid, binding.peer.pid
             ));
         }
+        match self.cmdline_matches(binding.host.pid, &cmdline_bytes(&binding.host_argv)?)? {
+            Some(true) => {}
+            Some(false) => {
+                return Err(format!(
+                    "host pid {} argv changed since binding",
+                    binding.host.pid
+                ));
+            }
+            None => return Ok(BindingRecheck::Ended),
+        }
         for (identity, evidence, prepared) in [
             (
                 binding.host,
@@ -940,24 +926,6 @@ impl Binder {
         }
         Ok(BindingRecheck::Bound)
     }
-}
-
-/// Semantic proof equality: every fact except per-read capture stamps.
-fn proof_matches(a: &TimeNamespaceProof, b: &TimeNamespaceProof) -> bool {
-    fn evidence_matches(a: &NamespaceEvidence, b: &NamespaceEvidence) -> bool {
-        a.pid == b.pid
-            && a.identity == b.identity
-            && a.time_namespace_inode == b.time_namespace_inode
-            && a.origin == b.origin
-            && a.observed_target == b.observed_target
-    }
-    a.reference == b.reference
-        && evidence_matches(&a.host, &b.host)
-        && evidence_matches(&a.peer, &b.peer)
-        && evidence_matches(&a.capturer, &b.capturer)
-        && a.capturer_timens_offsets == b.capturer_timens_offsets
-        && a.capturer_timens_offsets_origin == b.capturer_timens_offsets_origin
-        && a.monotonic_offset == b.monotonic_offset
 }
 
 /// True when `ancestor` is on `pid`'s parent chain in `nodes`.

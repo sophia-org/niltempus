@@ -33,6 +33,14 @@ fn host() -> u32 {
     std::process::id()
 }
 
+fn host_argv() -> Vec<String> {
+    vec![
+        std::env::current_exe().unwrap().display().to_string(),
+        "session".into(),
+        "run".into(),
+    ]
+}
+
 fn stat(pid: u32, ppid: u32, start: u64, state: &str) -> String {
     let mut fields: Vec<String> = (3..=52).map(|_| "0".to_string()).collect();
     fields[0] = state.into();
@@ -93,6 +101,7 @@ impl Fixture {
         EnvironmentMonitor::new(
             MonitorConfig {
                 host_executable: std::env::current_exe().unwrap(),
+                host_argv: host_argv(),
                 supervisor_executable: PathBuf::from("/usr/bin/bwrap"),
                 peer_executable: self.peer_file.clone(),
                 card: "card1".into(),
@@ -156,6 +165,10 @@ fn fixture(host_ready: bool) -> Fixture {
         4242,
         if host_ready { Some(&host_exe) } else { None },
         &[SUPERVISOR],
+    );
+    write(
+        &fx.proc_root.join(format!("{}/cmdline", host())),
+        &(host_argv().join("\0") + "\0"),
     );
     fx.process(
         SUPERVISOR,
@@ -536,7 +549,7 @@ fn monitor_evidence_composes_into_the_m5_record() {
             "instrumentation": "none",
             "environment_readback": true
         },
-        "argv": ["/fixture/sophia", "session"]
+        "argv": host_argv()
     }))
     .unwrap();
     let environment_bytes = serde_json::to_vec(&evidence).unwrap();

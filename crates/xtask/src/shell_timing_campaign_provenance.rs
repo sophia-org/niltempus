@@ -347,6 +347,10 @@ pub fn verify_environment(
         return Err("capture window is inverted".into());
     }
     let binding: &BindingRecord = evidence.binding.as_ref().ok_or("environment never bound")?;
+    let plan: PlanView = serde_json::from_slice(files.plan).map_err(|e| e.to_string())?;
+    if binding.host_argv != plan.argv {
+        return Err("bound host arguments differ from the frozen plan".into());
+    }
     if binding.uniqueness != crate::shell_timing_process_binding::UNIQUENESS_SCOPE {
         return Err("binding uniqueness scope is unknown".into());
     }

@@ -233,7 +233,12 @@ impl LiveCampaignObserver {
 }
 
 impl CampaignObserver for LiveCampaignObserver {
-    fn prepare(&mut self, request: &Request, stage: &Path) -> Result<PathBuf, String> {
+    fn prepare(
+        &mut self,
+        request: &Request,
+        host_argv: &[String],
+        stage: &Path,
+    ) -> Result<PathBuf, String> {
         if self.prepared || self.finished {
             return Err("campaign observer was already used".into());
         }
@@ -248,6 +253,7 @@ impl CampaignObserver for LiveCampaignObserver {
         self.monitor = Some(EnvironmentMonitor::new(
             MonitorConfig {
                 host_executable: request.artifacts["sophia"].path.clone(),
+                host_argv: host_argv.to_vec(),
                 // Prepared native argv has no bubblewrap override; Sophia uses
                 // this default. Binder retains and rechecks its device/inode.
                 supervisor_executable: PathBuf::from("/usr/bin/bwrap"),

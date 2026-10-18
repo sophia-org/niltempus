@@ -567,7 +567,12 @@ pub fn verify_prepared(bytes: &[u8]) -> Result<(Request, u64), String> {
 /// artifact and runner checks, with a new private stage directory. `finish`
 /// must retain evidence and stop owned load workers even when launch fails.
 pub trait CampaignObserver {
-    fn prepare(&mut self, request: &Request, stage: &Path) -> Result<PathBuf, String>;
+    fn prepare(
+        &mut self,
+        request: &Request,
+        host_argv: &[String],
+        stage: &Path,
+    ) -> Result<PathBuf, String>;
     fn observe(&mut self, wrapper_pid: u32, logs: &Path) -> Result<(), String>;
     fn finish(&mut self, stage: &Path) -> Result<(), String>;
 }
@@ -685,7 +690,7 @@ fn run_inner(
                 .join("tools/run_sophia_session.sh");
             let mut result = (|| {
                 let destination = match observer.as_deref_mut() {
-                    Some(observer) => Some(observer.prepare(&plan.request, stage)?),
+                    Some(observer) => Some(observer.prepare(&plan.request, &plan.argv, stage)?),
                     None => None,
                 };
                 let mut environment = vec![("SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE", "1")];

@@ -21,6 +21,7 @@ const PEER: u32 = 300;
 const CAPTURER: u32 = 900;
 const NS: u64 = INITIAL_TIME_NAMESPACE_INODE;
 const OFFSETS: &str = "monotonic 0 0\nboottime 0 0\n";
+const HOST_ARGS: [&str; 3] = ["session", "run", "--display=:94"];
 
 static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
 
@@ -31,6 +32,7 @@ struct Fixture {
     host_file: PathBuf,
     supervisor_file: PathBuf,
     peer_file: PathBuf,
+    host_argv: Vec<String>,
 }
 
 impl Drop for Fixture {
@@ -115,9 +117,35 @@ impl Fixture {
         );
     }
 
+    /// Write `pid`'s command line the way the kernel stores it.
+    fn set_cmdline(&self, pid: u32, argv: &[String]) {
+        let mut bytes = Vec::new();
+        for arg in argv {
+            bytes.extend_from_slice(arg.as_bytes());
+            bytes.push(0);
+        }
+        fs::create_dir_all(self.proc_root.join(pid.to_string())).unwrap();
+        fs::write(self.proc_root.join(format!("{pid}/cmdline")), bytes).unwrap();
+    }
+
+    /// A process running the host file with the prepared argv.
+    fn host_process(&self, pid: u32, ppid: u32, start: u64, children: &[u32]) {
+        self.process(pid, ppid, start, Some(&self.host_file.clone()), children);
+        self.set_cmdline(pid, &self.host_argv.clone());
+    }
+
+    /// A process running the host file in another mode.
+    fn host_mode(&self, pid: u32, ppid: u32, start: u64, args: &[&str], children: &[u32]) {
+        self.process(pid, ppid, start, Some(&self.host_file.clone()), children);
+        let mut argv = vec![self.host_file.display().to_string()];
+        argv.extend(args.iter().map(|arg| arg.to_string()));
+        self.set_cmdline(pid, &argv);
+    }
+
     fn exes(&self) -> Executables<'_> {
         Executables {
             host: &self.host_file,
+            host_argv: &self.host_argv,
             supervisor: &self.supervisor_file,
             peer: &self.peer_file,
         }
@@ -161,6 +189,8 @@ fn fixture() -> Fixture {
     write(&host_file, "host executable fixture\n");
     write(&supervisor_file, "supervisor executable fixture\n");
     write(&peer_file, "peer executable fixture\n");
+    let mut host_argv = vec![host_file.display().to_string()];
+    host_argv.extend(HOST_ARGS.iter().map(|arg| arg.to_string()));
     let binder = Binder::new(
         &CaptureRoots::new(proc_root.clone(), root.join("sys")),
         CAPTURER,
@@ -172,6 +202,7 @@ fn fixture() -> Fixture {
         host_file,
         supervisor_file,
         peer_file,
+        host_argv,
     };
     // Reference and capturer live outside the wrapper tree.
     fx.process(REF, 0, 10, None, &[]);
@@ -183,13 +214,7 @@ fn fixture() -> Fixture {
     // wrapper -> shell -> host -> supervisor -> peer.
     fx.process(WRAPPER, CAPTURER, 1000, None, &[SHELL]);
     fx.process(SHELL, WRAPPER, 1100, None, &[HOST]);
-    fx.process(
-        HOST,
-        SHELL,
-        2000,
-        Some(&fx.host_file.clone()),
-        &[SUPERVISOR],
-    );
+    fx.host_process(HOST, SHELL, 2000, &[SUPERVISOR]);
     fx.process(
         SUPERVISOR,
         HOST,
@@ -329,10 +354,15 @@ fn peer_outside_the_host_subtree_does_not_bind() {
 #[test]
 fn ambiguous_host_is_an_error() {
     let fx = fixture();
-    fx.process(210, SHELL, 2100, Some(&fx.host_file.clone()), &[]);
+    // Two exact session commands that are not a fork pair.
+    fx.host_process(210, SHELL, 2100, &[]);
     fx.set_children(SHELL, &[HOST, 210]);
     let err = fx.resolve().unwrap_err();
     assert!(err.contains("ambiguous"), "{err}");
+    assert!(
+        err.contains("pid 200 (ppid 110, start 2000), pid 210 (ppid 110, start 2100)"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -597,30 +627,48 @@ fn a_supervisor_child_before_exec_is_pending() {
 }
 
 #[test]
-fn a_host_fork_before_exec_is_pending_and_a_third_host_is_an_error() {
+fn host_forks_before_exec_are_pending_until_one_host_remains() {
+    let fork = (PendingStage::Host, PendingReason::ForkBeforeExec);
+    // A direct child still running the host argv.
     let fx = fixture();
-    fx.process(270, HOST, 2700, Some(&fx.host_file.clone()), &[]);
+    fx.host_process(270, HOST, 2700, &[]);
     fx.set_children(HOST, &[SUPERVISOR, 270]);
-    assert_eq!(
-        pending(&fx),
-        (PendingStage::Host, PendingReason::ForkBeforeExec)
-    );
+    assert_eq!(pending(&fx), fork);
     // After exec the child runs the supervisor file and is not a host.
     link(&fx.supervisor_file.clone(), &fx.proc_root.join("270/exe"));
     assert_eq!(fx.bound().host.pid, HOST);
-    // Two host matches that are not parent and child.
+    // Two pre-exec children and a deeper descendant, all below the host.
     let fx = fixture();
-    fx.process(271, SUPERVISOR, 2710, Some(&fx.host_file.clone()), &[]);
-    fx.set_children(SUPERVISOR, &[PEER, 271]);
-    let err = fx.resolve().unwrap_err();
-    assert!(err.contains("ambiguous"), "{err}");
-    // Three host matches, even if a fork pair is among them.
+    fx.host_process(270, HOST, 2700, &[272]);
+    fx.host_process(271, HOST, 2710, &[]);
+    fx.host_process(272, 270, 2720, &[]);
+    fx.host_process(273, SUPERVISOR, 2730, &[]);
+    fx.set_children(HOST, &[SUPERVISOR, 270, 271]);
+    fx.set_children(SUPERVISOR, &[PEER, 273]);
+    assert_eq!(pending(&fx), fork);
+    // Each exec transition leaves the tree rooted at the host; the last
+    // one leaves a unique host. The supervisor's extra child goes away.
+    link(&fx.supervisor_file.clone(), &fx.proc_root.join("272/exe"));
+    link(&fx.supervisor_file.clone(), &fx.proc_root.join("271/exe"));
+    assert_eq!(pending(&fx), fork);
+    fs::remove_dir_all(fx.proc_root.join("273")).unwrap();
+    fx.set_children(SUPERVISOR, &[PEER]);
+    assert_eq!(pending(&fx), fork);
+    link(&fx.supervisor_file.clone(), &fx.proc_root.join("270/exe"));
+    assert_eq!(fx.bound().host.pid, HOST);
+}
+
+#[test]
+fn host_matches_with_separate_roots_are_an_error() {
+    // A sibling root beside a forking host is still ambiguous.
     let fx = fixture();
-    fx.process(270, HOST, 2700, Some(&fx.host_file.clone()), &[272]);
-    fx.process(272, 270, 2720, Some(&fx.host_file.clone()), &[]);
+    fx.host_process(270, HOST, 2700, &[]);
     fx.set_children(HOST, &[SUPERVISOR, 270]);
+    fx.host_process(210, SHELL, 2100, &[]);
+    fx.set_children(SHELL, &[HOST, 210]);
     let err = fx.resolve().unwrap_err();
     assert!(err.contains("3 examined descendants"), "{err}");
+    assert!(err.contains("pid 210 (ppid 110, start 2100)"), "{err}");
 }
 
 #[test]
@@ -666,6 +714,7 @@ fn the_three_prepared_files_must_differ() {
             WRAPPER,
             Executables {
                 host: &fx.host_file,
+                host_argv: &fx.host_argv,
                 supervisor: &fx.host_file,
                 peer: &fx.peer_file,
             },
@@ -715,4 +764,68 @@ fn recheck_holds_the_exact_supervised_position_and_executable() {
     fx.opaque(PEER);
     let err = fx.binder.recheck(&binding).unwrap_err();
     assert!(err.contains("no longer readable"), "{err}");
+}
+
+#[test]
+fn other_modes_of_the_host_file_are_not_hosts() {
+    let fx = fixture();
+    // The launcher's input guard beside the session, a launch check with
+    // its parser child, and the metadata broker under its own supervisor.
+    fx.host_mode(
+        105,
+        WRAPPER,
+        1050,
+        &["session", "input-guard", "--owner-pid=100"],
+        &[],
+    );
+    fx.host_mode(
+        106,
+        WRAPPER,
+        1060,
+        &["session", "check-launch", "--", "session", "run"],
+        &[107],
+    );
+    let mut parser: Vec<&str> = HOST_ARGS.to_vec();
+    parser.push("--validate-session-args");
+    fx.host_mode(107, 106, 1070, &parser, &[]);
+    fx.set_children(WRAPPER, &[SHELL, 105, 106]);
+    fx.process(252, HOST, 2520, Some(&fx.supervisor_file.clone()), &[253]);
+    fx.host_mode(253, 252, 2530, &["metadata-broker-files-serve"], &[]);
+    fx.set_children(HOST, &[SUPERVISOR, 252]);
+    let binding = fx.bound();
+    assert_eq!(binding.host.pid, HOST);
+    assert_eq!(binding.host_argv, fx.host_argv);
+    // A host-file process without a readable command line is not a host.
+    let fx = fixture();
+    fs::remove_file(fx.proc_root.join(format!("{HOST}/cmdline"))).unwrap();
+    assert_eq!(pending(&fx), (PendingStage::Host, PendingReason::NoMatch));
+}
+
+#[test]
+fn recheck_refuses_a_changed_host_argv() {
+    let fx = fixture();
+    let binding = fx.bound();
+    let mut changed = fx.host_argv.clone();
+    changed.push("--extra".into());
+    fx.set_cmdline(HOST, &changed);
+    let err = fx.binder.recheck(&binding).unwrap_err();
+    assert!(err.contains("argv changed"), "{err}");
+}
+
+#[test]
+fn the_prepared_host_argv_must_be_nonempty_without_nul() {
+    let fx = fixture();
+    for argv in [vec![], vec!["sophia\0x".to_string()]] {
+        let err = fx
+            .binder
+            .resolve(
+                WRAPPER,
+                Executables {
+                    host_argv: &argv,
+                    ..fx.exes()
+                },
+            )
+            .unwrap_err();
+        assert!(err.contains("without NUL"), "{err}");
+    }
 }

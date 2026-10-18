@@ -451,7 +451,12 @@ fn observation_cannot_start_before_launch_prerequisites_or_without_its_frozen_fl
     use xtask::shell_timing_native::{CampaignObserver, run, run_observed};
     struct MustNotStart;
     impl CampaignObserver for MustNotStart {
-        fn prepare(&mut self, _: &Request, _: &std::path::Path) -> Result<PathBuf, String> {
+        fn prepare(
+            &mut self,
+            _: &Request,
+            _: &[String],
+            _: &std::path::Path,
+        ) -> Result<PathBuf, String> {
             panic!("observer must not start before attended/source checks")
         }
         fn observe(&mut self, _: u32, _: &std::path::Path) -> Result<(), String> {

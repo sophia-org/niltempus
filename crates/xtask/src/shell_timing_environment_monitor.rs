@@ -47,6 +47,7 @@ fn monotonic_usec() -> Result<u64, String> {
 #[derive(Clone, Debug)]
 pub struct MonitorConfig {
     pub host_executable: PathBuf,
+    pub host_argv: Vec<String>,
     pub supervisor_executable: PathBuf,
     pub peer_executable: PathBuf,
     pub card: String,
@@ -182,6 +183,7 @@ pub struct BindingRecord {
     pub peer: IdentityRecord,
     pub chain: Vec<ChainRecord>,
     pub host_executable: ExecutableRecord,
+    pub host_argv: Vec<String>,
     pub supervisor_executable: ExecutableRecord,
     pub peer_executable: ExecutableRecord,
     pub unexamined: Vec<ChainRecord>,
@@ -233,6 +235,7 @@ impl From<&ProcessBinding> for BindingRecord {
                 })
                 .collect(),
             host_executable: executable(&binding.host_executable),
+            host_argv: binding.host_argv.clone(),
             supervisor_executable: executable(&binding.supervisor_executable),
             peer_executable: executable(&binding.peer_executable),
             unexamined: binding
@@ -458,6 +461,7 @@ impl EnvironmentMonitor {
                 wrapper_pid,
                 crate::shell_timing_process_binding::Executables {
                     host: &self.config.host_executable,
+                    host_argv: &self.config.host_argv,
                     supervisor: &self.config.supervisor_executable,
                     peer: &self.config.peer_executable,
                 },

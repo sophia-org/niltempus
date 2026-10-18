@@ -53,7 +53,7 @@ fn rejected_prepare_retains_failure_without_starting_any_owner() {
         let mut observer = LiveCampaignObserver::new(condition, "card0".into());
         assert_eq!(
             observer
-                .prepare(&disabled_request(), &scratch.0)
+                .prepare(&disabled_request(), &[], &scratch.0)
                 .unwrap_err(),
             "campaign requires environment observation"
         );

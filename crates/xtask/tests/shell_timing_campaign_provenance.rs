@@ -246,6 +246,7 @@ fn base_evidence() -> MonitorEvidence {
                 dev: 5,
                 ino: 6,
             },
+            host_argv: vec!["/fixture/sophia".into(), "session".into()],
             peer_executable: ExecutableRecord {
                 prepared_path: "/fixture/peer".into(),
                 observed_link: "/fixture/peer".into(),
@@ -436,6 +437,17 @@ fn bound_and_ended_after_evidence_qualify() {
 
 #[test]
 fn explicit_supervisor_and_initial_clock_reference_are_required() {
+    assert_eq!(
+        run(|evidence, _| {
+            evidence
+                .binding
+                .as_mut()
+                .unwrap()
+                .host_argv
+                .push("input-guard".into());
+        }),
+        "bound host arguments differ from the frozen plan"
+    );
     for parent in [100, 110, SUPERVISOR, PEER] {
         assert_eq!(
             run(|evidence, _| {
