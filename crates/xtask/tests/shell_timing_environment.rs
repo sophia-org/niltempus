@@ -44,7 +44,7 @@ fn status(pid: u32, cpus: &str) -> String {
     )
 }
 
-const OUTPUT: &str = "sophia_shell_environment_output schema=1 pid=4100 output=3 card=card1 connector=DP-2 width=2560 height=1440 refresh_millihz=120000 scale_milli=1000 vrr=off monotonic_usec=1500";
+const OUTPUT: &str = "sophia_shell_environment_output schema=1 pid=4100 output=3 card=card1 connector=DP-2 width=2560 height=1440 refresh_millihz=120000 timing_refresh_millihz=120014 scale_milli=1000 vrr=off monotonic_usec=1500";
 const RENDERER: &str = "sophia_shell_environment_renderer schema=1 pid=4100 output=3 card=card1 driver=amdgpu vendor=Mesa renderer=AMD%20Radeon%20RX%207900%20XTX%20%28radeonsi%2C%20navi31%29 version=4.6%20%28Core%20Profile%29%20Mesa%2025.2.4 monotonic_usec=1600";
 
 fn host_log() -> String {
@@ -283,8 +283,8 @@ fn every_output_and_renderer_fact_must_match_the_campaign() {
         ("width=2560", "width=1920"),
         ("height=1440", "height=1080"),
         (
-            "refresh_millihz=120000 scale",
-            "refresh_millihz=60000 scale",
+            "refresh_millihz=120000 timing",
+            "refresh_millihz=60000 timing",
         ),
         ("scale_milli=1000", "scale_milli=1250"),
         ("vrr=off", "vrr=on"),
@@ -560,4 +560,42 @@ fn refusals_name_their_reason() {
         &stat(PEER, "x", 0, 0, 4),
     );
     assert!(refusal(&policy, &expect()).contains("unknown scheduling policy"));
+}
+
+#[test]
+fn timing_refresh_is_required_nonzero_and_never_compared() {
+    // Reported beside the nominal rate.
+    let env = environment_record(&capture(), &expect()).unwrap();
+    assert_eq!(
+        (
+            env.output.value.refresh_millihz,
+            env.output.value.timing_refresh_millihz
+        ),
+        (120_000, 120_014)
+    );
+    // A 119.98 Hz programmed timing with a nominal 120 Hz mode matches a
+    // 120000 mHz campaign: only the nominal rate is compared.
+    let near = log_with(
+        "timing_refresh_millihz=120014",
+        "timing_refresh_millihz=119980",
+    );
+    let env = environment_record(&near, &expect()).unwrap();
+    assert_eq!(env.output.value.timing_refresh_millihz, 119_980);
+    assert_eq!(env.output.value.refresh_millihz, 120_000);
+    // A timing rate equal to the campaign's does not rescue a nominal mismatch.
+    let mismatch = log_with(
+        "refresh_millihz=120000 timing_refresh_millihz=120014",
+        "refresh_millihz=119000 timing_refresh_millihz=120000",
+    );
+    assert_eq!(
+        refusal(&mismatch, &expect()),
+        "output record refresh_millihz differs from the campaign"
+    );
+    // Missing or zero is refused.
+    let missing = log_with(" timing_refresh_millihz=120014", "");
+    assert!(refusal(&missing, &expect()).contains("missing fields"));
+    let zero = log_with("timing_refresh_millihz=120014", "timing_refresh_millihz=0");
+    assert!(refusal(&zero, &expect()).contains("timing_refresh_millihz is zero"));
+    let signed = log_with("timing_refresh_millihz=120014", "timing_refresh_millihz=-1");
+    assert!(environment_record(&signed, &expect()).is_err());
 }

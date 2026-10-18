@@ -14,15 +14,23 @@
 //! ```text
 //! sophia_shell_environment_output schema=1 pid=<host pid> output=<id> \
 //!     card=<cardN> connector=<name> width=<px> height=<px> \
-//!     refresh_millihz=<mHz> scale_milli=<scale x 1000> vrr=<on|off> \
-//!     monotonic_usec=<CLOCK_MONOTONIC>
+//!     refresh_millihz=<mHz> timing_refresh_millihz=<mHz> \
+//!     scale_milli=<scale x 1000> vrr=<on|off> monotonic_usec=<CLOCK_MONOTONIC>
 //! sophia_shell_environment_renderer schema=1 pid=<host pid> output=<id> \
 //!     card=<cardN> driver=<kernel driver> vendor=<pct> renderer=<pct> \
 //!     version=<pct> monotonic_usec=<CLOCK_MONOTONIC>
 //! ```
 //!
-//! The output record states the mode, scale and VRR state the host observed
-//! on that output, not the configured ones. The renderer record states the
+//! The output record states the mode, scale and VRR state the host read back
+//! for that output, not the configured ones. `refresh_millihz` is the nominal
+//! rate: the mode's whole-Hz refresh times 1000, the convention the native
+//! binding record and the campaign use, and the only rate compared with the
+//! campaign. `timing_refresh_millihz` is derived from the programmed mode
+//! timing (pixel clock over total pixels per frame). It is reported, must be
+//! nonzero, and is not compared; it is not a measured scanout rate.
+//! `scale_milli` is the compositor-applied scale; KMS has no scale. `vrr` is
+//! the committed CRTC `VRR_ENABLED` state; it does not show whether the sink
+//! runs adaptive sync. The renderer record states the
 //! active GL context the host process uses for that output and card: vendor,
 //! renderer and version are its `GL_VENDOR`, `GL_RENDERER` and `GL_VERSION`
 //! strings. `EGL_VERSION` names only the EGL API and is not accepted as an
@@ -194,7 +202,10 @@ pub struct Output {
     pub connector: String,
     pub width: u32,
     pub height: u32,
+    /// Nominal: whole-Hz refresh times 1000. Compared with the campaign.
     pub refresh_millihz: u64,
+    /// Derived from the programmed timing. Reported, never compared.
+    pub timing_refresh_millihz: u64,
     pub scale_milli: u32,
     pub vrr: Vrr,
     pub monotonic_usec: u64,
@@ -678,6 +689,7 @@ fn host_records(text: &str) -> Result<HostRecords, String> {
                     "width",
                     "height",
                     "refresh_millihz",
+                    "timing_refresh_millihz",
                     "scale_milli",
                     "vrr",
                     "monotonic_usec",
@@ -689,6 +701,10 @@ fn host_records(text: &str) -> Result<HostRecords, String> {
                 "off" => Vrr::Off,
                 other => return Err(format!("{record}: bad vrr {other}")),
             };
+            let timing_refresh_millihz = number(&f, "timing_refresh_millihz")?;
+            if timing_refresh_millihz == 0 {
+                return Err(format!("{record}: timing_refresh_millihz is zero"));
+            }
             let parsed = Output {
                 pid: number(&f, "pid")?,
                 output: number(&f, "output")?,
@@ -697,6 +713,7 @@ fn host_records(text: &str) -> Result<HostRecords, String> {
                 width: number(&f, "width")?,
                 height: number(&f, "height")?,
                 refresh_millihz: number(&f, "refresh_millihz")?,
+                timing_refresh_millihz,
                 scale_milli: number(&f, "scale_milli")?,
                 vrr,
                 monotonic_usec: number(&f, "monotonic_usec")?,
