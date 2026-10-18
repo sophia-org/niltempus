@@ -238,6 +238,9 @@ impl World {
     }
 
     fn plans(&self) -> BTreeMap<String, PathBuf> {
+        self.plans_with_probe(4_194_304)
+    }
+    fn plans_with_probe(&self, probe: u64) -> BTreeMap<String, PathBuf> {
         PLAN_IDS
             .iter()
             .enumerate()
@@ -246,6 +249,7 @@ impl World {
                     ipc: i % 3 == 0,
                     sealed: i % 3 == 2,
                     instrumentation: if i < 3 { "cpu-only" } else { "rust-global" },
+                    probe,
                     ..Shape::bytes()
                 };
                 (id.to_string(), self.plan(id, &shape))
@@ -292,6 +296,15 @@ fn native(g: u64, completed: u64) -> String {
 /// A bulk capture: journal, counters around every frame and
 /// kernel completions.
 fn capture(frames: u64, variant: usize, allocations: bool, cpu: u64) -> String {
+    capture_workload(frames, variant, allocations, cpu, true)
+}
+fn capture_workload(
+    frames: u64,
+    variant: usize,
+    allocations: bool,
+    cpu: u64,
+    bulk: bool,
+) -> String {
     let row = |process: &str, stage: &str, sequence: u64, time: u64, count: u64| {
         let pid = if process == "session" { 10 } else { 20 };
         format!(
@@ -313,8 +326,9 @@ fn capture(frames: u64, variant: usize, allocations: bool, cpu: u64) -> String {
         ""
     };
     let wire = if variant == 0 { "ipc" } else { "files" };
+    let probe = if bulk { 4_194_304 } else { 0 };
     let mut journal = format!(
-        "{{\"schema\":2,\"event\":\"start\",\"frames\":{frames},\"wire\":\"{wire}\"{source},\"probe_bytes\":4194304}}\n"
+        "{{\"schema\":2,\"event\":\"start\",\"frames\":{frames},\"wire\":\"{wire}\"{source},\"probe_bytes\":{probe}}}\n"
     );
     let mut counters = row("session", "start", 0, 1_000, 0);
     let mut host = String::new();
@@ -322,15 +336,17 @@ fn capture(frames: u64, variant: usize, allocations: bool, cpu: u64) -> String {
     for g in 1..=frames {
         counters += &row("peer", "frame_start", g, t, 2 * g);
         t += 2;
-        for row in [
-            serde_json::json!({"schema":2,"event":"upload_offer","upload":{"connection_epoch":1,"content_grant_epoch":2,"output":OUTPUT,"candidate_generation":g,"resource_id":1,"resource_generation":g,"width":1024,"height":1024,"total_bytes":4194304,"begin_usec":t}}),
-            serde_json::json!({"schema":2,"event":"upload_accepted","resource_id":1,"resource_generation":g,"accepted_usec":t+1}),
-            serde_json::json!({"schema":2,"event":"probe_released","resource_id":1,"resource_generation":g,"released_usec":t+2}),
-        ] {
-            journal += &(row.to_string() + "\n");
+        if bulk {
+            for row in [
+                serde_json::json!({"schema":2,"event":"upload_offer","upload":{"connection_epoch":1,"content_grant_epoch":2,"output":OUTPUT,"candidate_generation":g,"resource_id":1,"resource_generation":g,"width":1024,"height":1024,"total_bytes":4194304,"begin_usec":t}}),
+                serde_json::json!({"schema":2,"event":"upload_accepted","resource_id":1,"resource_generation":g,"accepted_usec":t+1}),
+                serde_json::json!({"schema":2,"event":"probe_released","resource_id":1,"resource_generation":g,"released_usec":t+2}),
+            ] {
+                journal += &(row.to_string() + "\n");
+            }
+            t += 3;
         }
-        t += 3;
-        let (id, generation) = ((g - 1) % 2 + 2, (g - 1) / 2 + 1);
+        let (id, generation) = ((g - 1) % 2 + if bulk { 2 } else { 1 }, (g - 1) / 2 + 1);
         journal += &format!(
             "{{\"schema\":2,\"event\":\"upload_offer\",\"upload\":{{\"connection_epoch\":1,\"content_grant_epoch\":2,\"output\":{OUTPUT},\"candidate_generation\":{g},\"resource_id\":{id},\"resource_generation\":{generation},\"width\":1920,\"height\":24,\"total_bytes\":184320,\"begin_usec\":{t}}}}}\n{{\"schema\":2,\"event\":\"upload_accepted\",\"resource_id\":{id},\"resource_generation\":{generation},\"accepted_usec\":{}}}\n",
             t + 1
@@ -475,6 +491,11 @@ fn retain(frozen: &Path, digest: &str, plans: &[xtask::shell_timing_calibration:
     let mut previous: Option<String> = None;
     for (i, plan_index) in [0, 1, 2, 2, 1, 0, 3, 4, 5].into_iter().enumerate() {
         let plan = &plans[plan_index];
+        let config: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&plan.request.artifacts["peer-config"].path).unwrap(),
+        )
+        .unwrap();
+        let bulk = config["probe_bytes"] == 4_194_304;
         let dir = frozen.join(ARM_IDS[i]);
         let stage = dir.join(RUN_DIRECTORY);
         std::fs::create_dir_all(&stage).unwrap();
@@ -489,7 +510,7 @@ fn retain(frozen: &Path, digest: &str, plans: &[xtask::shell_timing_calibration:
             ),
             (
                 "session.log",
-                capture(1000, plan_index % 3, i >= 6, 100 + i as u64).into_bytes(),
+                capture_workload(1000, plan_index % 3, i >= 6, 100 + i as u64, bulk).into_bytes(),
             ),
             ("environment.json", b"{}".to_vec()),
             ("environment-receipts.json", b"[]".to_vec()),
@@ -577,6 +598,8 @@ fn nine_retained_arms_rederive_and_compare_with_no_acceptance_verdict() {
     retain(&frozen, &digest, &plans);
     let result = report(&frozen, &digest, &supplied).unwrap();
     assert_eq!(result["arms"].as_array().unwrap().len(), 9);
+    assert_eq!(result["schema"], 1);
+    assert!(result.get("workload").is_none());
     let comparisons = result["summary"]["comparisons"].as_array().unwrap();
     assert_eq!(comparisons.len(), 9);
     for row in comparisons {
@@ -731,4 +754,72 @@ fn report_comparison_uses_cross_bounds_and_rejects_legacy_counters() {
         comparisons(&reports).unwrap_err(),
         "pilot requires schema-3 process and fault counters"
     );
+}
+
+#[test]
+fn panel_pilot_freezes_and_replays_all_nine_without_bulk_uploads() {
+    let w = World::new("panel-report");
+    let request = w.request(&w.plans_with_probe(0));
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&request).unwrap()).unwrap();
+    value["schema"] = serde_json::json!(2);
+    value["workload"] = serde_json::json!("panel");
+    std::fs::write(&request, value.to_string()).unwrap();
+    let frozen = w.root.join("panel-frozen");
+    let line = prepare(&request, &frozen).unwrap();
+    let digest = &line.split("sha256=").nth(1).unwrap()[..64];
+    let (descriptor, plans) = verify_descriptor(&frozen, digest).unwrap();
+    assert_eq!(descriptor.schema, 2);
+    assert_eq!(
+        descriptor.workload,
+        Some(xtask::shell_timing_campaign::Workload::Panel)
+    );
+    retain(&frozen, digest, &plans);
+    let result = report(&frozen, digest, &supplied).unwrap();
+    assert_eq!(result["schema"], 2);
+    assert_eq!(result["workload"], "panel");
+    assert_eq!(result["arms"].as_array().unwrap().len(), 9);
+    for arm in result["arms"].as_array().unwrap() {
+        assert_eq!(arm["cost"]["normalized"]["frame_count"], 1000);
+        assert_eq!(arm["cost"]["normalized"]["presentation_bytes"], 184_320_000);
+        assert_eq!(arm["cost"]["normalized"]["transfer_probe_bytes"], 0);
+    }
+    assert_eq!(
+        result["summary"]["comparisons"].as_array().unwrap().len(),
+        9
+    );
+}
+
+#[test]
+fn workload_must_be_explicit_versioned_and_match_the_plans() {
+    let w = World::new("workload-refusals");
+    let request = w.request(&w.plans_with_probe(0));
+    let original: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&request).unwrap()).unwrap();
+    for (index, (schema, workload)) in [
+        (1, Some("panel")),
+        (2, None),
+        (2, Some("bulk")),
+        (3, Some("panel")),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut value = original.clone();
+        value["schema"] = serde_json::json!(schema);
+        if let Some(workload) = workload {
+            value["workload"] = serde_json::json!(workload);
+        }
+        std::fs::write(&request, value.to_string()).unwrap();
+        let destination = w.root.join(format!("refusal-{index}"));
+        assert!(prepare(&request, &destination).is_err());
+        assert!(!destination.exists());
+    }
+    let request = w.request(&w.plans());
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&request).unwrap()).unwrap();
+    value["schema"] = serde_json::json!(2);
+    value["workload"] = serde_json::json!("panel");
+    std::fs::write(&request, value.to_string()).unwrap();
+    assert!(prepare(&request, &w.root.join("bulk-as-panel")).is_err());
 }

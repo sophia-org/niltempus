@@ -1,4 +1,4 @@
-//! Fixed nine-arm bulk diagnostic. This is not the acceptance campaign.
+//! Fixed nine-arm panel or bulk diagnostic. This is not the acceptance campaign.
 //! Plans, order and attempts are frozen; a failed arm cannot be replaced.
 //! Only the attended runner launches, and reports rederive retained raw data.
 use crate::shell_timing::ImageSource;
@@ -57,6 +57,8 @@ const PLAN_INDEX: [usize; 9] = [0, 1, 2, 2, 1, 0, 3, 4, 5];
 #[serde(deny_unknown_fields)]
 pub struct PilotRequest {
     pub schema: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workload: Option<Workload>,
     pub target: ProvenanceTarget,
     pub quiet_window: String,
     /// Exactly PLAN_IDS, each naming a prepared plan.
@@ -67,18 +69,44 @@ pub struct PilotRequest {
 #[serde(deny_unknown_fields)]
 pub struct Descriptor {
     pub schema: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workload: Option<Workload>,
     pub target: ProvenanceTarget,
     pub quiet_window: String,
     pub plans: Vec<PlanRef>,
     pub order: Vec<String>,
 }
 
-fn declaration(schema: u8, target: &ProvenanceTarget, quiet: &str) -> Result<(), String> {
-    target.validate()?;
-    if schema != 1 || quiet.trim().is_empty() || quiet.len() > 4096 {
-        return Err("cost pilot needs schema 1 and a bounded quiet-window declaration".into());
+fn declared_workload(schema: u8, workload: Option<Workload>) -> Result<Workload, String> {
+    match (schema, workload) {
+        (1, None) => Ok(Workload::Bulk),
+        (2, Some(value)) => Ok(value),
+        _ => Err("schema 1 is legacy bulk; schema 2 requires an explicit workload".into()),
     }
-    Ok(())
+}
+fn probe_bytes(workload: Workload) -> u64 {
+    match workload {
+        Workload::Panel => 0,
+        Workload::Bulk => 4_194_304,
+    }
+}
+fn workload_name(workload: Workload) -> &'static str {
+    match workload {
+        Workload::Panel => "panel",
+        Workload::Bulk => "bulk",
+    }
+}
+fn declaration(
+    schema: u8,
+    workload: Option<Workload>,
+    target: &ProvenanceTarget,
+    quiet: &str,
+) -> Result<Workload, String> {
+    target.validate()?;
+    if quiet.trim().is_empty() || quiet.len() > 4096 {
+        return Err("cost pilot needs a bounded quiet-window declaration".into());
+    }
+    declared_workload(schema, workload)
 }
 
 /// Sources and policy must match across instrumentation builds. Executable
@@ -106,6 +134,7 @@ fn identity(request: &Request, across_modes: bool) -> Result<Vec<u8>, String> {
 }
 
 pub fn check_plans(
+    workload: Workload,
     target: &ProvenanceTarget,
     inputs: Vec<(PlanRef, Vec<u8>)>,
 ) -> Result<Vec<VerifiedPlan>, String> {
@@ -145,15 +174,16 @@ pub fn check_plans(
             || request.instrumentation != mode
             || request.frames != 1000
             || request.runtime_ms != 60_000
-            || probe != 4_194_304
+            || probe != probe_bytes(workload)
             || config["height"].as_u64() != Some(24)
             || !request.environment_readback
             || request.mode_millihz != target.mode_millihz
             || request.output != target.output
         {
             return Err(format!(
-                "{} is not its declared 1000-frame bulk pilot arm",
-                reference.label
+                "{} is not its declared 1000-frame {} pilot arm",
+                reference.label,
+                workload_name(workload)
             ));
         }
         verify_sources(&request)?;
@@ -184,7 +214,12 @@ pub fn prepare(request: &Path, frozen: &Path) -> Result<String, String> {
     absolute(frozen)?;
     let request: PilotRequest =
         serde_json::from_slice(&read_bounded(request, CAP)?).map_err(|e| e.to_string())?;
-    declaration(request.schema, &request.target, &request.quiet_window)?;
+    let workload = declaration(
+        request.schema,
+        request.workload,
+        &request.target,
+        &request.quiet_window,
+    )?;
     if request.plans.len() != PLAN_IDS.len()
         || PLAN_IDS.iter().any(|id| !request.plans.contains_key(*id))
     {
@@ -206,9 +241,10 @@ pub fn prepare(request: &Path, frozen: &Path) -> Result<String, String> {
             ))
         })
         .collect::<Result<Vec<_>, String>>()?;
-    let plans = check_plans(&request.target, inputs)?;
+    let plans = check_plans(workload, &request.target, inputs)?;
     let descriptor = Descriptor {
-        schema: 1,
+        schema: request.schema,
+        workload: request.workload,
         target: request.target,
         quiet_window: request.quiet_window,
         plans: plans.into_iter().map(|p| p.reference).collect(),
@@ -218,7 +254,8 @@ pub fn prepare(request: &Path, frozen: &Path) -> Result<String, String> {
     create_private(frozen)?;
     write_new(&frozen.join(DESCRIPTOR), &bytes)?;
     Ok(format!(
-        "frozen bulk cost pilot {} sha256={} (diagnostic only)",
+        "frozen {} cost pilot {} sha256={} (diagnostic only)",
+        workload_name(workload),
         frozen.display(),
         crate::sha256(&bytes)
     ))
@@ -234,7 +271,7 @@ pub fn verify_descriptor(
         return Err("cost pilot descriptor digest differs".into());
     }
     let d: Descriptor = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-    declaration(d.schema, &d.target, &d.quiet_window)?;
+    let workload = declaration(d.schema, d.workload, &d.target, &d.quiet_window)?;
     if d.order != ARM_IDS {
         return Err("cost pilot order differs".into());
     }
@@ -243,16 +280,16 @@ pub fn verify_descriptor(
         .iter()
         .map(|p| Ok((p.clone(), read_bounded(&p.path, CAP)?)))
         .collect::<Result<Vec<_>, String>>()?;
-    let plans = check_plans(&d.target, inputs)?;
+    let plans = check_plans(workload, &d.target, inputs)?;
     Ok((d, plans))
 }
 
-fn projected(index: usize, plan: &VerifiedPlan) -> Arm {
+fn projected(index: usize, plan: &VerifiedPlan, workload: Workload) -> Arm {
     Arm {
         id: ARM_IDS[index].into(),
         condition: Condition::Idle,
         pair: if (3..6).contains(&index) { 2 } else { 1 },
-        workload: Workload::Bulk,
+        workload,
         measurement: if index < 6 {
             Measurement::CpuOnly
         } else {
@@ -404,7 +441,15 @@ fn difference(candidate: &Bounds, baseline: &Bounds) -> serde_json::Value {
         "upper": i128::from(candidate.upper) - i128::from(baseline.lower)})
 }
 
+/// Compatibility entry point for the original bulk-only pilot.
 pub fn comparisons(costs: &[Report]) -> Result<serde_json::Value, String> {
+    comparisons_for_workload(costs, Workload::Bulk)
+}
+
+pub fn comparisons_for_workload(
+    costs: &[Report],
+    workload: Workload,
+) -> Result<serde_json::Value, String> {
     if costs.len() != 9 {
         return Err("cost pilot needs all nine reports".into());
     }
@@ -427,7 +472,7 @@ pub fn comparisons(costs: &[Report]) -> Result<serde_json::Value, String> {
             if report.instrumentation != mode
                 || n.frame_count != 1000
                 || n.presentation_bytes != 1000 * 1920 * 24 * 4
-                || n.transfer_probe_bytes != 1000 * 4_194_304
+                || n.transfer_probe_bytes != 1000 * probe_bytes(workload)
                 || n.source
                     != if matches!(index, 2 | 3 | 8) {
                         ImageSource::Sealed
@@ -437,7 +482,10 @@ pub fn comparisons(costs: &[Report]) -> Result<serde_json::Value, String> {
                 || n.transferred_bytes != n.presentation_bytes + n.transfer_probe_bytes
                 || n.uploaded_bytes != n.transferred_bytes
             {
-                return Err("pilot reports differ from the declared bulk workload or mode".into());
+                return Err(format!(
+                    "pilot reports differ from the declared {} workload or mode",
+                    workload_name(workload)
+                ));
             }
             let bounds = if index < 6 {
                 n.cpu_ns_per_uploaded_mib
@@ -482,6 +530,7 @@ pub fn report(
     verify: EnvironmentCheck<'_>,
 ) -> Result<serde_json::Value, String> {
     let (descriptor, plans) = verify_descriptor(frozen, digest)?;
+    let workload = declared_workload(descriptor.schema, descriptor.workload)?;
     let mut previous = None;
     let mut costs = Vec::new();
     let mut arms = Vec::new();
@@ -494,7 +543,7 @@ pub fn report(
         let AttemptOutcome::Captured { evidence } = record.outcome else {
             unreachable!()
         };
-        let arm = projected(index, plan);
+        let arm = projected(index, plan, workload);
         let files = read_run(&frozen.join(&arm.id), &arm, &evidence)?;
         check_run_record(&plan.bytes, &files)?;
         let rebuilt = derive_arm_for_output(
@@ -530,10 +579,12 @@ pub fn report(
         );
         costs.push(cost.report);
     }
-    Ok(
-        serde_json::json!({"schema":1,"pilot_sha256":digest,"target":descriptor.target,"arms":arms,
-        "summary":comparisons(&costs)?,"scope":"t331 bulk diagnostic; not a campaign condition, B9 verdict or transport selection"}),
-    )
+    let mut report = serde_json::json!({"schema":descriptor.schema,"pilot_sha256":digest,"target":descriptor.target,"arms":arms,
+        "summary":comparisons_for_workload(&costs, workload)?,"scope":format!("t331 {} diagnostic; not a campaign condition, B9 verdict or transport selection",workload_name(workload))});
+    if descriptor.schema == 2 {
+        report["workload"] = serde_json::to_value(workload).map_err(|e| e.to_string())?;
+    }
+    Ok(report)
 }
 
 pub fn run(args: &[String]) -> Result<Vec<String>, String> {

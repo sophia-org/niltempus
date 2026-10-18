@@ -63,18 +63,28 @@ counts socket copies or memory bandwidth. `cpu_ns_per_frame` uses the same
 outward-rounded bounds as CPU per MiB. Existing byte-path gate calculations
 are unchanged. No report by itself establishes a paired performance pass.
 
-## t331 bulk cost diagnostic
+## t331 panel and bulk cost diagnostics
 
-The separate cost pilot freezes six prepared plans and nine attempts. It uses
-1000 changing frames with a 4 MiB transfer probe plus the 1920×24 panel per
+The separate cost pilot freezes six prepared plans and nine attempts.
+Schema 1 retains the original bulk-only contract. New schema-2 requests must
+include `"workload": "panel"` or `"workload": "bulk"`; the frozen descriptor
+and report retain that declaration. A panel pilot requires `probe_bytes: 0`
+in every plan and capture; a bulk pilot requires `probe_bytes: 4194304`.
+Neither kind can consume the other's captures. The arm names, ordering,
+measurement methods and environment checks below are identical for both.
+Panel-only follow-ups reuse the exact host and peer binaries from the bulk
+pilot, changing only the workload configuration and necessary plan bindings.
+
+The bulk workload uses 1000 changing frames with a 4 MiB transfer probe plus the 1920×24 panel per
 frame, no warmup exclusion, and a fresh 60-second Session for each arm.
 The selected target is DP-1 at 1920×1080, nominal 120000 mHz, scale 1, VRR off.
 Keep the governor, affinity and scheduling identical across all arms; the
 report refuses differences in retained environment fact values. CPU-only and
 Rust allocation-counting builds must come from the same signed sources.
 
-The request is `schema: 1`, `target` (the calibration target fields), a
-`quiet_window` declaration, and `plans`, an object mapping these six names to
+The request contains `schema`, `target` (the calibration target fields), a
+`quiet_window` declaration, and `plans`; schema 2 also requires `workload`.
+The plans object maps these six names to
 absolute prepared-plan paths: `cpu-ipc`, `cpu-bytes`, `cpu-sealed`, `alloc-ipc`,
 `alloc-bytes`, `alloc-sealed`. Profiles may differ only in their checked peer
 executable, configuration and transport fields. The host and peer binaries
