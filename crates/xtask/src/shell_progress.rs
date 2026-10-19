@@ -2,7 +2,9 @@
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-pub const NAMES: [&str; 30] = [
+/// Every counter in schema order. Schemas 1, 2 and 3 are the first 12, 20
+/// and 30 names; schema 4 appends the 17 service-ledger names.
+pub const NAMES: [&str; 47] = [
     "owner_pass",
     "component_pass",
     "server_poll_turn",
@@ -33,6 +35,23 @@ pub const NAMES: [&str; 30] = [
     "owner_other",
     "owner_unattributed",
     "owner_mixed",
+    "wire_owner_input",
+    "wire_standalone_input",
+    "wire_flush_useful",
+    "wire_flush_no_progress",
+    "wire_flush_failed",
+    "wire_flush_blocked",
+    "wire_flush_deferred",
+    "wire_no_publication",
+    "retry_wake_ready",
+    "retry_wake_error",
+    "retry_wake_pending",
+    "retry_write_ready",
+    "retry_write_error",
+    "retry_write_pending",
+    "retry_other_ready",
+    "retry_other_error",
+    "retry_other_pending",
 ];
 
 #[derive(Clone, Serialize)]
@@ -68,7 +87,8 @@ pub fn collect(text: &str) -> Result<Vec<Sample>, String> {
         let count = match fields.get("schema") {
             Some(&"1") => 12,
             Some(&"2") => 20,
-            Some(&"3") => NAMES.len(),
+            Some(&"3") => 30,
+            Some(&"4") => NAMES.len(),
             _ => return Err("unsupported progress schema".into()),
         };
         if fields.len() != count + 7 || fields.get("mode") != Some(&"progress") {
