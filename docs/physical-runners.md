@@ -95,6 +95,41 @@ absent comparator counters are not zero CPU. Use a matched sealed peer with the
 same frame sequencing for the first lifecycle diagnostic. This does not qualify
 the four-workload Wayland/XLibre bar, bulk, retained or bursty ring workloads.
 
+For the first matched panel diagnostic, use the same raw peer binary for sealed
+and ring sources, 2,120 frames, a 24-pixel panel and a 60-second hold/runtime.
+Use 120 warmup frames and 2,000 measured completion intervals. The ring has two
+slots; both sources settle one upload before demanding the next candidate, so
+this is not an overlap or ring-pipelining measurement. Freeze ABBA order
+(sealed, ring, ring, sealed), the same output profile and all artifact hashes.
+
+`capture-panel-diagnostic DESCRIPTOR SHA256 NEW_RUN_DIR` wraps the normal
+attended native run with the existing authenticated environment observer and
+`tools/cpu-window/cpuwin.py`. Its JSON descriptor contains `schema: 1`, `plan`,
+`python` and `sampler` artifacts (each absolute `path` and `sha256`), the existing
+`ProvenanceTarget` fields in `target`, `warmup: 120`, `counted: 2000`, and
+`interval_ms: 5`. Plans must set `environment_readback: true` and
+`instrumentation: "none"`. Ordinary source, artifact, PAM-helper, seated-console
+and runner-image checks still precede launch; this command adds no bypass.
+
+The sampler starts only after the observer binds the outer Session and peer
+PIDs, start times, ancestry, executable identities and clock namespaces. It
+retains `cpu-binding.json`, `cpu-window.jsonl`, `cpu-sampler.log` and the exact
+descriptor alongside the normal native capture. It excludes the supervisor,
+wrapper and other processes. Cleanup requests TERM and checks sampler exit;
+its own 180-second deadline bounds an orphan if the runner is killed.
+
+A successful capture is not yet a CPU report. Rejoin the raw native and peer
+evidence with the runner, take the all-head kernel completion of frames 120
+and 2,120, and convert their microseconds to nanoseconds for `cpuwin.py analyze`.
+Set expected PIDs/start times from `cpu-binding.json`. Never use journal receipt
+times as those anchors. The analyzer requires inner and outer sample brackets,
+stable process identity and bounded edge gaps; it reports tick uncertainty,
+sampling cadence and sampler overhead without interpolation. The peer's hold
+leaves room for an outer sample after the final completion. Follow
+`tools/cpu-window/RECIPE.md` for the analysis-plan shape and ABBA differences.
+These are per-run CPU attribution intervals, not performance guarantees or an
+external-reference acceptance decision.
+
 ### Historical cost pilot
 
 The separate cost pilot freezes six prepared plans and nine attempts.

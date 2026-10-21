@@ -439,6 +439,15 @@ impl EnvironmentMonitor {
         MonitorTurn::Ended
     }
 
+    /// Identity established by this monitor while its owners remain bound.
+    /// Diagnostic observers may sample these exact processes; discovery by
+    /// executable name or an inner namespace PID is not an equivalent binding.
+    pub fn live_binding(&self) -> Option<&ProcessBinding> {
+        matches!(self.state, State::Bound)
+            .then_some(self.binding.as_ref())
+            .flatten()
+    }
+
     /// One observation turn for the owned wrapper pid.
     pub fn observe(&mut self, wrapper_pid: u32) -> Result<MonitorTurn, String> {
         if let Some(pinned) = self.wrapper_pid {

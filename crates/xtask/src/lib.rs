@@ -43,6 +43,7 @@ pub mod shell_timing_environment_socket;
 pub mod shell_timing_load;
 pub mod shell_timing_load_qualify;
 pub mod shell_timing_native;
+pub mod shell_timing_panel_diagnostic;
 pub mod shell_timing_process_binding;
 pub mod verify_archives;
 

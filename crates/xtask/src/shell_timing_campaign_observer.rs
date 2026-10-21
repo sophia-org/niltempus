@@ -77,6 +77,10 @@ pub struct LiveCampaignObserver {
 }
 
 impl LiveCampaignObserver {
+    pub fn live_binding(&self) -> Option<&crate::shell_timing_process_binding::ProcessBinding> {
+        self.monitor.as_ref()?.live_binding()
+    }
+
     pub fn new(condition: Condition, card: String) -> Self {
         Self {
             condition,

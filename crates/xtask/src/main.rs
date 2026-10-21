@@ -21,6 +21,7 @@ const USAGE: &str = "usage:
   xtask dock verify HOST_LOG
   xtask shell-timing collect CLIENT_NDJSON EXPECTED_OFFERS
   xtask shell-timing metrics CLIENT_NDJSON EXPECTED_OFFERS
+  xtask shell-timing capture-panel-diagnostic DESCRIPTOR SHA256 NEW_RUN_DIR
   xtask shell-timing latency HOST_LOG CLIENT_NDJSON MODE_MILLIHZ EXPECTED_OFFERS
   xtask shell-timing cost-metrics HOST_COUNTERS PEER_COUNTERS CLIENT_NDJSON EXPECTED_OFFERS
   xtask shell-timing costs HOST_COUNTERS PEER_COUNTERS CLIENT_JSON
@@ -74,6 +75,9 @@ fn run(arguments: &[String]) -> Result<Vec<String>, String> {
         return xtask::nix_assembly::run(&arguments[1..]);
     }
     if arguments.first().map(String::as_str) == Some("shell-timing") {
+        if arguments.get(1).map(String::as_str) == Some("capture-panel-diagnostic") {
+            return xtask::shell_timing_panel_diagnostic::run(&arguments[1..]);
+        }
         if matches!(
             arguments.get(1).map(String::as_str),
             Some("run-cpu-profile" | "capture-cpu-profile" | "report-cpu-profile")
