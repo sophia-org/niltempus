@@ -90,6 +90,41 @@ fn wrong_frame_denominator_or_target_is_refused() {
 }
 
 #[test]
+fn longer_reference_window_requires_matching_frames_and_runtime() {
+    let (mut d, mut r) = fixture();
+    d.counted = 6000;
+    r.frames = 6120;
+    r.runtime_ms = 120_000;
+    assert!(policy(&d, &r, 0).is_err()); // Frozen schema 1 remains 2000/60 s.
+    d.schema = 2;
+    d.workload = Some(DrawWorkload::Retained);
+    r.reference_workload = d.workload;
+    d.raster = Some(Artifact {
+        path: "/not-executed/sophia-draw-raster".into(),
+        sha256: "a".repeat(64),
+    });
+    for source in [
+        ImageSource::OwnedRing,
+        ImageSource::Draw,
+        ImageSource::Mixed,
+    ] {
+        r.source = source;
+        policy(&d, &r, 0).unwrap();
+    }
+    r.runtime_ms = 60_000;
+    assert!(policy(&d, &r, 0).is_err());
+    r.runtime_ms = 120_000;
+    r.frames = 2120;
+    assert!(policy(&d, &r, 0).is_err());
+    r.frames = 6120;
+    d.counted = 4000;
+    r.frames = 4120;
+    assert!(policy(&d, &r, 0).is_err());
+    d.counted = usize::MAX;
+    assert!(policy(&d, &r, 0).is_err());
+}
+
+#[test]
 fn changed_descriptor_never_creates_a_stage_or_reaches_launch() {
     let root = std::env::temp_dir().join(format!("panel-diagnostic-{}", std::process::id()));
     std::fs::create_dir(&root).unwrap();

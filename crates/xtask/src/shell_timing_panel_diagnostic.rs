@@ -34,7 +34,7 @@ pub struct Descriptor {
     pub workload: Option<DrawWorkload>,
 }
 
-/// Deliberately narrow first diagnostic. Neither historical comparator
+/// Deliberately narrow diagnostic. Neither historical comparator
 /// instrumentation nor external-reference acceptance enters this path.
 pub fn policy(d: &Descriptor, r: &Request, probe: u64) -> Result<(), String> {
     d.target.validate()?;
@@ -59,12 +59,15 @@ pub fn policy(d: &Descriptor, r: &Request, probe: u64) -> Result<(), String> {
         }
         _ => false,
     };
+    // The longer schema-2 window reduces counter quantization after the
+    // inconclusive t341-vello-03 CPU gate. Frozen schema 1 stays unchanged.
+    let window_matches = (d.counted, r.runtime_ms) == (2000, 60_000)
+        || d.schema == 2 && (d.counted, r.runtime_ms) == (6000, 120_000);
     if !source_matches
+        || !window_matches
         || d.warmup != 120
-        || d.counted != 2000
         || d.interval_ms != 5
-        || r.frames != 2120
-        || r.runtime_ms != 60_000
+        || Some(r.frames) != d.warmup.checked_add(d.counted)
         || r.instrumentation != "none"
         || r.external_timing.is_some()
         || !r.environment_readback
@@ -73,7 +76,7 @@ pub fn policy(d: &Descriptor, r: &Request, probe: u64) -> Result<(), String> {
         || r.output != d.target.output
         || r.mode_millihz != d.target.mode_millihz
     {
-        return Err("panel diagnostic requires an observed fresh files arm, 120+2000 frames, 60 seconds and 5 ms sampling".into());
+        return Err("panel diagnostic requires an observed files arm, 120 warmup, 2000 intervals/60 seconds (or schema 2: 6000/120 seconds), and 5 ms sampling".into());
     }
     Ok(())
 }
