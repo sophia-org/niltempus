@@ -129,3 +129,22 @@ fn command_joins_explicit_files_without_a_checkout_and_refuses_missing_offers() 
     assert!(!invoke("2").status.success());
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn explicit_card_clock_evidence_is_validated_without_rewriting_legacy_samples() {
+    for value in ["0", "1"] {
+        let log = host().replace(
+            "missing_kernel_timestamp=0",
+            &format!("missing_kernel_timestamp=0 drm_timestamp_monotonic={value}"),
+        );
+        assert_eq!(
+            join(&log, &[offer(4)], 60000, 1).unwrap()[0].latency_usec,
+            50
+        );
+    }
+    let invalid = host().replace(
+        "missing_kernel_timestamp=0",
+        "missing_kernel_timestamp=0 drm_timestamp_monotonic=2",
+    );
+    assert!(join(&invalid, &[offer(4)], 60000, 1).is_err());
+}

@@ -131,6 +131,7 @@ pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String>
         retained_resources: None,
         interval_msec: None,
         ring: None,
+        draw: None,
         offers: Vec::with_capacity(expected),
         uploads: Vec::with_capacity(expected),
         permits: Vec::with_capacity(expected),

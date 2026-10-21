@@ -35,6 +35,7 @@ impl Fixture {
                 instrumentation: "none".into(),
                 environment_readback: false,
                 external_timing: None,
+                reference_workload: None,
             },
         };
         // These fixtures are hashed only. None may be executed by validation.
@@ -393,6 +394,7 @@ fn captured_source_cannot_be_substituted_after_preparation() {
     // This guard binds the parsed arm to the prepared request.
     let mut metrics = Journal {
         ring: None,
+        draw: None,
         schema: 2,
         wire: "files".into(),
         source: ImageSource::Bytes,
@@ -802,4 +804,102 @@ fn sealed_campaign_policy_signature_tracks_every_adapter_bound() {
             "{field}"
         );
     }
+}
+
+#[test]
+fn reference_config_validates_against_declared_workload() {
+    use xtask::shell_timing::{DrawWorkload, ImageSource};
+    let mut f = Fixture::new("reference", "files");
+    f.request.source = ImageSource::Mixed;
+    f.request.reference_workload = Some(DrawWorkload::Bursty);
+    f.put(
+        "peer-config",
+        br#"{"wire":"files","output":1,"frames":3,"source":"mixed","workload":"bursty"}"#,
+        false,
+    );
+    assert!(validate(&f.request).is_ok());
+    // Workload mismatch against the declared plan workload refuses.
+    f.put(
+        "peer-config",
+        br#"{"wire":"files","output":1,"frames":3,"source":"mixed","workload":"idle"}"#,
+        false,
+    );
+    assert!(validate(&f.request).is_err());
+    // Journal spelling ring resolves to plan spelling owned_ring.
+    f.request.source = ImageSource::OwnedRing;
+    f.request.reference_workload = Some(DrawWorkload::Retained);
+    f.put(
+        "peer-config",
+        br#"{"wire":"files","output":1,"frames":3,"source":"ring","workload":"retained"}"#,
+        false,
+    );
+    assert!(validate(&f.request).is_ok());
+    // Unknown keys refuse (the reference client refuses them too).
+    f.put(
+        "peer-config",
+        br#"{"wire":"files","output":1,"frames":3,"source":"ring","workload":"retained","height":24}"#,
+        false,
+    );
+    assert!(validate(&f.request).is_err());
+}
+
+#[test]
+fn reference_capture_uses_its_config_and_checks_source_cadence_and_hold() {
+    use xtask::shell_timing::{
+        DrawEvidence, DrawSource, DrawWorkload, ImageSource, Journal, Offer, WorkloadMode,
+    };
+    use xtask::shell_timing_native::validate_captured_config;
+    let mut f = Fixture::new("reference-capture", "files");
+    f.request.source = ImageSource::Mixed;
+    f.request.reference_workload = Some(DrawWorkload::Retained);
+    let config = br#"{"wire":"files","output":1,"frames":3,"source":"mixed","workload":"retained","hold_ms":1000}"#;
+    let mut metrics = Journal {
+        schema: 6,
+        wire: "files".into(),
+        source: ImageSource::Mixed,
+        probe_bytes: 0,
+        workload: WorkloadMode::Fresh,
+        retained_resources: None,
+        interval_msec: None,
+        ring: None,
+        draw: Some(DrawEvidence {
+            source: DrawSource::Mixed,
+            workload: DrawWorkload::Retained,
+            draw_ready_usec: Some(1),
+            ring_ready: None,
+            batches: vec![],
+            value_dues: vec![],
+            hold_usec: 1_000_000,
+        }),
+        offers: (1..=3)
+            .map(|generation| Offer {
+                connection_epoch: 1,
+                content_grant_epoch: 1,
+                output: 1,
+                candidate_generation: generation,
+                submitted_monotonic_usec: generation,
+                outcome: "presented".into(),
+            })
+            .collect(),
+        uploads: vec![],
+        permits: vec![],
+        terminal_usec: vec![],
+        placements: vec![],
+        live_resources: vec![],
+    };
+    validate_captured_config(&metrics, &f.request, config).unwrap();
+    metrics.draw.as_mut().unwrap().hold_usec -= 1;
+    assert!(validate_captured_config(&metrics, &f.request, config).is_err());
+    metrics.draw.as_mut().unwrap().hold_usec += 1;
+    metrics.draw.as_mut().unwrap().workload = DrawWorkload::Continuous;
+    assert!(validate_captured_config(&metrics, &f.request, config).is_err());
+    metrics.draw.as_mut().unwrap().workload = DrawWorkload::Retained;
+    metrics.source = ImageSource::Draw;
+    assert!(validate_captured_config(&metrics, &f.request, config).is_err());
+    metrics.source = ImageSource::Mixed;
+    metrics.offers[0].output = 2;
+    assert!(validate_captured_config(&metrics, &f.request, config).is_err());
+    metrics.offers[0].output = 1;
+    f.request.reference_workload = None;
+    assert!(validate_captured_config(&metrics, &f.request, config).is_err());
 }

@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use xtask::shell_timing::ImageSource;
+use xtask::shell_timing::{DrawWorkload, ImageSource};
 use xtask::shell_timing_campaign_provenance::ProvenanceTarget;
 use xtask::shell_timing_native::{Artifact, Request, Source};
 use xtask::shell_timing_panel_diagnostic::{Descriptor, policy, run};
@@ -16,6 +16,8 @@ fn fixture() -> (Descriptor, Request) {
     (
         Descriptor {
             schema: 1,
+            raster: None,
+            workload: None,
             plan: artifact(),
             python: artifact(),
             sampler: artifact(),
@@ -49,6 +51,7 @@ fn fixture() -> (Descriptor, Request) {
             instrumentation: "none".into(),
             environment_readback: true,
             external_timing: None,
+            reference_workload: None,
         },
     )
 }
@@ -103,4 +106,32 @@ fn changed_descriptor_never_creates_a_stage_or_reaches_launch() {
     assert_eq!(error, "diagnostic descriptor changed");
     assert!(!stage.exists());
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn draw_diagnostic_requires_helper_pin_and_explicit_updating_workload() {
+    let (mut d, mut r) = fixture();
+    d.schema = 2;
+    d.workload = Some(DrawWorkload::Retained);
+    r.reference_workload = d.workload;
+    r.source = ImageSource::Draw;
+    assert!(policy(&d, &r, 0).is_err());
+    d.raster = Some(Artifact {
+        path: "/not-executed/sophia-draw-raster".into(),
+        sha256: "a".repeat(64),
+    });
+    policy(&d, &r, 0).unwrap();
+    for arm in [ImageSource::Mixed, ImageSource::OwnedRing] {
+        r.source = arm;
+        policy(&d, &r, 0).unwrap();
+    }
+    r.source = ImageSource::Isb;
+    assert!(policy(&d, &r, 0).is_err());
+    r.source = ImageSource::Draw;
+    d.workload = Some(DrawWorkload::Idle);
+    assert!(policy(&d, &r, 0).is_err()); // Idle needs time anchors, not frame intervals.
+    d.schema = 1;
+    d.workload = None;
+    r.source = ImageSource::OwnedRing;
+    assert!(policy(&d, &r, 0).is_err()); // No silent alteration of frozen schema 1.
 }

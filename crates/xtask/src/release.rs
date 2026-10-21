@@ -302,6 +302,9 @@ pub struct Binaries {
     /// agent requires of the helper before it starts.
     pub factotum: PathBuf,
     pub pam_helper: PathBuf,
+    /// The draw raster helper, from the same Sophia build. Session starts it
+    /// from its own directory, so it sits beside `sophia`.
+    pub draw_raster: PathBuf,
 }
 
 /// Everything `assemble` needs, already verified.
@@ -421,6 +424,7 @@ fn lay_out(a: &Assembly) -> Result<(), String> {
         (&a.binaries.preflight, "active-session-preflight"),
         (&a.binaries.factotum, "sophia-factotum"),
         (&a.binaries.pam_helper, "sophia-factotum-pam"),
+        (&a.binaries.draw_raster, "sophia-draw-raster"),
         (&a.pair.hagia, "hagia"),
         (&a.pair.narthex, "narthex"),
     ] {

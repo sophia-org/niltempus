@@ -171,6 +171,7 @@ pub fn assembly(root: &Path) -> Assembly {
         "active-session-preflight",
         "sophia-factotum",
         "sophia-factotum-pam",
+        "sophia-draw-raster",
     ] {
         script(&bins.join(name), &format!("# fixture {name}\nexit 0"));
     }
@@ -192,6 +193,7 @@ pub fn assembly(root: &Path) -> Assembly {
             preflight: bins.join("active-session-preflight"),
             factotum: bins.join("sophia-factotum"),
             pam_helper: bins.join("sophia-factotum-pam"),
+            draw_raster: bins.join("sophia-draw-raster"),
         },
         pair: wm_pair(&root.join("wm-pair")),
         out: root.join("release"),

@@ -328,6 +328,7 @@ fn only_observed_cpu_plans_can_be_profiled() {
         instrumentation: "cpu-only".into(),
         environment_readback: true,
         external_timing: None,
+        reference_workload: None,
     };
     assert!(projected(&request, 0, "sha").is_ok());
     assert!(projected(&request, 4_194_304, "sha").is_ok());

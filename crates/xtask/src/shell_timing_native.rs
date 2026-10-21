@@ -1,5 +1,5 @@
 //! Bind a reviewed shell workload to exact files before any attended launch.
-use crate::shell_timing::{ImageSource, WorkloadMode};
+use crate::shell_timing::{DrawSource, DrawWorkload, ImageSource, WorkloadMode};
 use crate::{hex, output_file_native_run::process, sha256};
 use serde::{Deserialize, Serialize};
 mod external;
@@ -65,6 +65,13 @@ pub struct Request {
     /// Explicit new timing policies; absent preserves historical plans.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_timing: Option<ExternalTiming>,
+    /// Schema-6 reference-client workload; absent preserves every
+    /// historical peer-config plan. When present, the peer-config
+    /// artifact is the reference client's own config
+    /// (wire/output/frames/source/workload), validated by
+    /// `validate_reference` instead of the legacy `PeerConfig` shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_workload: Option<DrawWorkload>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -108,6 +115,48 @@ where
     D: serde::Deserializer<'de>,
 {
     u64::deserialize(deserializer).map(Some)
+}
+
+/// The reference client's own configuration, exactly as
+/// `shell_draw_reference` parses it: no other keys exist. `source`
+/// uses the journal spellings (draw/ring/mixed); `Request::source`
+/// uses the runner spellings (draw/owned_ring/mixed) and the two are
+/// reconciled only through `DrawSource::image_source`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReferenceConfig {
+    wire: String,
+    output: u64,
+    frames: usize,
+    source: DrawSource,
+    workload: DrawWorkload,
+    #[serde(default = "reference_hold_ms")]
+    hold_ms: u64,
+}
+
+fn reference_hold_ms() -> u64 {
+    5000
+}
+
+fn validate_reference(request: &Request, bytes: &[u8]) -> Result<(), String> {
+    let Some(workload) = request.reference_workload else {
+        return Err("reference validation requires a declared workload".into());
+    };
+    if request.external_timing.is_some() {
+        return Err("external timing is not defined for reference workloads".into());
+    }
+    let config: ReferenceConfig = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+    if config.wire != "files"
+        || config.output != request.output
+        || config.output == 0
+        || config.frames != request.frames
+        || config.workload != workload
+        || config.source.image_source() != request.source
+        || !(1000..=120_000).contains(&config.hold_ms)
+    {
+        return Err("reference configuration differs from the declared workload".into());
+    }
+    Ok(())
 }
 
 impl PeerConfig {
@@ -326,28 +375,43 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
             texts.insert(key.as_str(), bytes);
         }
     }
-    let peer: PeerConfig =
-        serde_json::from_slice(&texts["peer-config"]).map_err(|e| e.to_string())?;
-    peer.workload()?;
-    external::validate(request, &peer)?;
-    if peer.wire != request.wire
-        || peer.source != request.source
-        || (peer.source == ImageSource::Isb && request.wire != "files")
-        || match peer.source {
-            ImageSource::Isb => !peer.image.as_ref().is_some_and(ImageConfig::valid),
-            ImageSource::Bytes | ImageSource::OwnedRing => peer.image.is_some(),
+    if request.reference_workload.is_some() {
+        if request.wire != "files"
+            || !matches!(
+                request.source,
+                ImageSource::Draw | ImageSource::OwnedRing | ImageSource::Mixed
+            )
+        {
+            return Err("reference workloads require files wire and a draw/ring source".into());
         }
-        || (peer.source == ImageSource::OwnedRing
-            && (request.instrumentation != "none" || request.external_timing.is_some()))
-        || peer.output != request.output
-        || peer.frames != request.frames
-        || !(1..=512).contains(&peer.height)
-        || !matches!(peer.probe_bytes, 0 | 4194304)
-        || peer.hold_msec != request.runtime_ms
-    {
-        return Err(
-            "peer configuration differs from the declared workload or full-runtime hold".into(),
-        );
+        validate_reference(request, &texts["peer-config"])?;
+    } else {
+        let peer: PeerConfig =
+            serde_json::from_slice(&texts["peer-config"]).map_err(|e| e.to_string())?;
+        peer.workload()?;
+        external::validate(request, &peer)?;
+        if peer.wire != request.wire
+            || peer.source != request.source
+            || (peer.source == ImageSource::Isb && request.wire != "files")
+            || match peer.source {
+                ImageSource::Isb => !peer.image.as_ref().is_some_and(ImageConfig::valid),
+                ImageSource::Bytes | ImageSource::OwnedRing => peer.image.is_some(),
+                // Reference sources only validate through the
+                // reference_workload branch above.
+                ImageSource::Draw | ImageSource::Mixed => true,
+            }
+            || (peer.source == ImageSource::OwnedRing
+                && (request.instrumentation != "none" || request.external_timing.is_some()))
+            || peer.output != request.output
+            || peer.frames != request.frames
+            || !(1..=512).contains(&peer.height)
+            || !matches!(peer.probe_bytes, 0 | 4194304)
+            || peer.hold_msec != request.runtime_ms
+        {
+            return Err(
+                "peer configuration differs from the declared workload or full-runtime hold".into(),
+            );
+        }
     }
     document(&texts["core"])?;
     let profile = document(&texts["profile"])?;
@@ -545,6 +609,54 @@ pub fn validate_captured_workload(
                 .and_then(ExternalTiming::interval)
     {
         return Err("captured upload workload differs from prepared configuration".into());
+    }
+    Ok(())
+}
+
+/// Validate the collected journal against the same config used at preparation.
+/// Schema 6 never passes through the legacy image-peer config decoder.
+pub fn validate_captured_config(
+    metrics: &crate::shell_timing::Journal,
+    request: &Request,
+    config: &[u8],
+) -> Result<(), String> {
+    if let Some(workload) = request.reference_workload {
+        validate_reference(request, config)?;
+        let config: ReferenceConfig = serde_json::from_slice(config).map_err(|e| e.to_string())?;
+        let evidence = metrics
+            .draw
+            .as_ref()
+            .ok_or("reference journal lacks draw evidence")?;
+        if metrics.schema != 6
+            || metrics.wire != request.wire
+            || metrics.source != request.source
+            || evidence.source.image_source() != request.source
+            || evidence.workload != workload
+            || evidence.hold_usec < config.hold_ms * 1000
+            || metrics.offers.len() != request.frames
+            || metrics
+                .offers
+                .iter()
+                .any(|offer| offer.output != request.output)
+        {
+            return Err("captured reference workload differs from prepared configuration".into());
+        }
+        return Ok(());
+    }
+    if metrics.draw.is_some() {
+        return Err("reference journal supplied for a legacy image plan".into());
+    }
+    let peer: PeerConfig = serde_json::from_slice(config).map_err(|e| e.to_string())?;
+    let (workload, retained) = peer.workload()?;
+    validate_captured_workload(metrics, request, peer.probe_bytes, workload, retained)?;
+    if metrics.ring.as_ref().map(|ring| ring.registration.slots) != peer.ring_slots
+        || metrics.source == ImageSource::OwnedRing
+            && metrics
+                .uploads
+                .iter()
+                .any(|copy| u64::from(copy.upload.height) != peer.height)
+    {
+        return Err("captured ring geometry differs from prepared configuration".into());
     }
     Ok(())
 }
@@ -837,28 +949,11 @@ fn run_inner(
             write(&stage.join("client.ndjson"), client.as_bytes())?;
             write(&stage.join("native.log"), host.as_bytes())?;
             let metrics = crate::shell_timing::collect_metrics(&client, plan.request.frames)?;
-            let peer: PeerConfig = serde_json::from_slice(&bounded(
-                &plan.request.artifacts["peer-config"].path,
-                MAX_INPUT,
-            )?)
-            .map_err(|e| e.to_string())?;
-            let (workload, retained) = peer.workload()?;
-            validate_captured_workload(
+            validate_captured_config(
                 &metrics,
                 &plan.request,
-                peer.probe_bytes,
-                workload,
-                retained,
+                &bounded(&plan.request.artifacts["peer-config"].path, MAX_INPUT)?,
             )?;
-            if metrics.ring.as_ref().map(|ring| ring.registration.slots) != peer.ring_slots
-                || metrics.source == ImageSource::OwnedRing
-                    && metrics
-                        .uploads
-                        .iter()
-                        .any(|copy| u64::from(copy.upload.height) != peer.height)
-            {
-                return Err("captured ring geometry differs from prepared configuration".into());
-            }
             let offers = &metrics.offers;
             let samples = crate::shell_timing::join(
                 &host,

@@ -829,3 +829,38 @@ fn the_prepared_host_argv_must_be_nonempty_without_nul() {
         assert!(err.contains("without NUL"), "{err}");
     }
 }
+
+#[test]
+fn raster_helper_on_another_host_thread_has_its_own_exact_binding() {
+    let fx = fixture();
+    let raster_file = fx.root.join("bin/sophia-draw-raster");
+    write(&raster_file, "raster fixture");
+    // The helper supervisor is spawned by a Session worker, not its main task.
+    write(
+        &fx.proc_root.join(format!("{HOST}/task/201/children")),
+        "260",
+    );
+    fx.process(260, HOST, 2600, Some(&fx.supervisor_file), &[310]);
+    fx.process(310, 260, 3100, Some(&raster_file), &[]);
+    let client = fx.bound();
+    let exes = || Executables {
+        peer: &raster_file,
+        ..fx.exes()
+    };
+    let ResolveOutcome::Bound(helper) = fx.binder.resolve(WRAPPER, exes()).unwrap() else {
+        panic!("helper did not bind through its spawning task");
+    };
+    assert_eq!(client.host, helper.host);
+    assert_eq!(client.peer.pid, PEER);
+    assert_eq!(helper.peer.pid, 310);
+    assert_eq!(fx.binder.recheck(&helper).unwrap(), BindingRecheck::Bound);
+    // A second helper cannot silently disappear from the CPU scope.
+    write(
+        &fx.proc_root.join(format!("{HOST}/task/201/children")),
+        "260 261",
+    );
+    fx.process(261, HOST, 2610, Some(&fx.supervisor_file), &[311]);
+    fx.process(311, 261, 3110, Some(&raster_file), &[]);
+    assert!(fx.binder.resolve(WRAPPER, exes()).is_err());
+    assert_eq!(fx.bound().peer.pid, PEER);
+}

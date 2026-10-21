@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 mod journal;
 mod latency;
 pub use journal::{
-    CandidatePlacements, Journal, LiveResource, Placement, collect, collect_metrics,
+    BatchTiming, CandidatePlacements, DrawEvidence, DrawSource, DrawWorkload, Journal,
+    LiveResource, Placement, RingReady6, ValueDueTiming, collect, collect_metrics,
 };
 pub use latency::{
     BoundReached, Distribution, Measures, TRANSFER_BOUND_USEC, Window, WindowedLatency,
@@ -26,6 +27,10 @@ pub enum ImageSource {
     Isb,
     /// Experimental D4 copy from reusable producer slots.
     OwnedRing,
+    /// r11 server-rasterized draw batches (schema 6).
+    Draw,
+    /// r11 draw and owned-ring uploads on one connection (schema 6).
+    Mixed,
 }
 
 /// Peer workload declared in peer-config and echoed in schema 3 journals.
@@ -246,19 +251,30 @@ pub fn join(
                 group.insert(binding.head, binding);
             }
         } else {
-            let f = fields(
-                line,
-                &[
-                    "schema",
-                    "output",
-                    "native_owner",
-                    "native_frame",
-                    "heads",
-                    "monotonic_usec",
-                    "timestamp_source",
-                    "missing_kernel_timestamp",
-                ],
-            )?;
+            let mut keys = vec![
+                "schema",
+                "output",
+                "native_owner",
+                "native_frame",
+                "heads",
+                "monotonic_usec",
+                "timestamp_source",
+                "missing_kernel_timestamp",
+            ];
+            // Historical journals predate the explicit card capability. New
+            // diagnostics require it in their independent analysis step.
+            if line
+                .split_whitespace()
+                .any(|word| word.starts_with("drm_timestamp_monotonic="))
+            {
+                keys.push("drm_timestamp_monotonic");
+            }
+            let f = fields(line, &keys)?;
+            if f.get("drm_timestamp_monotonic")
+                .is_some_and(|v| !matches!(*v, "0" | "1"))
+            {
+                return Err("invalid DRM timestamp capability".into());
+            }
             if !matches!(f["timestamp_source"], "kernel" | "observation_fallback")
                 || !matches!(f["missing_kernel_timestamp"], "0" | "1")
             {

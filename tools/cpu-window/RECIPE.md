@@ -152,3 +152,42 @@ Option: summing per-thread `/proc/PID/task/*/schedstat` gives nanoseconds, but i
 - **Journal join.** The ring journal is schema 5, which is not external rev 5, and account.py's journal join does not apply. Anchors come from the observer, not from journal parsing.
 - **Children.** cutime is ignored.
 - **PIDs outside the named set.** Engine or renderer processes, if separate, need their own `--pid`.
+
+## t341 schema-2 draw diagnostic
+
+Use the same pinned Session, reference client and sibling raster helper for
+ring/draw comparisons, identical target geometry, profile policy, cadence and
+frame count. The updating workloads use 120 warmup + 2000 completion intervals.
+The client must retain its connection, grant and final resources for the
+configured post-terminal hold (default 5 seconds). Session lifetime alone does
+not keep the helper alive. Idle windows need separate time-based analysis.
+
+`capture-panel-diagnostic` schema 2 binds Session and client independently of the
+sampler. Draw/mixed arms also bind the one raster helper beneath that Session;
+ring refuses an observed helper. Every capture records helper identity and alive
+observations in `cpu-raster-binding.json` and `cpu-raster-lifetime.json`.
+
+Build the analysis plan from the retained evidence, then run the existing analyzer:
+
+```
+python3 -I cpuplan.py --out plan.json --baseline ring \
+  --run a1 ring /absolute/a1/run --run b1 draw /absolute/b1/run \
+  --run b2 draw /absolute/b2/run --run a2 ring /absolute/a2/run
+python3 -I cpuwin.py analyze plan.json --json result.json
+```
+
+The builder requires independent pid/starttime bindings, matching time namespaces,
+exact kernel completion anchors with `drm_timestamp_monotonic=1`, and helper alive
+observations spanning the entire window. It refuses old schema-1 captures. The
+analyzer independently checks sampled identities, counter monotonicity and window
+coverage. A process surviving as a zombie cannot satisfy the helper lifetime
+proof. Source/binary pins and target/profile equivalence remain recipe checks;
+this plan builder is not a production acceptance verdict.
+
+CPU includes each named thread group (including exited threads and in-process
+kernel work). The draw helper is a separate row; Session's worker threads remain
+in Session's row. Supervisor wrappers, other processes, GPU work, interrupts,
+and observer/proc-walk overhead are outside the sum. The sampler reports its own
+overhead. Ring's no-helper observation is sampled, and multiple live matching
+helpers refuse the diagnostic. Helper replacement conservatively refuses the
+whole capture, including a replacement after the measurement window.

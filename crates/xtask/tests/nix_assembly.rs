@@ -36,6 +36,7 @@ fn arguments(a: &Assembly, out: &Path) -> Vec<String> {
         ("sophia", path(&a.binaries.sophia)),
         ("factotum", path(&a.binaries.factotum)),
         ("pam-helper", path(&a.binaries.pam_helper)),
+        ("draw-raster", path(&a.binaries.draw_raster)),
         ("xtask", path(&a.binaries.xtask)),
         ("preflight", path(&a.binaries.preflight)),
         ("hagia", path(&a.pair.hagia)),
@@ -97,6 +98,10 @@ fn a_nix_assembly_equals_the_direct_assembly() {
     let (nix, packaged) = (contents(&nix_out), contents(&assembly.out));
     assert!(nix.contains_key("manifest") && nix.contains_key("SHA256SUMS"));
     assert_eq!(nix, packaged);
+    // Session starts the raster helper from its own directory.
+    assert_eq!(nix["target/release/sophia-draw-raster"].1, 0o755);
+    let sums = String::from_utf8(nix["SHA256SUMS"].0.clone()).unwrap();
+    assert!(sums.contains("  target/release/sophia-draw-raster\n"));
 }
 
 #[test]
@@ -140,6 +145,14 @@ fn malformed_inputs_are_refused_before_any_output() {
             "--built-at-utc must be",
         ),
         (valid[1..].to_vec(), "--out is required"),
+        (
+            valid
+                .iter()
+                .filter(|arg| !arg.starts_with("--draw-raster="))
+                .cloned()
+                .collect(),
+            "--draw-raster is required",
+        ),
         (
             valid
                 .iter()

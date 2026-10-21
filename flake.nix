@@ -174,6 +174,7 @@
           --sophia=${sophiaPackage}/bin/sophia \
           --factotum=${sophiaPackage}/bin/sophia-factotum \
           --pam-helper=${sophiaPackage}/bin/sophia-factotum-pam \
+          --draw-raster=${sophiaPackage}/bin/sophia-draw-raster \
           --xtask=${xtask}/bin/xtask --preflight=${xtask}/bin/active-session-preflight \
           --hagia=$hagia --hagia-commit=${revision hagia} \
           --narthex=${narthexPackage}/bin/narthex --narthex-commit=${revision narthex} \

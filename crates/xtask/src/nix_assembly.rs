@@ -6,8 +6,8 @@
 //!
 //! cargo xtask assemble-nix --out=/ABS --built-at-utc=YYYY-MM-DDTHH:MM:SSZ \
 //!   --release-id=ID --repo=/ABS --integration-commit=SHA --sophia-tree=/ABS \
-//!   --sophia-rev=SHA --sophia=/ABS --factotum=/ABS --pam-helper=/ABS --xtask=/ABS \
-//!   --preflight=/ABS --hagia=/ABS --hagia-commit=SHA --narthex=/ABS \
+//!   --sophia-rev=SHA --sophia=/ABS --factotum=/ABS --pam-helper=/ABS \
+//!   --draw-raster=/ABS --xtask=/ABS --preflight=/ABS --hagia=/ABS --hagia-commit=SHA --narthex=/ABS \
 //!   --narthex-commit=SHA --profile=/ABS --c-sdk=/ABS --c-sdk-rev=SHA \
 //!   [--verifier-interpreter=/ABS] [--file=DEST=/ABS ...]
 //!
@@ -34,11 +34,11 @@ use crate::{hex, read, sha256};
 
 const USAGE: &str = "usage: cargo xtask assemble-nix --out=/ABS --built-at-utc=YYYY-MM-DDTHH:MM:SSZ \
 --release-id=ID --repo=/ABS --integration-commit=SHA --sophia-tree=/ABS --sophia-rev=SHA \
---sophia=/ABS --factotum=/ABS --pam-helper=/ABS --xtask=/ABS --preflight=/ABS --hagia=/ABS \
---hagia-commit=SHA --narthex=/ABS --narthex-commit=SHA --profile=/ABS --c-sdk=/ABS \
+--sophia=/ABS --factotum=/ABS --pam-helper=/ABS --draw-raster=/ABS --xtask=/ABS \
+--preflight=/ABS --hagia=/ABS --hagia-commit=SHA --narthex=/ABS --narthex-commit=SHA --profile=/ABS --c-sdk=/ABS \
 --c-sdk-rev=SHA [--verifier-interpreter=/ABS] [--file=DEST=/ABS ...]";
 
-const KEYS: [&str; 20] = [
+const KEYS: [&str; 21] = [
     "out",
     "built-at-utc",
     "repo",
@@ -48,6 +48,7 @@ const KEYS: [&str; 20] = [
     "sophia",
     "factotum",
     "pam-helper",
+    "draw-raster",
     "xtask",
     "preflight",
     "hagia",
@@ -179,6 +180,7 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
             preflight: file("preflight")?,
             factotum: file("factotum")?,
             pam_helper: file("pam-helper")?,
+            draw_raster: file("draw-raster")?,
         },
         pair,
         out,

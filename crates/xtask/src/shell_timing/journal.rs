@@ -2,7 +2,9 @@
 use super::{ImageSource, MAX_BYTES, MAX_RECORDS, Offer, WorkloadMode};
 use serde::{Deserialize, Serialize};
 
+mod draw;
 mod ring;
+pub use draw::{BatchTiming, DrawEvidence, DrawSource, DrawWorkload, RingReady6, ValueDueTiming};
 pub use ring::RingEvidence;
 
 #[derive(Deserialize, Serialize)]
@@ -82,6 +84,8 @@ pub struct Journal {
     pub interval_msec: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ring: Option<RingEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub draw: Option<DrawEvidence>,
     pub offers: Vec<Offer>,
     pub uploads: Vec<AcceptedUpload>,
     pub permits: Vec<PermitTiming>,
@@ -195,12 +199,14 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
     struct Schema {
         schema: u64,
     }
-    if serde_json::from_str::<Schema>(start)
+    let start_schema = serde_json::from_str::<Schema>(start)
         .map_err(|e| e.to_string())?
-        .schema
-        == 5
-    {
+        .schema;
+    if start_schema == 5 {
         return ring::collect(journal, expected);
+    }
+    if start_schema == 6 {
+        return draw::collect(journal, expected);
     }
     let schema = serde_json::from_str::<Record>(start)
         .map_err(|e| e.to_string())?
@@ -613,6 +619,7 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
         retained_resources: retained,
         interval_msec,
         ring: None,
+        draw: None,
         offers,
         uploads,
         permits,

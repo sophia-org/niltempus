@@ -223,6 +223,7 @@ fn request(arm: &Arm) -> xtask::shell_timing_native::Request {
         instrumentation: "none".into(),
         environment_readback: true,
         external_timing: None,
+        reference_workload: None,
     }
 }
 
