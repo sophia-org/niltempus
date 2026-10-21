@@ -114,11 +114,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792550433,
-        "narHash": "sha256-Cdt5fXi9jxmpUCy159//9u5LqGBfcZsYmzkIaFKZMDo=",
+        "lastModified": 1792551251,
+        "narHash": "sha256-Bt03aiBZjipriVIW26rt/kWPuDcpsKYHhgctQbtNiDc=",
         "owner": "sophia-org",
         "repo": "kleis",
-        "rev": "574d4004129fdc7ea384254c243e51516974a69b",
+        "rev": "0907d29e2b82b686544a0bccf3a3461222b647b1",
         "type": "github"
       },
       "original": {

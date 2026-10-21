@@ -210,3 +210,23 @@ visible rain and lock/unlock still require attended acceptance.
 
 Evidence: `~/.local/state/sophia/development-evidence/kleis-matrix-20261020/`.
 The c43 comparison remains on hold until the live desktop is accepted.
+
+## Kleis per-output frame progress, 2026-10-20
+
+The operator confirmed lock/unlock and rain in
+`niltempus-9cceca44630d8a69d64f`, then reported that DP-1 stopped animating
+while DP-2 continued. That release is not an accepted rain baseline.
+
+Kleis `0907d29` settles submission receipts before each visible protocol
+event. A receipt decoded alongside a permit or presentation outcome could
+otherwise leave the presenter in its previous state, causing it to discard
+the event and stall that output. A receipt can also be exposed by consuming
+an earlier event, so settling only once per batch is insufficient.
+
+The regression tests exercise continuing animation on two outputs with
+coalesced receipts and an earlier visible event. Removing the fix fails the
+single-output case; settling only once per batch fails the two-output case.
+The full test suite and formatting checks pass. Sustained rain on both
+physical outputs still needs an attended check. Session evidence also shows
+Lom restarting while locked; that separate issue remains unresolved, and c43
+remains on hold.
