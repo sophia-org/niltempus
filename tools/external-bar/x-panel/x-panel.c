@@ -64,6 +64,7 @@ struct shmbuf {
     Pixmap pixmap; /* present mode only */
     size_t len;
     int busy;      /* 1 while the server may still read it */
+    uint32_t serial;
 };
 
 struct ctx {
@@ -154,12 +155,19 @@ static void fresh_release(struct ctx *c, struct fresh *f) {
 static int handle(struct ctx *c, xcb_generic_event_t *ev) {
     uint8_t type = ev->response_type & 0x7f;
     uint64_t now = mono_ns();
+    if (type == 0) {
+        xcb_generic_error_t *error = (xcb_generic_error_t *)ev;
+        fprintf(stderr, "X error %u, request %u.%u, sequence %u\n",
+                error->error_code, error->major_code, error->minor_code, error->sequence);
+        die("asynchronous X request failed");
+    }
     if (type == XCB_GE_GENERIC) {
         xcb_ge_generic_event_t *ge = (xcb_ge_generic_event_t *)ev;
         if (ge->extension != c->present_opcode) return 0;
         if (ge->event_type == XCB_PRESENT_EVENT_COMPLETE_NOTIFY) {
             xcb_present_complete_notify_event_t *cn =
                 (xcb_present_complete_notify_event_t *)ev;
+            if (cn->window != c->win) die("Present completion for wrong window");
             if (cn->kind == XCB_PRESENT_COMPLETE_KIND_NOTIFY_MSC &&
                 cn->serial == c->pending_msc_serial) {
                 c->msc_seen = 1;
@@ -168,6 +176,13 @@ static int handle(struct ctx *c, xcb_generic_event_t *ev) {
             }
             if (cn->kind == XCB_PRESENT_COMPLETE_KIND_PIXMAP &&
                 cn->serial == c->pending_serial) {
+                if (cn->mode == XCB_PRESENT_COMPLETE_MODE_SKIP)
+                    die("Present skipped a frame; no delivered-frame row");
+                if (cn->mode != XCB_PRESENT_COMPLETE_MODE_COPY &&
+                    cn->mode != XCB_PRESENT_COMPLETE_MODE_FLIP &&
+                    cn->mode != XCB_PRESENT_COMPLETE_MODE_SUBOPTIMAL_COPY)
+                    die("unknown Present completion mode");
+                if (cn->ust > UINT64_MAX / 1000ull) die("Present timestamp overflow");
                 c->complete_seen = 1;
                 c->complete_ust_ns = cn->ust * 1000ull;
                 c->complete_recv_ns = now;
@@ -178,7 +193,8 @@ static int handle(struct ctx *c, xcb_generic_event_t *ev) {
             xcb_present_idle_notify_event_t *in =
                 (xcb_present_idle_notify_event_t *)ev;
             for (unsigned i = 0; i < c->nbufs; i++)
-                if (c->bufs[i].pixmap == in->pixmap) c->bufs[i].busy = 0;
+                if (in->window == c->win && c->bufs[i].pixmap == in->pixmap &&
+                    c->bufs[i].serial == in->serial) c->bufs[i].busy = 0;
             return 1;
         }
         return 0;
@@ -414,10 +430,11 @@ int main(int argc, char **argv) {
             c.pending_serial = f;
             c.complete_seen = 0;
             b->busy = 1;
+            b->serial = f;
+            submit = mono_ns();
             xcb_present_pixmap(c.conn, c.win, b->pixmap, f, 0, 0, 0, 0, 0, 0, 0,
                                XCB_PRESENT_OPTION_NONE, 0, 0, 0, 0, NULL);
             xcb_flush(c.conn);
-            submit = mono_ns();
             pump_until(&c, &c.complete_seen);
             if (c.complete_ust_ns >= submit && c.complete_ust_ns <= c.complete_recv_ns) {
                 presented = (int64_t)c.complete_ust_ns;
@@ -431,9 +448,9 @@ int main(int argc, char **argv) {
         } else {
             c.shm_completion_seen = 0;
             b->busy = 1;
+            submit = mono_ns();
             XShmPutImage(c.dpy, c.win, c.gc, b->image, 0, 0, 0, 0, width, height, True);
             XFlush(c.dpy);
-            submit = mono_ns();
             pump_until(&c, &c.shm_completion_seen);
             presented = (int64_t)c.complete_recv_ns;
             source = "shm_completion";

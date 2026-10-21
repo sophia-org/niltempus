@@ -19,4 +19,7 @@ $(BUILD)/x-panel: x-panel/x-panel.c $(COMMON) | $(BUILD)
 $(BUILD)/fill-parity: test/fill_parity.c $(COMMON) | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ $< common/fill.c
 
+$(BUILD)/x-events: test/x_events.c x-panel/x-panel.c $(COMMON) | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ $< common/fill.c $$(pkg-config --cflags --libs $(X_PKGS))
+
 .PHONY: all

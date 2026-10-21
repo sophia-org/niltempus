@@ -169,4 +169,35 @@ malformed/noncontiguous rows, mixed lifecycles, reversed timestamps, changed or
 empty/duplicate PID sets, changed tick rates and decreasing counters. Quantile
 sample counts stay counts rather than being divided by 1000. These controls
 prevent several misleading reports but are not the unfinished gate analyzer.
-No X server smoke, seated reference pair, x13 run or GPU parity is claimed.
+No XLibre server smoke, seated reference pair, x13 run or GPU parity is claimed.
+
+### X protocol controls and isolated X.Org smoke — October 21
+
+The integration client now refuses Present Skip/unknown modes, wrong-window
+completion, overflowing UST conversion and asynchronous X request errors. None
+can become a delivered-frame row. IdleNotify must match both pixmap and serial
+before a buffer can be reused. Submit timestamps precede request submission,
+so a fast completion is not misclassified merely because flush returned later.
+`make -C tools/external-bar build/x-events` and `build/x-events` exercise these
+refusals, successful Copy/Flip/SuboptimalCopy, and stale-idle retention without
+opening a display. The initial test incorrectly expected refusal exit 1; the
+client uses exit 2, and the test was corrected to that existing contract.
+
+`tools/external-bar/headless_x_smoke.py` runs a dummy server in separate user,
+PID, network and filesystem namespaces with private `/dev`, `/run` and `/tmp`.
+It owns and stops only its child process groups; no seat, DRM or input device is
+available. The installed unprivileged server is **X.Org 1.21.1.24**, not XLibre.
+Fresh and reuse clients each completed 8/8 counted rows after two warmup frames
+with two buffers and xcompmgr `-n` (normal client-side composition). An earlier
+fresh diagnostic used `-a` (automatic server-side composition); its separate
+receipt is retained and is not evidence of client-side composition. A bare
+fresh dummy-server smoke also passed. These are protocol checks on software
+dummy output, not native display, GPU or performance qualification. XLibre still
+needs its own pinned smoke. Client Present completion still does not identify
+the final composed frame reaching scanout.
+
+Raw artifacts are under
+`~/.local/state/sophia/development-evidence/t331-d4-owned-copy-20261021/external-bar-xorg-smoke-*`;
+the source hashes, binary identities and outcome inventory are in
+`external-bar-xorg-protocol-01` under that evidence root. The reporter remains
+diagnostic-only and all native matching and interval requirements above remain.
