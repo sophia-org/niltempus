@@ -83,14 +83,28 @@ pub struct ProcessNormalized {
     pub major_faults_per_frame: Bounds,
 }
 
+fn fresh_workload(mode: &crate::shell_timing::WorkloadMode) -> bool {
+    *mode == crate::shell_timing::WorkloadMode::Fresh
+}
+
 #[derive(Debug, Serialize)]
 pub struct Normalized {
     pub frame_count: u64,
+    /// Retained only; fresh reports keep their legacy serialized shape.
+    #[serde(skip_serializing_if = "fresh_workload")]
+    pub workload: crate::shell_timing::WorkloadMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retained_resources: Option<u64>,
     pub source: crate::shell_timing::ImageSource,
     /// Logical accepted payload bytes, including sealed payloads. This is not
     /// a socket-copy or memory-bandwidth measurement.
     pub transferred_bytes: u64,
     /// Compatibility name for the same denominator in older byte-path reports.
+    /// Retained: only the bytes actually uploaded (the N pool tiles, once,
+    /// plus any probes). Qualification normalization only, not a full
+    /// lifecycle cost: the pool uploads precede the first peer frame_start
+    /// counter, so per-frame and whole-workload CPU bounds exclude pool
+    /// preparation by construction.
     pub uploaded_bytes: u64,
     pub presentation_bytes: u64,
     pub transfer_probe_bytes: u64,
@@ -128,8 +142,17 @@ pub fn measure_journal(
     expected: usize,
 ) -> Result<Report, String> {
     let metrics = crate::shell_timing::collect_metrics(journal, expected)?;
-    if metrics.schema != 2 {
-        return Err("byte-normalized costs require schema 2 upload evidence".into());
+    // Fresh schema 2, or retained schema 3 whose pool uploads are counted
+    // once. cpu_ns_per_uploaded_mib below therefore divides by the bytes
+    // actually uploaded (retained: N tiles plus probes), never by a
+    // per-frame presentation-work denominator.
+    if !(metrics.schema == 2 && metrics.workload == crate::shell_timing::WorkloadMode::Fresh
+        || metrics.schema == 3 && metrics.workload == crate::shell_timing::WorkloadMode::Retained)
+    {
+        return Err(
+            "byte-normalized costs require schema 2 fresh or schema 3 retained upload evidence"
+                .into(),
+        );
     }
     let mut report = measure(host_log, peer_log, &metrics.offers)?;
     let peer = counters(peer_log, "peer")?;
@@ -144,14 +167,26 @@ pub fn measure_journal(
     }
     for accepted in &metrics.uploads {
         let upload = &accepted.upload;
-        let index = (upload.candidate_generation - 1) as usize;
-        let start = &peer[index * 2];
-        let end = &peer[index * 2 + 1];
-        if upload.begin_usec < start.after
-            || accepted.accepted_usec > end.before
-            || accepted.released_usec.is_some_and(|time| time > end.before)
-        {
-            return Err("upload lies outside its frame counter interval".into());
+        if upload.candidate_generation == 0 {
+            // Retained pool uploads run before the first peer frame_start
+            // counter (peer prepares the pool before its frame loop), so
+            // acceptance must precede that counter's window. Their CPU is
+            // therefore outside every per-frame interval and outside the
+            // whole-workload peer delta: uploaded bytes normalize a
+            // qualification ratio only, never a lifecycle cost.
+            if accepted.purpose != "retained" || accepted.accepted_usec > peer[0].before {
+                return Err("retained upload not accepted before the first frame counter".into());
+            }
+        } else {
+            let index = (upload.candidate_generation - 1) as usize;
+            let start = &peer[index * 2];
+            let end = &peer[index * 2 + 1];
+            if upload.begin_usec < start.after
+                || accepted.accepted_usec > end.before
+                || accepted.released_usec.is_some_and(|time| time > end.before)
+            {
+                return Err("upload lies outside its frame counter interval".into());
+            }
         }
         let total = if accepted.purpose == "transfer_probe" {
             &mut transfer_probe_bytes
@@ -167,6 +202,8 @@ pub fn measure_journal(
         .ok_or("uploaded byte count overflow")?;
     report.normalized = Some(Normalized {
         frame_count: expected as u64,
+        workload: metrics.workload,
+        retained_resources: metrics.retained_resources,
         source: metrics.source,
         transferred_bytes: uploaded_bytes,
         uploaded_bytes,
@@ -495,6 +532,11 @@ pub fn measure(host_log: &str, peer_log: &str, offers: &[Offer]) -> Result<Repor
             cost: cost(&host, start, end)?,
         });
     }
+    // Exact bound: the peer delta runs from its first frame_start counter
+    // (peer[0]) to its last frame_end counter; the Session side is bracketed
+    // by the host snapshots wholly before peer[0] and wholly after that end.
+    // Anything the peer did before frame 1 — including retained pool
+    // preparation — is outside this bound, not estimated into it.
     let whole_workload = cost(&host, &peer[0], peer.last().unwrap())?;
     let diagnostics = if host[0].schema == 3 {
         Some(process_diagnostics(&host, &peer[0], peer.last().unwrap())?)

@@ -493,6 +493,78 @@ fn schema_three_refuses_incomplete_mixed_or_regressing_fault_evidence() {
     assert!(measure(&host(), &p, &offers()).is_err());
 }
 
+fn retained_journal() -> String {
+    // Two frames against the shared host()/peer() counter fixtures: the
+    // pool (2 tiles of 960x24) is accepted before frame 1, both candidates
+    // reference it, and it stays live at End (shape A, no releases).
+    let mut rows = vec![
+        serde_json::json!({"schema":3,"event":"start","frames":2,"wire":"files","source":"sealed","probe_bytes":0,"workload":"retained","retained_resources":2}),
+    ];
+    for (id, begin, accepted) in [(2, 20, 22), (3, 23, 24)] {
+        rows.push(serde_json::json!({"schema":3,"event":"upload_offer","upload":{"connection_epoch":1,"content_grant_epoch":2,"output":3,"candidate_generation":0,"resource_id":id,"resource_generation":1,"width":960,"height":24,"total_bytes":92160,"begin_usec":begin}}));
+        rows.push(serde_json::json!({"schema":3,"event":"upload_accepted","resource_id":id,"resource_generation":1,"accepted_usec":accepted}));
+    }
+    for (f, demand, received, submitted, terminal) in [(1, 30, 31, 35, 50), (2, 60, 61, 62, 64)] {
+        rows.push(serde_json::json!({"schema":3,"event":"permit","generation":f,"demand_usec":demand,"received_usec":received}));
+        let placements: Vec<_> = (0..2)
+            .map(|i| serde_json::json!({"resource_id":i+2,"resource_generation":1,"destination_x_px":(i+f-1)%2*960,"destination_y_px":0}))
+            .collect();
+        rows.push(serde_json::json!({"schema":3,"event":"candidate_placements","candidate_generation":f,"placements":placements}));
+        rows.push(serde_json::json!({"schema":3,"event":"offer","connection_epoch":1,"content_grant_epoch":2,"output":3,"candidate_generation":f,"submitted_monotonic_usec":submitted}));
+        rows.push(serde_json::json!({"schema":3,"event":"terminal","connection_epoch":1,"content_grant_epoch":2,"output":3,"candidate_generation":f,"outcome":"presented","kind":2,"reason":0,"observed_monotonic_usec":terminal}));
+    }
+    rows.push(serde_json::json!({"schema":3,"event":"end","offered":2,"completed":2}));
+    rows.iter().map(|r| r.to_string() + "\n").collect()
+}
+
+#[test]
+fn retained_cost_normalizes_by_actual_pool_uploads_not_frame_work() {
+    use xtask::shell_timing_cost::measure_journal;
+    let retained = measure_journal(&host(), &peer(), &retained_journal(), 2)
+        .unwrap()
+        .normalized
+        .unwrap();
+    assert_eq!(
+        retained.workload,
+        xtask::shell_timing::WorkloadMode::Retained
+    );
+    assert_eq!(retained.retained_resources, Some(2));
+    assert_eq!(retained.frame_count, 2);
+    // Two 960x24 tiles uploaded once: 184320 bytes total, while the fresh
+    // two-frame journal uploads the same bytes per frame (368640).
+    assert_eq!(retained.presentation_bytes, 184320);
+    assert_eq!(retained.uploaded_bytes, 184320);
+    assert_eq!(retained.transferred_bytes, 184320);
+    let fresh_report = measure_journal(&host(), &peer(), &journal(), 2).unwrap();
+    // Fresh reports keep their legacy serialized shape: no workload field.
+    let fresh_json = serde_json::to_value(&fresh_report).unwrap();
+    assert!(fresh_json["normalized"].get("workload").is_none());
+    let fresh = fresh_report.normalized.unwrap();
+    assert_eq!(fresh.workload, xtask::shell_timing::WorkloadMode::Fresh);
+    assert_eq!(fresh.uploaded_bytes, 368640);
+    assert_eq!(
+        (
+            retained.cpu_ns_per_frame.lower,
+            retained.cpu_ns_per_frame.upper
+        ),
+        (fresh.cpu_ns_per_frame.lower, fresh.cpu_ns_per_frame.upper)
+    );
+    assert!(
+        retained.cpu_ns_per_uploaded_mib.lower > fresh.cpu_ns_per_uploaded_mib.lower,
+        "per-MiB must divide by actual uploaded bytes"
+    );
+    // A pool accepted after the first frame interval cannot be normalized.
+    assert!(
+        measure_journal(
+            &host(),
+            &peer(),
+            &retained_journal().replace("\"accepted_usec\":22", "\"accepted_usec\":99"),
+            2
+        )
+        .is_err()
+    );
+}
+
 #[test]
 fn schema_three_profile_remains_diagnostic_only() {
     use xtask::shell_timing_cost::for_mode;

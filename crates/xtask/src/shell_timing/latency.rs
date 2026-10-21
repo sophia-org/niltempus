@@ -36,6 +36,9 @@ pub fn latency_report(
     expected: usize,
 ) -> Result<serde_json::Value, String> {
     let metrics = super::collect_metrics(journal, expected)?;
+    if metrics.workload == super::WorkloadMode::Retained {
+        return Err("retained workload has no latency acceptance until designed".into());
+    }
     let native = super::join(host, &metrics.offers, mode, expected)?;
     let presentation: Vec<_> = native.iter().map(|s| s.latency_usec).collect();
     let permits: Vec<_> = metrics
@@ -156,6 +159,9 @@ pub fn latency_window(
         .filter(|_| window.warmup != 0 && window.measured != 0)
         .ok_or("window requires positive warmup and measured frame counts")?;
     let metrics = super::collect_metrics(journal, offered)?;
+    if metrics.workload == super::WorkloadMode::Retained {
+        return Err("retained workload has no latency acceptance until designed".into());
+    }
     let native = super::join(host, &metrics.offers, mode, offered)?;
     if native.len() != offered {
         return Err("native evidence does not cover every offered frame".into());

@@ -248,8 +248,51 @@ fn sealed_preparation_requires_matching_files_source_without_running_artifacts()
 }
 
 #[test]
+fn retained_peer_config_requires_files_sealed_and_an_explicit_pool() {
+    use xtask::shell_timing::ImageSource;
+    let mut f = Fixture::new("retained-config", "files");
+    f.request.source = ImageSource::Isb;
+    let config = |extra: &str| {
+        format!(
+            r#"{{"wire":"files","source":"sealed","output":1,"frames":3,"height":24,"hold_msec":60000,"image":{{"max_resource_bytes":1,"max_width":1,"max_height":1,"max_admitted_outputs":1,"transfer_slots":1,"transfer_timeout_ms":1}}{extra}}}"#
+        )
+    };
+    for (extra, valid) in [
+        (r#","workload":"retained","retained_resources":2"#, true),
+        (r#","workload":"retained","retained_resources":8"#, true),
+        (r#","workload":"fresh""#, true),
+        ("", true),
+        (r#","workload":"retained""#, false),
+        (r#","workload":"retained","retained_resources":1"#, false),
+        (r#","workload":"retained","retained_resources":9"#, false),
+        (r#","workload":"retained","retained_resources":0"#, false),
+        (r#","retained_resources":4"#, false),
+        (r#","workload":"fresh","retained_resources":4"#, false),
+        (r#","workload":"unknown","retained_resources":4"#, false),
+        // Explicit nulls are not absence (peer retained::parse parity).
+        (r#","workload":null"#, false),
+        (r#","retained_resources":null"#, false),
+        (r#","workload":"retained","retained_resources":null"#, false),
+        (r#","workload":"retained","retained_resources":4.5"#, false),
+    ] {
+        f.put("peer-config", config(extra).as_bytes(), false);
+        assert_eq!(validate(&f.request).is_ok(), valid, "config {extra}");
+    }
+    // Retained over bytes or ipc is refused even with a valid pool.
+    f.request.source = ImageSource::Bytes;
+    f.put(
+        "peer-config",
+        config(r#","workload":"retained","retained_resources":4"#)
+            .replace("sealed", "bytes")
+            .as_bytes(),
+        false,
+    );
+    assert!(validate(&f.request).is_err());
+}
+
+#[test]
 fn captured_source_cannot_be_substituted_after_preparation() {
-    use xtask::shell_timing::{ImageSource, Journal};
+    use xtask::shell_timing::{ImageSource, Journal, WorkloadMode};
     use xtask::shell_timing_native::validate_captured_workload;
     let mut f = Fixture::new("capture-source", "files");
     f.request.source = ImageSource::Isb;
@@ -260,18 +303,44 @@ fn captured_source_cannot_be_substituted_after_preparation() {
         wire: "files".into(),
         source: ImageSource::Bytes,
         probe_bytes: 0,
+        workload: WorkloadMode::Fresh,
+        retained_resources: None,
         offers: vec![],
         uploads: vec![],
         permits: vec![],
         terminal_usec: vec![],
+        placements: vec![],
+        live_resources: vec![],
     };
-    assert!(validate_captured_workload(&metrics, &f.request, 0).is_err());
+    let fresh = |m: &Journal, probe: u64| {
+        validate_captured_workload(m, &f.request, probe, WorkloadMode::Fresh, None)
+    };
+    assert!(fresh(&metrics, 0).is_err());
     metrics.source = ImageSource::Isb;
-    assert!(validate_captured_workload(&metrics, &f.request, 0).is_ok());
+    assert!(fresh(&metrics, 0).is_ok());
     metrics.wire = "ipc".into();
-    assert!(validate_captured_workload(&metrics, &f.request, 0).is_err());
+    assert!(fresh(&metrics, 0).is_err());
     metrics.wire = "files".into();
-    assert!(validate_captured_workload(&metrics, &f.request, 4194304).is_err());
+    assert!(fresh(&metrics, 4194304).is_err());
+    // A retained journal matches only a retained plan with the exact pool.
+    metrics.schema = 3;
+    metrics.workload = WorkloadMode::Retained;
+    metrics.retained_resources = Some(4);
+    assert!(fresh(&metrics, 0).is_err());
+    assert!(
+        validate_captured_workload(&metrics, &f.request, 0, WorkloadMode::Retained, Some(4))
+            .is_ok()
+    );
+    assert!(
+        validate_captured_workload(&metrics, &f.request, 0, WorkloadMode::Retained, Some(3))
+            .is_err()
+    );
+    assert!(
+        validate_captured_workload(&metrics, &f.request, 0, WorkloadMode::Retained, None).is_err()
+    );
+    assert!(
+        validate_captured_workload(&metrics, &f.request, 0, WorkloadMode::Fresh, Some(4)).is_err()
+    );
 }
 
 #[test]

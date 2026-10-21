@@ -1,5 +1,5 @@
 //! Bind a reviewed shell workload to exact files before any attended launch.
-use crate::shell_timing::ImageSource;
+use crate::shell_timing::{ImageSource, WorkloadMode};
 use crate::{hex, output_file_native_run::process, sha256};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -82,7 +82,43 @@ struct PeerConfig {
     hold_msec: u64,
     #[serde(default)]
     probe_bytes: u64,
+    /// Absent means the historical fresh workload. Explicit JSON null is
+    /// invalid (peer parity): the enum itself refuses it, not an Option.
+    #[serde(default)]
+    workload: WorkloadMode,
+    /// Absent means no pool. A present value must be an integer: explicit
+    /// null is invalid (peer parity), so this rejects null instead of
+    /// collapsing it to absence.
+    #[serde(default, deserialize_with = "present_u64")]
+    retained_resources: Option<u64>,
     image: Option<ImageConfig>,
+}
+
+fn present_u64<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    u64::deserialize(deserializer).map(Some)
+}
+
+impl PeerConfig {
+    /// Validated workload declaration: retained needs files + sealed and an
+    /// explicit 2..=8 pool; fresh forbids a pool declaration.
+    /// Tile geometry is deliberately not plan-checked here: neither the
+    /// request nor this config carries the output/allocation width, so the
+    /// package analyzer must bind every retained upload's width to
+    /// floor(allocation_width / N) rounded down even, its height to this
+    /// config's height, and placements to slots inside that width.
+    fn workload(&self) -> Result<(WorkloadMode, Option<u64>), String> {
+        let mode = self.workload;
+        let retained = mode.check(self.retained_resources)?;
+        if mode == WorkloadMode::Retained
+            && (self.wire != "files" || self.source != ImageSource::Isb)
+        {
+            return Err("retained workload requires files wire and sealed source".into());
+        }
+        Ok((mode, retained))
+    }
 }
 
 /// Caller bounds for the sealed SDK adapter. The peer verifies these against
@@ -267,6 +303,7 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
     }
     let peer: PeerConfig =
         serde_json::from_slice(&texts["peer-config"]).map_err(|e| e.to_string())?;
+    peer.workload()?;
     if peer.wire != request.wire
         || peer.source != request.source
         || (peer.source == ImageSource::Isb && request.wire != "files")
@@ -458,14 +495,21 @@ pub fn environment_capture(text: &str) -> Result<String, String> {
 }
 
 /// Reject a valid journal from a different arm before joining native samples.
+/// The journal's workload mode and pool size must match the prepared
+/// peer-config exactly; a fresh plan never accepts a retained journal.
 pub fn validate_captured_workload(
     metrics: &crate::shell_timing::Journal,
     request: &Request,
     probe_bytes: u64,
+    workload: WorkloadMode,
+    retained_resources: Option<u64>,
 ) -> Result<(), String> {
+    workload.check(retained_resources)?;
     if metrics.probe_bytes != probe_bytes
         || metrics.source != request.source
         || metrics.wire != request.wire
+        || metrics.workload != workload
+        || metrics.retained_resources != retained_resources
     {
         return Err("captured upload workload differs from prepared configuration".into());
     }
@@ -765,7 +809,14 @@ fn run_inner(
                 MAX_INPUT,
             )?)
             .map_err(|e| e.to_string())?;
-            validate_captured_workload(&metrics, &plan.request, peer.probe_bytes)?;
+            let (workload, retained) = peer.workload()?;
+            validate_captured_workload(
+                &metrics,
+                &plan.request,
+                peer.probe_bytes,
+                workload,
+                retained,
+            )?;
             let offers = &metrics.offers;
             let samples = crate::shell_timing::join(
                 &host,

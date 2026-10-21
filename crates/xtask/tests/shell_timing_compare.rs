@@ -166,6 +166,8 @@ fn cost(
             },
             normalized: Some(Normalized {
                 frame_count: 1000,
+                workload: xtask::shell_timing::WorkloadMode::Fresh,
+                retained_resources: None,
                 source,
                 transferred_bytes: 1000 * 184320 + probe,
                 uploaded_bytes: 1000 * 184320 + probe,
@@ -412,6 +414,21 @@ fn cost_and_source_comparisons_refuse_mismatched_identity() {
     mislabelled.source = ImageSource::Bytes;
     assert!(compare_cost(&mislabelled, &a).is_err());
     assert!(compare_cost(&a, &c).is_err());
+    // Retained arms are CPU/progress qualification only: no B9 comparison
+    // against fresh arms (or each other) until a comparison is designed.
+    let mut retained = cost(
+        "c",
+        "files",
+        ImageSource::Isb,
+        Workload::Panel,
+        "cpu-only",
+        (110, 110),
+    );
+    let normalized = retained.report.normalized.as_mut().unwrap();
+    normalized.workload = xtask::shell_timing::WorkloadMode::Retained;
+    normalized.retained_resources = Some(4);
+    assert!(compare_cost(&retained, &a).is_err());
+    assert!(compare_source_cost(&retained, &c).is_err());
     let b = cost(
         "b",
         "files",

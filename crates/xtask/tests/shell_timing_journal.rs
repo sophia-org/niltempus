@@ -346,3 +346,201 @@ fn collector_cli_exports_join_input_outside_checkout() {
     assert_eq!(metrics["uploads"][0]["upload"]["total_bytes"], 184320);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+/// Schema 3 retained rows (shape A): N generation-0 pool uploads
+/// (ids 2..=N+1, generation 1), then per frame an optional probe, exact
+/// rotated placements, permit, offer and terminal. No release records:
+/// the pool stays live at End.
+fn retained_rows(frames: u64, count: u64, probe: bool) -> Vec<serde_json::Value> {
+    let tile = 1920 / count.max(1) / 2 * 2;
+    let mut t = 0u64;
+    let mut next = move || {
+        t += 10;
+        t
+    };
+    let mut rows = vec![
+        serde_json::json!({"schema":3,"event":"start","frames":frames,"wire":"files","source":"sealed","probe_bytes":if probe {4194304} else {0},"workload":"retained","retained_resources":count}),
+    ];
+    for i in 0..count {
+        let begin = next();
+        rows.push(serde_json::json!({"schema":3,"event":"upload_offer","upload":{"connection_epoch":1,"content_grant_epoch":2,"output":3,"candidate_generation":0,"resource_id":i+2,"resource_generation":1,"width":tile,"height":24,"total_bytes":tile*24*4,"begin_usec":begin}}));
+        let accepted = next();
+        rows.push(serde_json::json!({"schema":3,"event":"upload_accepted","resource_id":i+2,"resource_generation":1,"accepted_usec":accepted}));
+    }
+    for f in 1..=frames {
+        if probe {
+            let begin = next();
+            rows.push(serde_json::json!({"schema":3,"event":"upload_offer","upload":{"connection_epoch":1,"content_grant_epoch":2,"output":3,"candidate_generation":f,"resource_id":1,"resource_generation":f,"width":1024,"height":1024,"total_bytes":4194304,"begin_usec":begin}}));
+            let accepted = next();
+            rows.push(serde_json::json!({"schema":3,"event":"upload_accepted","resource_id":1,"resource_generation":f,"accepted_usec":accepted}));
+            let released = next();
+            rows.push(serde_json::json!({"schema":3,"event":"probe_released","resource_id":1,"resource_generation":f,"released_usec":released}));
+        }
+        let demand = next();
+        let received = next();
+        rows.push(serde_json::json!({"schema":3,"event":"permit","generation":f,"demand_usec":demand,"received_usec":received}));
+        let placements: Vec<_> = (0..count)
+            .map(|i| {
+                serde_json::json!({"resource_id":i+2,"resource_generation":1,"destination_x_px":(i+f-1)%count*tile,"destination_y_px":0})
+            })
+            .collect();
+        rows.push(
+            serde_json::json!({"schema":3,"event":"candidate_placements","candidate_generation":f,"placements":placements}),
+        );
+        let submitted = next();
+        rows.push(serde_json::json!({"schema":3,"event":"offer","connection_epoch":1,"content_grant_epoch":2,"output":3,"candidate_generation":f,"submitted_monotonic_usec":submitted}));
+        let observed = next();
+        rows.push(serde_json::json!({"schema":3,"event":"terminal","connection_epoch":1,"content_grant_epoch":2,"output":3,"candidate_generation":f,"outcome":"presented","kind":2,"reason":0,"observed_monotonic_usec":observed}));
+    }
+    rows.push(serde_json::json!({"schema":3,"event":"end","offered":frames,"completed":frames}));
+    rows
+}
+
+fn encode_rows(rows: &[serde_json::Value]) -> String {
+    rows.iter().map(|r| r.to_string() + "\n").collect()
+}
+
+#[test]
+fn retained_journal_collects_exact_pool_placements_and_live_set() {
+    use xtask::shell_timing::WorkloadMode;
+    let metrics = collect_metrics(&encode_rows(&retained_rows(3, 3, false)), 3).unwrap();
+    assert_eq!(metrics.schema, 3);
+    assert_eq!(metrics.workload, WorkloadMode::Retained);
+    assert_eq!(metrics.retained_resources, Some(3));
+    assert_eq!(metrics.offers.len(), 3);
+    assert_eq!(metrics.permits.len(), 3);
+    assert_eq!(metrics.uploads.len(), 3);
+    assert!(metrics.uploads.iter().all(|u| u.purpose == "retained"
+        && u.upload.candidate_generation == 0
+        && u.upload.total_bytes == 640 * 24 * 4));
+    // Frame 2 rotates the pool by one tile: ids stay in pool order.
+    assert_eq!(
+        metrics.placements[1]
+            .placements
+            .iter()
+            .map(|p| (p.resource_id, p.destination_x_px))
+            .collect::<Vec<_>>(),
+        vec![(2, 640), (3, 1280), (4, 0)]
+    );
+    // Shape A: the exact accepted pool is reported live at End, unreleased.
+    assert_eq!(
+        metrics
+            .live_resources
+            .iter()
+            .map(|r| (r.resource_id, r.resource_generation, r.released_usec))
+            .collect::<Vec<_>>(),
+        vec![(2, 1, None), (3, 1, None), (4, 1, None)]
+    );
+    // The 1000-candidate shape: offers stay 1000, uploads stay N.
+    let full = collect_metrics(&encode_rows(&retained_rows(1000, 8, false)), 1000).unwrap();
+    assert_eq!(full.offers.len(), 1000);
+    assert_eq!(full.uploads.len(), 8);
+    assert_eq!(full.placements.len(), 1000);
+    // The optional per-frame probe keeps its existing transfer_probe role.
+    let probed = collect_metrics(&encode_rows(&retained_rows(2, 2, true)), 2).unwrap();
+    assert_eq!(
+        probed
+            .uploads
+            .iter()
+            .filter(|u| u.purpose == "transfer_probe")
+            .count(),
+        2
+    );
+    assert_eq!(
+        probed
+            .uploads
+            .iter()
+            .filter(|u| u.purpose == "retained")
+            .count(),
+        2
+    );
+    // No latency acceptance is designed for retained yet.
+    assert!(
+        xtask::shell_timing::latency_report(
+            &native_host(140),
+            &encode_rows(&retained_rows(1, 2, false)),
+            60000,
+            1
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn retained_journal_rejects_pool_and_reference_violations() {
+    let good = retained_rows(3, 3, false);
+    let find = |rows: &[serde_json::Value], event: &str| {
+        rows.iter().position(|r| r["event"] == event).unwrap()
+    };
+    // Pool size is required and bounded at declaration time.
+    for count in [0, 1, 9] {
+        assert!(collect_metrics(&encode_rows(&retained_rows(1, count, false)), 1).is_err());
+    }
+    // Schema 3 without an explicit retained declaration is not a journal.
+    let mut rows = good.clone();
+    rows[0].as_object_mut().unwrap().remove("workload");
+    assert!(collect_metrics(&encode_rows(&rows), 3).is_err());
+    let mut rows = good.clone();
+    rows[0]
+        .as_object_mut()
+        .unwrap()
+        .remove("retained_resources");
+    assert!(collect_metrics(&encode_rows(&rows), 3).is_err());
+    // Pool uploads are generation 0, ids from 2, generation 1, even tiles.
+    for (key, value) in [
+        ("candidate_generation", 1),
+        ("resource_id", 1),
+        ("resource_generation", 2),
+    ] {
+        let mut rows = good.clone();
+        rows[1]["upload"][key] = value.into();
+        assert!(collect_metrics(&encode_rows(&rows), 3).is_err(), "{key}");
+    }
+    let mut rows = good.clone();
+    rows[1]["upload"]["width"] = 641.into();
+    rows[1]["upload"]["total_bytes"] = (641 * 24 * 4).into();
+    assert!(collect_metrics(&encode_rows(&rows), 3).is_err());
+    // A missing pool acceptance means no candidate may reference the pool.
+    let mut rows = good.clone();
+    rows.remove(2);
+    assert!(collect_metrics(&encode_rows(&rows), 3).is_err());
+    // Placements precede the offer, rotate exactly, and reference only
+    // accepted pool resources at generation 1.
+    let placed = find(&good, "candidate_placements");
+    let mut rows = good.clone();
+    rows[placed]["placements"][0]["destination_x_px"] = 640.into();
+    assert!(collect_metrics(&encode_rows(&rows), 3).is_err());
+    let mut rows = good.clone();
+    rows[placed]["placements"][0]["resource_id"] = 99.into();
+    assert!(collect_metrics(&encode_rows(&rows), 3).is_err());
+    let mut rows = good.clone();
+    rows[placed]["placements"][0]["resource_generation"] = 2.into();
+    assert!(collect_metrics(&encode_rows(&rows), 3).is_err());
+    let mut rows = good.clone();
+    let offer = find(&rows, "offer");
+    rows.swap(placed, offer);
+    assert!(collect_metrics(&encode_rows(&rows), 3).is_err());
+    let mut rows = good.clone();
+    rows.remove(placed);
+    assert!(collect_metrics(&encode_rows(&rows), 3).is_err());
+    // Shape A rejects any retained_released record: before End, right
+    // after the last terminal, or after End. Tiles stay live at End.
+    let release = serde_json::json!({"schema":3,"event":"retained_released","resource_id":2,"resource_generation":1,"released_usec":9999});
+    let mut rows = good.clone();
+    let end = rows.len() - 1;
+    rows.insert(end, release.clone());
+    assert!(collect_metrics(&encode_rows(&rows), 3).is_err());
+    let mut rows = good.clone();
+    rows.push(release.clone());
+    assert!(collect_metrics(&encode_rows(&rows), 3).is_err());
+    let mut rows = good.clone();
+    let last_terminal = rows.iter().rposition(|r| r["event"] == "terminal").unwrap();
+    rows.insert(last_terminal + 1, release);
+    assert!(collect_metrics(&encode_rows(&rows), 3).is_err());
+    // Fresh journals cannot smuggle a retained declaration.
+    let mut rows = good.clone();
+    for row in &mut rows {
+        row["schema"] = 2.into();
+    }
+    assert!(collect_metrics(&encode_rows(&rows), 3).is_err());
+}

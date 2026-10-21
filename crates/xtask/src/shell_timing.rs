@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 
 mod journal;
 mod latency;
-pub use journal::{Journal, collect, collect_metrics};
+pub use journal::{
+    CandidatePlacements, Journal, LiveResource, Placement, collect, collect_metrics,
+};
 pub use latency::{
     BoundReached, Distribution, Measures, TRANSFER_BOUND_USEC, Window, WindowedLatency,
     latency_report, latency_window,
@@ -22,6 +24,32 @@ pub enum ImageSource {
     /// Immutable Shared Buffers; retain the source label in frozen evidence.
     #[serde(rename = "sealed")]
     Isb,
+}
+
+/// Peer workload declared in peer-config and echoed in schema 3 journals.
+/// Fresh is the historical per-frame upload workload; retained pre-uploads a
+/// small pool once and references it from every candidate.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkloadMode {
+    #[default]
+    Fresh,
+    Retained,
+}
+
+impl WorkloadMode {
+    /// Retained resources are required (2..=8) exactly when retained, and
+    /// forbidden otherwise. Returns the validated retained count.
+    pub fn check(self, retained_resources: Option<u64>) -> Result<Option<u64>, String> {
+        match (self, retained_resources) {
+            (Self::Fresh, None) => Ok(None),
+            (Self::Retained, Some(count)) if (2..=8).contains(&count) => Ok(Some(count)),
+            (Self::Fresh, Some(_)) => Err("retained_resources requires workload retained".into()),
+            (Self::Retained, _) => {
+                Err("retained workload requires retained_resources in 2..=8".into())
+            }
+        }
+    }
 }
 
 const MAX_BYTES: u64 = 64 * 1024 * 1024;

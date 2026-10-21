@@ -202,6 +202,12 @@ fn check_plans_height(
         if request.wire != wire
             || request.source != source
             || request.instrumentation != mode
+            || config
+                .get("workload")
+                .is_some_and(|w| w.as_str() != Some("fresh"))
+            || config
+                .get("retained_resources")
+                .is_some_and(|v| !v.is_null())
             || request.frames != 1000
             || request.runtime_ms != 60_000
             || probe != probe_bytes(workload)

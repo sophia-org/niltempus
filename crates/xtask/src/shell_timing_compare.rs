@@ -192,6 +192,12 @@ fn cost_role(arm: &CostArm) -> Result<(Role, &crate::shell_timing_cost::Normaliz
         .normalized
         .as_ref()
         .ok_or_else(|| format!("{}: cost arm lacks byte normalization", arm.label))?;
+    if normalized.workload == crate::shell_timing::WorkloadMode::Retained {
+        return Err(format!(
+            "{}: retained cost arms have no B9 comparison until designed",
+            arm.label
+        ));
+    }
     if normalized.source != arm.source
         || Some(normalized.transfer_probe_bytes)
             != normalized
