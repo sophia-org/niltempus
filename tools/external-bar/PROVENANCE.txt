@@ -1,3 +1,16 @@
 External reference clients handed back by Claude wB:pH and Muse wB:pJ, 2026-10-21. Original sources compiled only; no display/server/Session runs. Original 19 source hashes verified and frozen at /home/niltempus/.local/state/sophia/development-evidence/t331-d4-owned-copy-20261021/external-bar-handback-01; verified-sources.json records the hashes. This copy is the integration lane; local changes and qualification must be recorded separately. No Sophia production dependency.
 
 Second handback: 20 rev-4 source hashes verified at external-bar-handback-02 in the same evidence root. The integration copy includes local fixes; see docs/desktop-comparison.md October 21 section. Native comparison remains unqualified.
+
+Third handback: 23 rev-5 source hashes verified at external-bar-handback-03.
+The integration includes four workloads and preserves local parser/refusal
+controls. Local fixes and device-hidden software smokes are recorded in
+docs/desktop-comparison.md and external-rev5-integration-01 under the evidence
+root above. These checks do not qualify native performance or final composed
+scanout. The converter remains downstream of the typed runner.
+
+test/wlr-output-management-unstable-v1.xml was copied, with its copyright and
+license notice intact, from the installed wayland-protocols-wlr-0.3.12 crate:
+~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-protocols-wlr-0.3.12/wlr-protocols/unstable/wlr-output-management-unstable-v1.xml
+It is used only by the isolated HEADLESS-1 smoke output helper. The receipt
+records its hash. Generated output-helper files remain ignored build output.

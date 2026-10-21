@@ -1,6 +1,6 @@
 /* wl-panel: external-bar Wayland reference panel client.
  *
- * A wlr-layer-shell wl_shm panel, 1920x24 at the top of the first output,
+ * A wlr-layer-shell wl_shm panel, 1920x24 on an explicitly selected output,
  * exclusive zone 24, fresh whole-pixel fill per frame, paced by frame
  * callbacks, presented times from wp_presentation feedback. Optional bulk
  * variant adds a 1024x1024 surface updated on the same submissions.
@@ -14,6 +14,7 @@
  * Compile-only artifact for Codex's gated runs; see README in this dir.
  */
 #define _GNU_SOURCE
+#include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -51,6 +52,7 @@ struct panel {
     unsigned nslots;
     uint32_t serial;
     bool configured;
+    unsigned width, height;
 };
 
 static struct wl_display *display;
@@ -64,6 +66,11 @@ static bool clock_seen;
 static unsigned opt_frames = 1000, opt_warmup = 120, opt_buffers = 3;
 static bool opt_bulk;
 static bool opt_fresh; /* --lifecycle fresh|reuse, default reuse */
+static bool fresh_mode; /* effective: fresh creation for this run */
+enum workload { WL_FRESH, WL_IDLE, WL_BURSTY, WL_RETAINED };
+static enum workload opt_workload = WL_FRESH;
+static unsigned opt_idle_sec = 60, opt_interval_ms = 250;
+static struct wl_subcompositor *subcompositor;
 
 static int64_t *rec_presented; /* per counted frame, -1 until presented */
 static struct panel main_panel, bulk_panel;
@@ -72,6 +79,8 @@ static void die(const char *what) {
     fprintf(stderr, "wl-panel: %s\n", what);
     exit(2);
 }
+
+#include "output.h"
 
 /* ---------- registry / presentation clock ---------- */
 
@@ -88,8 +97,13 @@ static const struct wp_presentation_listener presentation_listener = {
 static void registry_global(void *data, struct wl_registry *registry,
                             uint32_t name, const char *interface,
                             uint32_t version) {
-    (void)data; (void)version;
-    if (strcmp(interface, wl_compositor_interface.name) == 0)
+    (void)data;
+    if ((strcmp(interface, wl_compositor_interface.name) == 0 ||
+         strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) && version < 4)
+        die("required compositor/layer-shell protocol version unavailable");
+    if (strcmp(interface, wl_output_interface.name) == 0)
+        output_bind(registry, name, version);
+    else if (strcmp(interface, wl_compositor_interface.name) == 0)
         compositor = wl_registry_bind(registry, name,
                                       &wl_compositor_interface, 4);
     else if (strcmp(interface, wl_shm_interface.name) == 0)
@@ -97,6 +111,9 @@ static void registry_global(void *data, struct wl_registry *registry,
     else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0)
         layer_shell = wl_registry_bind(registry, name,
                                        &zwlr_layer_shell_v1_interface, 4);
+    else if (strcmp(interface, wl_subcompositor_interface.name) == 0)
+        subcompositor = wl_registry_bind(registry, name,
+                                         &wl_subcompositor_interface, 1);
     else if (strcmp(interface, wp_presentation_interface.name) == 0) {
         presentation = wl_registry_bind(registry, name,
                                         &wp_presentation_interface, 1);
@@ -105,7 +122,8 @@ static void registry_global(void *data, struct wl_registry *registry,
     }
 }
 static void registry_remove(void *d, struct wl_registry *r, uint32_t n) {
-    (void)d; (void)r; (void)n;
+    (void)d; (void)r;
+    if (selected_output && n==selected_output->global) die("selected output removed");
 }
 static const struct wl_registry_listener registry_listener = {
     .global = registry_global, .global_remove = registry_remove,
@@ -116,7 +134,8 @@ static const struct wl_registry_listener registry_listener = {
 static void layer_configure(void *data, struct zwlr_layer_surface_v1 *layer,
                             uint32_t serial, uint32_t w, uint32_t h) {
     struct panel *p = data;
-    (void)w; (void)h;
+    if ((w && w != p->width) || (h && h != p->height))
+        die("configured panel geometry differs from requested geometry");
     zwlr_layer_surface_v1_ack_configure(layer, serial);
     p->serial = serial;
     p->configured = true;
@@ -141,9 +160,11 @@ static const struct wl_buffer_listener buffer_listener = {
 static void panel_init(struct panel *p, unsigned width, unsigned height,
                        uint32_t anchor, int32_t exclusive, unsigned nslots) {
     size_t stride = (size_t)width * 4, size = stride * height;
+    p->width = width;
+    p->height = height;
     p->surface = wl_compositor_create_surface(compositor);
     p->layer = zwlr_layer_shell_v1_get_layer_surface(
-        layer_shell, p->surface, NULL, ZWLR_LAYER_SHELL_V1_LAYER_TOP,
+        layer_shell, p->surface, selected_output->object, ZWLR_LAYER_SHELL_V1_LAYER_TOP,
         "external-bar-panel");
     zwlr_layer_surface_v1_set_anchor(p->layer, anchor);
     zwlr_layer_surface_v1_set_size(p->layer, width, height);
@@ -154,8 +175,8 @@ static void panel_init(struct panel *p, unsigned width, unsigned height,
         if (wl_display_dispatch(display) < 0)
             die("dispatch while waiting for configure");
     }
-    if (opt_fresh) {
-        p->nslots = 0; /* fresh mode creates one pool per submission */
+    if (fresh_mode) {
+        p->nslots = 0; /* fresh creation: no fixed pool */
         return;
     }
     int fd = memfd_create("wl-panel", MFD_ALLOW_SEALING | MFD_CLOEXEC);
@@ -197,14 +218,15 @@ struct feedback {
 
 static void feedback_sync_output(void *d, struct wp_presentation_feedback *f,
                                  struct wl_output *o) {
-    (void)d; (void)f; (void)o;
+    (void)d; (void)f;
+    if (o != selected_output->object) die("feedback belongs to another output");
 }
 static void feedback_presented(void *data,
                                struct wp_presentation_feedback *feedback,
                                uint32_t tv_sec_hi, uint32_t tv_sec_lo,
                                uint32_t tv_nsec, uint32_t refresh, uint32_t s_hi,
                                uint32_t s_lo, uint32_t flags) {
-    (void)refresh; (void)s_hi; (void)s_lo; (void)flags;
+    (void)feedback; (void)refresh; (void)s_hi; (void)s_lo; (void)flags;
     struct feedback *fb = data;
     if (fb->presented_ns) {
         uint64_t sec = ((uint64_t)tv_sec_hi << 32) | tv_sec_lo;
@@ -261,9 +283,12 @@ static const struct wl_buffer_listener fresh_listener = {
     .release = fresh_release,
 };
 
-static void submit_fresh(struct wl_surface *surface, unsigned width,
-                         unsigned height, uint64_t generation,
-                         unsigned *inflight) {
+/* One fresh sealed memfd turned into a wl_buffer. Seals are GROW|SHRINK
+ * only, for the wlroots PROT_WRITE reason above. */
+static struct wl_buffer *fresh_buffer(unsigned width, unsigned height,
+                                      uint64_t generation,
+                                      const struct wl_buffer_listener *listener,
+                                      void *data) {
     size_t size = (size_t)width * height * 4;
     int fd = memfd_create("wl-panel-fresh", MFD_ALLOW_SEALING | MFD_CLOEXEC);
     if (fd < 0 || fallocate(fd, 0, 0, (off_t)size) < 0)
@@ -273,7 +298,8 @@ static void submit_fresh(struct wl_surface *surface, unsigned width,
     uint8_t *map = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (map == MAP_FAILED)
         die("fresh mmap");
-    fill_pixels(map, size, generation);
+    if (opt_workload == WL_BURSTY) fill_bursty_panel(map, generation);
+    else fill_pixels(map, size, generation);
     munmap(map, size);
     struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, (int32_t)size);
     struct wl_buffer *buffer = wl_shm_pool_create_buffer(
@@ -281,15 +307,30 @@ static void submit_fresh(struct wl_surface *surface, unsigned width,
         WL_SHM_FORMAT_ARGB8888);
     wl_shm_pool_destroy(pool); /* the buffer keeps the pool alive */
     close(fd);
+    if (listener)
+        wl_buffer_add_listener(buffer, listener, data);
+    return buffer;
+}
+
+static int damage_x = 0, damage_y = 0;
+static unsigned damage_w, damage_h;
+
+static void submit_fresh(struct wl_surface *surface, unsigned width,
+                         unsigned height, uint64_t generation,
+                         unsigned *inflight) {
     struct fresh_slot *s = calloc(1, sizeof(*s));
     if (!s)
         die("alloc");
-    s->buffer = buffer;
     s->inflight = inflight;
     (*inflight)++;
-    wl_buffer_add_listener(buffer, &fresh_listener, s);
-    wl_surface_attach(surface, buffer, 0, 0);
-    wl_surface_damage_buffer(surface, 0, 0, (int32_t)width, (int32_t)height);
+    s->buffer = fresh_buffer(width, height, generation, &fresh_listener, s);
+    wl_surface_attach(surface, s->buffer, 0, 0);
+    if (damage_w && generation != 1)
+        wl_surface_damage_buffer(surface, damage_x, damage_y,
+                                 (int32_t)damage_w, (int32_t)damage_h);
+    else
+        wl_surface_damage_buffer(surface, 0, 0, (int32_t)width,
+                                 (int32_t)height);
 }
 
 /* ---------- main ---------- */
@@ -308,6 +349,24 @@ int main(int argc, char **argv) {
             opt_buffers = (unsigned)strtoul(argv[++i], NULL, 10);
         else if (strcmp(argv[i], "--bulk") == 0)
             opt_bulk = true;
+        else if (strcmp(argv[i], "--output") == 0 && i + 1 < argc)
+            requested_output = argv[++i];
+        else if (strcmp(argv[i], "--workload") == 0 && i + 1 < argc) {
+            const char *v = argv[++i];
+            if (strcmp(v, "fresh") == 0)
+                opt_workload = WL_FRESH;
+            else if (strcmp(v, "idle") == 0)
+                opt_workload = WL_IDLE;
+            else if (strcmp(v, "bursty") == 0)
+                opt_workload = WL_BURSTY;
+            else if (strcmp(v, "retained") == 0)
+                opt_workload = WL_RETAINED;
+            else
+                die("--workload must be idle|bursty|retained|fresh");
+        } else if (strcmp(argv[i], "--idle-sec") == 0 && i + 1 < argc)
+            opt_idle_sec = (unsigned)strtoul(argv[++i], NULL, 10);
+        else if (strcmp(argv[i], "--interval-ms") == 0 && i + 1 < argc)
+            opt_interval_ms = (unsigned)strtoul(argv[++i], NULL, 10);
         else if (strcmp(argv[i], "--lifecycle") == 0 && i + 1 < argc) {
             const char *v = argv[++i];
             if (strcmp(v, "fresh") == 0)
@@ -322,6 +381,12 @@ int main(int argc, char **argv) {
     }
     if (opt_buffers < 1 || opt_buffers > MAX_BUFFERS || opt_frames < 1)
         die("bad frames/buffers");
+    if (opt_workload != WL_FRESH && (!opt_fresh || opt_bulk))
+        die("idle/bursty/retained require --lifecycle fresh and no --bulk");
+    if (opt_workload == WL_BURSTY && !opt_interval_ms)
+        die("bursty requires a positive interval");
+    if (opt_workload == WL_IDLE && (!opt_idle_sec || opt_frames != 1 || opt_warmup != 0))
+        die("idle requires --frames 1 --warmup 0 and positive --idle-sec");
 
     display = wl_display_connect(NULL);
     if (!display)
@@ -332,9 +397,9 @@ int main(int argc, char **argv) {
         die("registry roundtrip");
     if (!compositor || !shm || !layer_shell || !presentation)
         die("compositor lacks compositor/shm/layer-shell/presentation");
-    /* Binds from registry callbacks follow the first sync request. */
     if (wl_display_roundtrip(display) < 0)
-        die("bound-global roundtrip");
+        die("bound globals roundtrip");
+    output_select();
     if (!clock_seen)
         die("no presentation clock_id");
     if (presentation_clock != CLOCK_MONOTONIC) {
@@ -348,11 +413,30 @@ int main(int argc, char **argv) {
     FILE *journal = fopen(journal_path, "w");
     if (!journal)
         die("open journal");
+    fprintf(journal,"# output name=%s width=%d height=%d scale=%d\n",
+            selected_output->name,selected_output->width,selected_output->height,selected_output->scale);
+    fresh_mode = opt_fresh;
+    if (opt_workload == WL_BURSTY) {
+        damage_x = 1824;
+        damage_w = 96;
+        damage_h = PANEL_H;
+    }
     journal_header(journal, "wl-panel", PANEL_W, PANEL_H, opt_buffers,
-                   opt_frames, opt_warmup, opt_bulk ? 1 : 0,
-                   opt_bulk ? BULK_W : 0, opt_bulk ? BULK_H : 0,
-                   opt_fresh ? "fresh" : "reuse",
-                   opt_fresh
+                   opt_workload == WL_IDLE ? 1 : opt_frames,
+                   opt_workload == WL_IDLE ? 0 : opt_warmup,
+                   opt_bulk && opt_workload == WL_FRESH ? 1 : 0,
+                   opt_bulk && opt_workload == WL_FRESH ? BULK_W : 0,
+                   opt_bulk && opt_workload == WL_FRESH ? BULK_H : 0,
+                   fresh_mode ? "fresh" : "reuse",
+                   opt_workload == WL_IDLE     ? "idle"
+                   : opt_workload == WL_BURSTY ? "bursty"
+                   : opt_workload == WL_RETAINED ? "retained"
+                                                 : "fresh",
+                   opt_workload == WL_RETAINED ? 8 : 0,
+                   opt_workload == WL_BURSTY ? opt_interval_ms : 0,
+                   opt_workload == WL_BURSTY ? "96x24+1824+0" : "full",
+                   opt_workload == WL_IDLE ? opt_idle_sec : 0,
+                   fresh_mode
                        ? "wp_presentation clock_id asserted CLOCK_MONOTONIC "
                          "(id=1), recorded as-is, not converted; fresh pools "
                          "seal GROW|SHRINK only (no WRITE seal: wlroots "
@@ -362,8 +446,7 @@ int main(int argc, char **argv) {
 
     panel_init(&main_panel, PANEL_W, PANEL_H,
                ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
-                   ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
-                   ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT,
+                   ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT,
                (int32_t)PANEL_H, opt_buffers);
     if (opt_bulk)
         panel_init(&bulk_panel, BULK_W, BULK_H,
@@ -381,17 +464,125 @@ int main(int argc, char **argv) {
     for (unsigned k = 0; k < opt_frames; k++)
         rec_presented[k] = -1;
 
+    if (opt_workload == WL_IDLE) {
+        /* Present generation 1 once, anchor the hold on its presented
+         * timestamp, then sleep without dispatching: no frame callback,
+         * no timers. The single row is frame 1. */
+        uint64_t fs = mono_ns();
+        submit_fresh(main_panel.surface, PANEL_W, PANEL_H, 1,
+                     &fresh_inflight);
+        struct feedback *fb = calloc(1, sizeof(*fb));
+        fb->presented_ns = &rec_presented[0];
+        struct wp_presentation_feedback *pf =
+            wp_presentation_feedback(presentation, main_panel.surface);
+        wp_presentation_feedback_add_listener(pf, &feedback_listener, fb);
+        uint64_t sm = mono_ns();
+        wl_surface_commit(main_panel.surface);
+        uint64_t until = mono_ns() + 5000000000ull;
+        while (rec_presented[0] < 0 && mono_ns() < until) {
+            struct timespec ts = {.tv_sec = 0, .tv_nsec = 100000000};
+            if (wl_display_dispatch_timeout(display, &ts) < 0)
+                break;
+        }
+        journal_frame(journal, 1, fs, sm, rec_presented[0], -1,
+                      "wp_presentation");
+        if (rec_presented[0] < 0) die("idle panel never presented");
+        fflush(journal); /* let the sampler observe the first-presentation anchor */
+        uint64_t end = (uint64_t)rec_presented[0] + ((uint64_t)opt_idle_sec + 4) * 1000000000ull;
+        struct timespec hold = {.tv_sec = end / 1000000000ull, .tv_nsec = end % 1000000000ull};
+        int error;
+        while ((error = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &hold, NULL)) == EINTR) {}
+        if (error) die("idle hold failed");
+        journal_footer_rusage(journal);
+        fprintf(journal, "# pid %ld\n", (long)getpid());
+        fprintf(journal, "# mode idle_hold\n");
+        fclose(journal);
+        return 0;
+    }
+    if (opt_workload == WL_RETAINED) {
+        /* Eight 240x24 tiles as sync-mode subsurfaces over a parent
+         * whose once-attached buffer is load-bearing (a bufferless
+         * layer surface and its subsurfaces are unmapped). Tiles are
+         * fresh sealed memfds made once, filled with generation i+1;
+         * each submission rotates tile t to slot (t + i - 1) mod 8 by
+         * submission index, warmup included. No new pixels per frame. */
+        if (!subcompositor)
+            die("compositor lacks wl_subcompositor");
+        struct wl_buffer *parent_buffer =
+            fresh_buffer(PANEL_W, PANEL_H, 1, NULL, NULL);
+        wl_surface_attach(main_panel.surface, parent_buffer, 0, 0);
+        wl_surface_damage_buffer(main_panel.surface, 0, 0, PANEL_W, PANEL_H);
+        struct wl_surface *tile_surface[8];
+        struct wl_subsurface *tile_sub[8];
+        for (unsigned t = 0; t < 8; t++) {
+            tile_surface[t] = wl_compositor_create_surface(compositor);
+            tile_sub[t] = wl_subcompositor_get_subsurface(
+                subcompositor, tile_surface[t], main_panel.surface);
+            struct wl_buffer *tile =
+                fresh_buffer(240, PANEL_H, t + 1, NULL, NULL);
+            wl_surface_attach(tile_surface[t], tile, 0, 0);
+            wl_surface_damage_buffer(tile_surface[t], 0, 0, 240, PANEL_H);
+            // Synchronized children cache their commits until the parent commit.
+            wl_surface_commit(tile_surface[t]);
+        }
+        for (unsigned i = 1; i <= total; i++) {
+            bool counted = i > opt_warmup;
+            unsigned k = counted ? i - opt_warmup : 0;
+            callback_done = (i == 1);
+            while (!callback_done) {
+                if (wl_display_dispatch(display) < 0)
+                    die("dispatch while pacing retained");
+            }
+            pace[i] = (i == 1) ? -1 : (int64_t)callback_time;
+            fill_start[i] = mono_ns();
+            for (unsigned t = 0; t < 8; t++)
+                wl_subsurface_set_position(
+                    tile_sub[t], (int32_t)(((t + i - 1) % 8) * 240), 0);
+            struct feedback *fb = calloc(1, sizeof(*fb));
+            fb->presented_ns = counted ? &rec_presented[k - 1] : NULL;
+            struct wp_presentation_feedback *pf =
+                wp_presentation_feedback(presentation, main_panel.surface);
+            wp_presentation_feedback_add_listener(pf, &feedback_listener, fb);
+            struct wl_callback *cb = wl_surface_frame(main_panel.surface);
+            wl_callback_add_listener(cb, &frame_listener, NULL);
+            callback_done = false;
+            submit[i] = mono_ns();
+            wl_surface_commit(main_panel.surface);
+        }
+        uint64_t drain_end = mono_ns() + 5000000000ull;
+        for (;;) {
+            unsigned got = 0;
+            for (unsigned k = 0; k < opt_frames; k++)
+                if (rec_presented[k] >= 0)
+                    got++;
+            if (got == opt_frames || mono_ns() >= drain_end)
+                break;
+            struct timespec ts = {.tv_sec = 0, .tv_nsec = 100000000};
+            if (wl_display_dispatch_timeout(display, &ts) < 0)
+                break;
+        }
+        for (unsigned i = opt_warmup + 1; i <= total; i++) {
+            unsigned k = i - opt_warmup;
+            journal_frame(journal, k, fill_start[i], submit[i],
+                          rec_presented[k - 1], pace[i], "wp_presentation");
+        }
+        journal_footer_rusage(journal);
+        fprintf(journal, "# pid %ld\n", (long)getpid());
+        fprintf(journal, "# mode frame_callback\n");
+        fclose(journal);
+        return 0;
+    }
     for (unsigned i = 1; i <= total; i++) {
         bool counted = i > opt_warmup;
         unsigned k = counted ? i - opt_warmup : 0; /* counted index 1..F */
-        uint64_t generation = counted ? k : i;     /* fill generation */
+        uint64_t generation = i; /* includes warmup, matching Sophia */
         struct slot *slot = NULL, *bslot = NULL;
-        callback_done = (i == 1);
+        callback_done = (i == 1) || opt_workload == WL_BURSTY;
         /* Wait for the previous frame callback and capacity on every
          * surface that takes part in this submission: a free pool slot
          * (reuse) or in-flight headroom under --buffers (fresh). */
         for (;;) {
-            if (opt_fresh) {
+            if (fresh_mode) {
                 if (callback_done && fresh_inflight < opt_buffers &&
                     (!opt_bulk || fresh_inflight_bulk < opt_buffers))
                     break;
@@ -404,9 +595,26 @@ int main(int argc, char **argv) {
             if (wl_display_dispatch(display) < 0)
                 die("dispatch while pacing");
         }
-        pace[i] = (i == 1) ? -1 : (int64_t)callback_time;
+        if (opt_workload == WL_BURSTY) {
+            /* Absolute timer, no drift, not callback-gated: update i is
+             * due at t0 + (i-1)*interval; pace_ns is the due time. */
+            static uint64_t t0;
+            if (i == 1)
+                t0 = mono_ns();
+            uint64_t due = t0 + (uint64_t)(i - 1) * opt_interval_ms * 1000000ull;
+            while (fresh_inflight >= opt_buffers || mono_ns() < due) {
+                uint64_t now = mono_ns();
+                uint64_t wait = now < due ? due - now : 1000000000ull;
+                struct timespec ts = {.tv_sec = wait / 1000000000ull, .tv_nsec = wait % 1000000000ull};
+                if (wl_display_dispatch_timeout(display, &ts) < 0)
+                    die("dispatch while waiting for bursty due time");
+            }
+            pace[i] = (int64_t)due;
+        } else {
+            pace[i] = (i == 1) ? -1 : (int64_t)callback_time;
+        }
         fill_start[i] = mono_ns();
-        if (opt_fresh) {
+        if (fresh_mode) {
             /* fill_start precedes memfd_create: the whole producer
              * lifecycle is inside fill->presented, as on the peer. */
             submit_fresh(main_panel.surface, PANEL_W, PANEL_H, generation,
@@ -419,7 +627,7 @@ int main(int argc, char **argv) {
             struct wl_callback *cb = wl_surface_frame(main_panel.surface);
             wl_callback_add_listener(cb, &frame_listener, NULL);
             callback_done = false;
-            if (opt_bulk) {
+            if (opt_bulk && opt_workload == WL_FRESH) {
                 submit_fresh(bulk_panel.surface, BULK_W, BULK_H, generation,
                              &fresh_inflight_bulk);
                 struct feedback *bfb = calloc(1, sizeof(*bfb));
@@ -479,17 +687,12 @@ int main(int argc, char **argv) {
         journal_frame(journal, k, fill_start[i], submit[i],
                       rec_presented[k - 1], pace[i], "wp_presentation");
     }
-    struct rusage ru;
-    getrusage(RUSAGE_SELF, &ru);
-    fprintf(journal,
-            "# rusage utime_ns=%lld stime_ns=%lld minflt=%lld majflt=%lld\n",
-            (long long)(ru.ru_utime.tv_sec * 1000000000ll +
-                        ru.ru_utime.tv_usec * 1000ll),
-            (long long)(ru.ru_stime.tv_sec * 1000000000ll +
-                        ru.ru_stime.tv_usec * 1000ll),
-            (long long)ru.ru_minflt, (long long)ru.ru_majflt);
+    journal_footer_rusage(journal);
     fprintf(journal, "# pid %ld\n", (long)getpid());
-    fprintf(journal, "# mode frame_callback\n");
+    fprintf(journal, "# mode %s\n",
+            opt_workload == WL_BURSTY    ? "absolute_timer"
+            : opt_workload == WL_IDLE    ? "idle_hold"
+                                         : "frame_callback");
     fclose(journal);
     return 0;
 }

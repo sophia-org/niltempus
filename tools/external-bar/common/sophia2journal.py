@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert one Sophia shell_timing_peer run into an external-bar journal (rev 4).
+"""Convert one validated Sophia native join into a rev-5 diagnostic journal.
 
   sophia2journal.py STAGE_DIR --out sophia.tsv [--warmup U] [--buffers 2]
 
@@ -21,8 +21,10 @@ xtask join), as in ~/.local/state/t331/panel23r-*. Per candidate generation:
 
 All values are CLOCK_MONOTONIC microseconds in the source, written as ns.
 The first U generations are dropped as warmup and the rest renumbered 1..F;
-counted frame k therefore carries generation k+U (shade (k+U)%128): same byte
-count and write pattern as the reference clients, different shade value.
+counted frame k therefore carries generation k+U, matching the reference clients.
+Bursty pacing remains unavailable until the producer records scheduled due times;
+upload start must not be substituted. The received schema-4 producer changes the
+whole frame, so its fill label intentionally differs from corrected references.
 
 CPU is NOT taken from native-samples here: run account.py sample on the
 Session PID set before and after, exactly as for River and Xorg, so all arms
@@ -43,8 +45,10 @@ def main():
     ap.add_argument("--warmup", type=int, default=0)
     ap.add_argument("--buffers", type=int, default=2,
                     help="in-flight resource bound to declare; must equal the reference arms'")
+    ap.add_argument('--idle-sec', type=int, default=0,
+                    help='must match the explicit typed runner idle declaration')
     args = ap.parse_args()
-    if args.warmup < 0 or args.buffers != 2:
+    if args.warmup < 0 or args.buffers != 2 or args.idle_sec < 0:
         sys.exit("warmup must be nonnegative; the current peer has two resource ids")
     stage = Path(args.stage)
 
@@ -52,6 +56,8 @@ def main():
     for line in (stage / "client.ndjson").read_text().splitlines():
         e = json.loads(line)
         events[e["event"]].append(e)
+    if len(events['start']) != 1 or len(events['end']) != 1:
+        sys.exit('requires exactly one start and end')
     start = events["start"][0]
     if start.get("wire") != "files" or start.get("source") != "sealed":
         sys.exit(f"not a sealed files run: {start}")
@@ -70,6 +76,33 @@ def main():
     data = json.loads((stage / "native-samples.json").read_text())
     if data.get("schema") != 2 or data.get("verdict") != "joined_only":
         sys.exit("requires a schema-2 native xtask join; this converter does not establish kernel/head evidence")
+    metadata = data.get('journal') or {}
+    if any(metadata.get(key) != start.get(key) for key in ('schema', 'wire', 'source', 'probe_bytes', 'workload', 'interval_msec', 'retained_resources')):
+        sys.exit('raw start differs from validated native journal')
+    if [e['upload'] for e in events['upload_offer']] != [u['upload'] for u in metadata.get('uploads', [])]:
+        sys.exit('raw uploads differ from the validated native journal')
+    if [{k: e[k] for k in ('generation','demand_usec','received_usec')} for e in events['permit']] != metadata.get('permits'):
+        sys.exit('raw permits differ from the validated native journal')
+    if [e['observed_monotonic_usec'] for e in events['terminal']] != metadata.get('terminal_usec'):
+        sys.exit('raw terminals differ from the validated native journal')
+    timing = data.get('external_timing') or {}
+    interval = metadata.get('interval_msec') or 0
+    tiles = metadata.get('retained_resources') or 0
+    workload = 'retained' if tiles else 'bursty' if interval else 'idle' if timing.get('workload') == 'idle' else 'fresh'
+    idle = timing.get('seconds', 0) if workload == 'idle' else 0
+    if args.idle_sec and args.idle_sec != idle:
+        sys.exit('idle requires the matching typed runner declaration')
+    if workload == 'idle' and (start['frames'] != 1 or args.warmup or idle != 60):
+        sys.exit('idle requires one frame, no warmup and the approved 60-second window')
+    if workload == 'bursty' and (timing.get('workload') != 'bursty' or timing.get('interval_msec') != interval or timing.get('warmup') != args.warmup):
+        sys.exit('bursty requires the matching typed runner declaration')
+    if workload == 'retained':
+        pool = [u for u in metadata.get('uploads', []) if u['purpose'] == 'retained']
+        if tiles != 8 or len(pool) != 8 or any((u['upload']['width'], u['upload']['height']) != (240, 24) for u in pool):
+            sys.exit('retained requires eight validated 240x24 tiles')
+    for name, table in [('offer', offers), ('permit', permits), ('terminal', terminal)]:
+        if len(table) != len(events[name]):
+            sys.exit(f'duplicate {name} generation')
     samples = {s["candidate_generation"]: s for s in data["samples"]}
     if len(samples) != len(data["samples"]):
         sys.exit("duplicate native sample generation")
@@ -79,10 +112,13 @@ def main():
             sys.exit(f"native sample {generation} does not match its exact offer")
 
     gens = sorted(offers)
-    if gens != list(range(1, len(gens) + 1)):
+    if gens != list(range(1, len(gens) + 1)) or len(gens) != start['frames'] or set(samples) != set(gens):
         sys.exit("offered generations not contiguous from 1")
     for g in gens:
-        for name, table in (("upload", uploads), ("permit", permits), ("terminal", terminal)):
+        required = (("permit", permits), ("terminal", terminal))
+        if workload != 'retained':
+            required += (("upload", uploads),)
+        for name, table in required:
             if g not in table:
                 sys.exit(f"generation {g} has no {name}")
     if args.warmup >= len(gens):
@@ -93,23 +129,27 @@ def main():
         j.write(
             "# header arm=sophia width=1920 height=24 buffers=%d fill=shade_mod128_a255 "
             "frames=%d warmup=%d bulk=%d bulk_width=%d bulk_height=%d lifecycle=fresh "
+            "workload=%s tiles=%d interval_ms=%d damage=%s idle_sec=%d "
             "clock=CLOCK_MONOTONIC_ns presented_clock=kernel_flip_usec_all_heads_xtask_join\n"
-            % (args.buffers, len(counted), args.warmup, bulk, 1024 if bulk else 0, 1024 if bulk else 0)
+            % (args.buffers, len(counted), args.warmup, bulk, 1024 if bulk else 0, 1024 if bulk else 0,
+               workload, tiles, interval, '96x24+1824+0' if workload == 'bursty' else 'full', idle)
         )
         j.write(f"# source {stage.resolve()}\n# mode sophia_files_sealed\n")
+        if workload == 'bursty':
+            j.write('# note unqualified: received producer changes the whole frame; scheduled due times unavailable\n')
         for k, g in enumerate(counted, 1):
             presented = -1
             if terminal[g]["outcome"] == "presented" and g in samples:
                 presented = samples[g]["completed_monotonic_usec"] * 1000
             j.write("%d\t%d\t%d\t%d\t%d\t%s\n" % (
                 k,
-                uploads[g]["begin_usec"] * 1000,
+                permits[g]['received_usec'] * 1000 if workload == 'retained' else uploads[g]["begin_usec"] * 1000,
                 offers[g]["submitted_monotonic_usec"] * 1000,
                 presented,
-                permits[g]["received_usec"] * 1000,
+                -1 if workload == 'bursty' else permits[g]["received_usec"] * 1000,
                 "sophia_kernel_flip",
             ))
-        diag = data.get("costs", {}).get("diagnostics", {})
+        diag = (data.get("costs") or {}).get("diagnostics", {})
         for role in ("session", "peer", "combined"):
             if role in diag:
                 d = diag[role]

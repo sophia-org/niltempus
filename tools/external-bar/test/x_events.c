@@ -42,8 +42,8 @@ int main(void) {
     completion(XCB_PRESENT_COMPLETE_MODE_FLIP, 9, 1);
     completion(XCB_PRESENT_COMPLETE_MODE_SUBOPTIMAL_COPY, 9, 1);
     for (unsigned i = 0; i < 5; i++) refusal(i);
-    struct shmbuf buffer = { .pixmap = 12, .serial = 6, .busy = 1 };
-    struct ctx c = { .win = 9, .present_opcode = 73, .nbufs = 1, .bufs = &buffer };
+    struct back buffer = { .pixmap = 12, .serial = 6, .busy = 1 };
+    struct ctx c = { .win = 9, .present_opcode = 73, .nbacks = 1, .backs = &buffer };
     xcb_present_idle_notify_event_t event = {
         .response_type = XCB_GE_GENERIC, .extension = 73,
         .event_type = XCB_PRESENT_EVENT_IDLE_NOTIFY,

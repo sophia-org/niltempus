@@ -207,8 +207,8 @@ diagnostic-only and all native matching and interval requirements above remain.
 Niltempus approved idle, bursty and retained as representative CPU-backed shell
 workloads, with fresh the worst-case bound. The authoritative t331 amendment is
 Sophia's `mvbubiv9` plan. The rev-5 handback is frozen, with 23 verified source
-hashes, at `t331-d4-owned-copy-20261021/external-bar-handback-03`. It has not yet
-replaced the corrected rev-4 integration clients above.
+hashes, at `t331-d4-owned-copy-20261021/external-bar-handback-03`. The integration
+below supersedes the rev-4 clients while retaining their refusal controls.
 
 **Choose (b): extend this typed runner before bursty/idle captures.** The
 converter stays downstream of a validated native join. The runner now parses
@@ -248,3 +248,48 @@ fixture; its isolated serial retry passed. Both outcomes are retained at
 `t331-d4-owned-copy-20261021/external-runner-schema4-01`. No bursty/idle desktop
 or protocol smoke was run by these checks; the 90-second idle example above is
 configuration guidance, not an observed window.
+
+### Rev-5 reference integration and software smokes — October 21
+
+The reference clients now implement all four workloads. Bursty fills the entire
+fresh buffer with a constant background and a changing rightmost 96×24 region;
+X back pixmaps receive a complete initial fill. Generations include warmup, as
+on the Sophia peer. Idle holds extend four seconds beyond the requested quiet
+duration and flush the first presentation row before waiting. The Wayland
+retained path commits each synchronized child before its parent; attaching a
+tile without committing the child did not make its content visible.
+
+Wayland requires a named output on multi-output desktops, checks configured
+panel dimensions, and refuses insufficient output size, scaling or rotation.
+The headless smoke helper configures exactly one HEADLESS-1 at 1920×1080@60,
+scale 1, inside the device-hidden sandbox. The first rev-5 smoke's default
+1280-wide output put the bursty damage beyond the output; bursty and retained
+then delivered zero feedback despite client exit success. Those failed logs
+remain alongside corrected runs. Smoke results require complete presentation
+rows, not merely an exit status.
+
+The final `external-rev5-{wl,x}-{fresh,bursty,retained,idle}-03` runs each
+completed all expected rows: eight after two warmup frames for active workloads,
+one for idle. These use a short 1-second idle duration and 25 ms burst interval
+to exercise protocols, not the 60-second/250 ms measurement recipe. Wayland used
+River's headless pixman backend; X used the installed X.Org dummy server with
+xcompmgr `-n`, not XLibre. No physical display, GPU, Sophia Session or seated
+benchmark was started. The evidence inventory and source/binary hashes are in
+`t331-d4-owned-copy-20261021/external-rev5-integration-01`.
+
+The rev-5 reporter selects fill-to-presentation latency for fresh/bursty and
+pacing-to-presentation for retained; idle reports CPU per second. Thread switch
+differences cover surviving endpoint threads only and are labelled lower bounds,
+not complete lifetime accounting or wakeups. Client whole-run rusage does not
+become a measured-window CPU value. Six Python test groups cover accounting,
+converter identities, workload selection and rejection controls; fill parity,
+bursty bounds/guards and X event negative controls pass. C builds use
+`-Wall -Wextra -Werror`.
+
+The converter now handles the four workloads downstream of the typed native
+join. It does not invent bursty due timestamps or relabel the incoming Sophia
+peer's changing whole-frame pattern as the corrected reference pattern: their
+headers intentionally fail to join until the peer is corrected. Synchronized
+server/client sampling, complete thread lifetime coverage, native output/GPU
+proof and composed X scanout association remain unfinished. Reports stay
+diagnostic-only; numeric acceptance ratios remain unset.

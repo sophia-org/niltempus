@@ -26,6 +26,7 @@ import os
 import statistics
 import sys
 import time
+from thread_stats import read_threads, endpoint_delta
 
 CLK_TCK = os.sysconf("SC_CLK_TCK")
 
@@ -36,6 +37,11 @@ def read_stat(pid):
     rp = raw.rindex(")")
     comm = raw[raw.index("(") + 1 : rp]
     fields = raw[rp + 2 :].split()
+    threads = read_threads(pid)
+    with open(f'/proc/{pid}/stat') as f:
+        again = f.read()
+    if int(again[again.rindex(')') + 2:].split()[19]) != int(fields[19]):
+        sys.exit('process identity changed during snapshot')
     # fields[0] is state (field 3); utime is field 14 -> index 11
     return dict(
         pid=int(pid),
@@ -45,6 +51,7 @@ def read_stat(pid):
         utime_ticks=int(fields[11]),
         stime_ticks=int(fields[12]),
         starttime=int(fields[19]),
+        threads=threads,
     )
 
 
@@ -54,6 +61,7 @@ def cmd_sample(args):
         clk_tck=CLK_TCK,
         pids=[read_stat(p) for p in args.pids],
     )
+    snap['mono_end_ns'] = time.monotonic_ns()
     with open(args.out, "w") as f:
         json.dump(snap, f, indent=1)
         f.write("\n")
@@ -124,7 +132,9 @@ def cpu_delta(before, after):
         sys.exit("duplicate PID in snapshot")
     if set(b) != set(a):
         sys.exit("pid sets differ between snapshots")
-    out = dict(cpu_ns=0, minflt=0, majflt=0, pids=[])
+    out = dict(cpu_ns=0, minflt=0, majflt=0, pids=[],
+               window_ns=after['mono_ns']-before['mono_ns'],
+               endpoint_context_switches=dict(voluntary=0, involuntary=0))
     for pid in sorted(b):
         if b[pid]["starttime"] != a[pid]["starttime"] or b[pid]["comm"] != a[pid]["comm"]:
             sys.exit(f"pid {pid} identity changed between snapshots")
@@ -137,6 +147,12 @@ def cpu_delta(before, after):
         out["minflt"] += a[pid]["minflt"] - b[pid]["minflt"]
         out["majflt"] += a[pid]["majflt"] - b[pid]["majflt"]
         out["pids"].append(f"{pid}:{b[pid]['comm']}")
+        switches = endpoint_delta(b[pid].get('threads'), a[pid].get('threads'))
+        if switches is None:
+            out['endpoint_context_switches'] = None
+        elif out['endpoint_context_switches'] is not None:
+            for key, value in switches.items():
+                out['endpoint_context_switches'][key] += value
     out["tick_ns"] = 1_000_000_000 // before["clk_tck"]
     # Each process's utime and stime are truncated tick counters, so each
     # delta is exact to within one tick per counter at each end: the true
@@ -162,8 +178,20 @@ def cmd_report(args):
 
     ignore = {"arm", "presented_clock"}
     for arm in arms:
-        if "lifecycle" not in arm["header"]:
-            sys.exit(f"{arm['name']}: journal header has no lifecycle (rev 4 required)")
+        required = {'lifecycle', 'workload', 'tiles', 'interval_ms', 'damage', 'idle_sec'}
+        if not required <= arm['header'].keys():
+            sys.exit(f"{arm['name']}: rev 5 workload header required")
+        if arm['header']['workload'] not in {'fresh', 'bursty', 'retained', 'idle'}:
+            sys.exit('unknown workload')
+        h = arm['header']
+        workload = h['workload']
+        if (int(h['tiles']) != (8 if workload == 'retained' else 0)
+                or (workload == 'bursty') != (int(h['interval_ms']) > 0)
+                or (workload == 'idle') != (int(h['idle_sec']) > 0)
+                or h['damage'] != ('96x24+1824+0' if workload == 'bursty' else 'full')
+                or (workload != 'fresh' and int(h['bulk']) != 0)
+                or (workload == 'idle' and (int(h['frames']) != 1 or int(h['warmup']) != 0))):
+            sys.exit('workload header contradicts its declared shape')
     ref = {k: v for k, v in arms[0]["header"].items() if k not in ignore}
     for arm in arms[1:]:
         h = {k: v for k, v in arm["header"].items() if k not in ignore}
@@ -193,11 +221,14 @@ def cmd_report(args):
         # clients fill after their pacing event, so submit and pace sit at
         # different points of the pipeline; fill start does not.
         fill_lat = ns_quantiles([r["presented"] - r["fill_start"] for r in presented])
+        pace_lat = ns_quantiles([r['presented']-r['pace'] for r in presented if r['pace'] >= 0])
         pace_to_submit = ns_quantiles([r["submit"] - r["pace"] for r in presented if r["pace"] >= 0])
         spacing = ns_quantiles(
             [b2["presented"] - a2["presented"] for a2, b2 in zip(presented, presented[1:])]
         )
         sources = sorted({r["source"] for r in presented})
+        if len(sources) > 1:
+            sys.exit('mixed presentation sources cannot supply one latency distribution')
         ru = {}
         if "rusage" in arm["meta"]:
             ru = dict(kv.split("=") for kv in arm["meta"]["rusage"].split())
@@ -209,6 +240,11 @@ def cmd_report(args):
         # delivered counted frames.
         warmup = int(arm["header"]["warmup"])
         server = arm["cpu"]
+        workload = arm['header']['workload']
+        selected = pace_lat if workload == 'retained' else fill_lat
+        if workload == 'idle' or any(s in {'xpresent_recv', 'shm_completion'} for s in sources):
+            selected = None
+        per_second = 1e9 / server['window_ns']
         results.append(
             dict(
                 arm=arm["name"],
@@ -226,6 +262,13 @@ def cmd_report(args):
                 server_pids=server["pids"],
                 server_minflt=server["minflt"],
                 server_majflt=server["majflt"],
+                server_cpu_per_second_us=server['cpu_ns'] * per_second / 1000,
+                server_cpu_per_second_us_bounds=[server[k] * per_second / 1000 for k in ('cpu_ns_lower','cpu_ns_upper')],
+                server_context_switches_endpoint_lower_bound_per_second={
+                    k: v * per_second for k,v in server['endpoint_context_switches'].items()
+                } if server['endpoint_context_switches'] is not None else None,
+                context_switch_coverage='surviving_endpoint_threads_only_not_wakeups',
+                client_window_cpu_per_second_us=None,
                 client_cpu_ns=client_cpu,
                 client_cpu_per_submitted_frame_us=(client_cpu / (submitted + warmup) / 1000)
                 if submitted and client_cpu is not None
@@ -234,6 +277,8 @@ def cmd_report(args):
                 client_majflt=int(ru.get("majflt", -1)),
                 submit_to_presented_us={k: v if k == "n" else v / 1000 for k, v in lat.items()} if lat else None,
                 fill_to_presented_us={k: v if k == "n" else v / 1000 for k, v in fill_lat.items()} if fill_lat else None,
+                cross_arm_latency_kind='pace_to_presented' if workload == 'retained' else 'fill_to_presented',
+                cross_arm_latency_us={k: v if k == 'n' else v / 1000 for k,v in selected.items()} if selected else None,
                 pace_to_submit_us={k: v if k == "n" else v / 1000 for k, v in pace_to_submit.items()} if pace_to_submit else None,
                 intercompletion_us={k: v if k == "n" else v / 1000 for k, v in spacing.items()} if spacing else None,
                 presented_sources=sources,
@@ -255,14 +300,22 @@ def cmd_report(args):
         ("arm", lambda r: r["arm"]),
         ("delivered/submitted", lambda r: f"{r['delivered']}/{r['submitted']}"),
         ("server CPU/frame us [bounds]", lambda r: bounds(r)),
+        ('server CPU us/s', lambda r: fmt(r['server_cpu_per_second_us'])),
         ("client CPU/frame us", lambda r: fmt(r["client_cpu_per_submitted_frame_us"])),
-        ("fill->presented p50/p95/p99 ms", lambda r: q3(r["fill_to_presented_us"])),
+        ("workload latency p50/p95/p99 ms", lambda r: q3(r["cross_arm_latency_us"])),
         ("submit->presented p50/p95/p99 ms", lambda r: q3(r["submit_to_presented_us"])),
         ("pace->submit p50 ms", lambda r: fmt(r["pace_to_submit_us"]["p50"] / 1000) if r["pace_to_submit_us"] else "-"),
         ("spacing p50 ms", lambda r: fmt(r["intercompletion_us"]["p50"] / 1000) if r["intercompletion_us"] else "-"),
         ("server faults min/maj", lambda r: f"{r['server_minflt']}/{r['server_majflt']}"),
         ("presented source", lambda r: ",".join(r["presented_sources"])),
     ]
+    if ref['workload'] == 'idle':
+        cols = [
+            ('arm', lambda r: r['arm']),
+            ('server CPU us/s', lambda r: fmt(r['server_cpu_per_second_us'])),
+            ('endpoint thread switches/s (lower bound)', lambda r: str(r['server_context_switches_endpoint_lower_bound_per_second'])),
+            ('client window CPU', lambda r: 'unavailable (whole-run rusage only)'),
+        ]
     widths = [max(len(c[0]), *(len(c[1](r)) for r in results)) for c in cols]
     print("  ".join(c[0].ljust(w) for c, w in zip(cols, widths)))
     for r in results:
@@ -272,7 +325,8 @@ def cmd_report(args):
           f"counters tick at {results[0]['server_tick_ns'] / 1e6:.0f} ms, so bounds are +-2 ticks per process",
           "spread over delivered frames. Attribution intervals, not confidence intervals;",
           "a single run is an observation, not a bound on any other run.")
-    print("Compare arms on fill->presented; submit and pace sit at different pipeline points per arm.")
+    print('Workload latency is pace->presented for retained, fill->presented for fresh/bursty; idle has no per-frame latency gate.')
+    print('Context switches cover surviving endpoint threads only, not wakeups; short-lived threads need separate lifetime evidence.')
     print("External rows price the pixel path only: mutable buffers, cooperative release,",
           "no identity, checksum or evidence journal. They are not acceptance rows.")
     for r in results:

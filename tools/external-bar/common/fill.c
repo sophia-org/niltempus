@@ -13,3 +13,9 @@ void fill_pixels(uint8_t *bytes, size_t len, uint64_t generation) {
     }
     memset(bytes + pixels * 4, shade, len - pixels * 4);
 }
+
+void fill_bursty_panel(uint8_t *bytes, uint64_t generation) {
+    fill_pixels(bytes, 1920u * 24u * 4u, 1);
+    for (unsigned y = 0; y < 24; y++)
+        fill_pixels(bytes + (y * 1920u + 1824u) * 4u, 96u * 4u, generation);
+}

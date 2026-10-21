@@ -75,9 +75,10 @@ def inside(args):
             with (runtime/'client.log').open('w') as client_log:
                 result = subprocess.run([
                     args.client, '--journal', str(runtime/'journal.tsv'),
-                    '--frames', '8', '--warmup', '2', '--buffers', '2',
-                    '--mode', 'present', '--lifecycle', args.lifecycle], env=env,
-                    stdout=client_log, stderr=subprocess.STDOUT, timeout=12)
+                    '--frames', '1' if args.workload == 'idle' else '8', '--warmup', '0' if args.workload == 'idle' else '2', '--buffers', '2',
+                    '--lifecycle', args.lifecycle, '--workload', args.workload,
+                    '--idle-sec', str(args.idle_sec), '--interval-ms', '25'], env=env,
+                    stdout=client_log, stderr=subprocess.STDOUT, timeout=max(12, args.idle_sec + 8))
             return result.returncode
         finally:
             stop(compositor)
@@ -92,6 +93,8 @@ def main():
     parser.add_argument('--out', type=Path)
     parser.add_argument('--inside', action='store_true')
     parser.add_argument('--lifecycle', choices=('fresh', 'reuse'), default='fresh')
+    parser.add_argument('--workload', choices=('fresh', 'bursty', 'retained', 'idle'), default='fresh')
+    parser.add_argument('--idle-sec', type=int, default=1, help='short protocol smoke, not the 60s gate')
     args = parser.parse_args()
     if args.inside:
         return inside(args)
@@ -103,10 +106,10 @@ def main():
                '--bind', str(args.out.resolve()), '/tmp/runtime', '--chdir', '/tmp/runtime',
                'python3', str(Path(__file__).resolve()), '--inside',
                '--server', str(Path(args.server).resolve()),
-               '--client', str(Path(args.client).resolve()), '--lifecycle', args.lifecycle]
+               '--client', str(Path(args.client).resolve()), '--lifecycle', args.lifecycle, '--workload', args.workload, '--idle-sec', str(args.idle_sec)]
     if args.compositor:
         command.extend(['--compositor', str(Path(args.compositor).resolve())])
-    return subprocess.run(command, timeout=30).returncode
+    return subprocess.run(command, timeout=max(30, args.idle_sec + 20)).returncode
 
 
 if __name__ == '__main__':

@@ -14,5 +14,7 @@
 #include <stdint.h>
 
 void fill_pixels(uint8_t *bytes, size_t len, uint64_t generation);
+/* Rewrites all 1920x24 pixels; only the rightmost 96x24 change between updates. */
+void fill_bursty_panel(uint8_t *bytes, uint64_t generation);
 
 #endif
