@@ -750,10 +750,22 @@ pub fn verify_sources(request: &Request) -> Result<(), String> {
 /// Recheck a prepared plan without launching it. Campaign preparation uses the
 /// same artifact and argv checks as an individual native run.
 pub fn verify_prepared(bytes: &[u8]) -> Result<(Request, u64), String> {
+    verify_prepared_for(bytes, false)
+}
+
+/// The panel diagnostic supports reference-client plans; legacy campaigns do not.
+pub fn verify_panel_prepared(bytes: &[u8]) -> Result<(Request, u64), String> {
+    verify_prepared_for(bytes, true)
+}
+
+fn verify_prepared_for(bytes: &[u8], reference: bool) -> Result<(Request, u64), String> {
     if bytes.len() > MAX_INPUT as usize {
         return Err("plan exceeds input bound".into());
     }
     let plan: Plan = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+    if plan.request.reference_workload.is_some() && !reference {
+        return Err("reference plans require the panel diagnostic".into());
+    }
     if plan.schema != 1 || validate(&plan.request)? != plan.argv {
         return Err("plan arguments differ".into());
     }
@@ -762,8 +774,14 @@ pub fn verify_prepared(bytes: &[u8]) -> Result<(Request, u64), String> {
     if sha256(&peer_bytes) != plan.request.artifacts["peer-config"].sha256 {
         return Err("peer configuration changed during verification".into());
     }
-    let peer: PeerConfig = serde_json::from_slice(&peer_bytes).map_err(|e| e.to_string())?;
-    Ok((plan.request, peer.probe_bytes))
+    let probe_bytes = if plan.request.reference_workload.is_some() {
+        validate_reference(&plan.request, &peer_bytes)?;
+        0 // The reference config has no probe field or probe workload.
+    } else {
+        let peer: PeerConfig = serde_json::from_slice(&peer_bytes).map_err(|e| e.to_string())?;
+        peer.probe_bytes
+    };
+    Ok((plan.request, probe_bytes))
 }
 
 /// Attended campaign hooks. Preparation happens only after console, source,
@@ -949,11 +967,11 @@ fn run_inner(
             write(&stage.join("client.ndjson"), client.as_bytes())?;
             write(&stage.join("native.log"), host.as_bytes())?;
             let metrics = crate::shell_timing::collect_metrics(&client, plan.request.frames)?;
-            validate_captured_config(
-                &metrics,
-                &plan.request,
-                &bounded(&plan.request.artifacts["peer-config"].path, MAX_INPUT)?,
-            )?;
+            let peer_bytes = bounded(&plan.request.artifacts["peer-config"].path, MAX_INPUT)?;
+            if sha256(&peer_bytes) != plan.request.artifacts["peer-config"].sha256 {
+                return Err("peer configuration changed during capture".into());
+            }
+            validate_captured_config(&metrics, &plan.request, &peer_bytes)?;
             let offers = &metrics.offers;
             let samples = crate::shell_timing::join(
                 &host,

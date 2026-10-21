@@ -162,6 +162,11 @@ The client must retain its connection, grant and final resources for the
 configured post-terminal hold (default 5 seconds). Session lifetime alone does
 not keep the helper alive. Idle windows need separate time-based analysis.
 
+Before handing a prepared wrapper to the operator, run the pinned runner's
+`xtask shell-timing check-panel-diagnostic DESCRIPTOR SHA256` for every arm.
+This uses the same descriptor/config verification as capture, checks the signed
+source trees and PAM helper, and creates no stage or Session.
+
 `capture-panel-diagnostic` schema 2 binds Session and client independently of the
 sampler. Draw/mixed arms also bind the one raster helper beneath that Session;
 ring refuses an observed helper. Every capture records helper identity and alive

@@ -104,6 +104,15 @@ fn changed_descriptor_never_creates_a_stage_or_reaches_launch() {
     ])
     .unwrap_err();
     assert_eq!(error, "diagnostic descriptor changed");
+    assert_eq!(
+        run(&[
+            "check-panel-diagnostic".into(),
+            descriptor.display().to_string(),
+            "0".repeat(64),
+        ])
+        .unwrap_err(),
+        "diagnostic descriptor changed"
+    );
     assert!(!stage.exists());
     std::fs::remove_dir_all(root).unwrap();
 }

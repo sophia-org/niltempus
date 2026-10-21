@@ -94,7 +94,7 @@ fn verify(d: &Descriptor) -> Result<Request, String> {
     let bytes = artifact(&d.plan, CAP)?;
     artifact(&d.python, 128 * CAP)?;
     artifact(&d.sampler, CAP)?;
-    let (request, probe) = shell_timing_native::verify_prepared(&bytes)?;
+    let (request, probe) = shell_timing_native::verify_panel_prepared(&bytes)?;
     policy(d, &request, probe)?;
     let config: serde_json::Value =
         serde_json::from_slice(&artifact(&request.artifacts["peer-config"], CAP)?)
@@ -369,19 +369,34 @@ impl CampaignObserver for Observer<'_> {
     }
 }
 
-pub fn run(args: &[String]) -> Result<Vec<String>, String> {
-    let [command, descriptor, digest, stage] = args else {
-        return Err("expected capture-panel-diagnostic DESCRIPTOR SHA256 NEW_RUN_DIR".into());
-    };
-    if command != "capture-panel-diagnostic" {
-        return Err("unknown panel diagnostic command".into());
-    }
-    let bytes = read_bounded(Path::new(descriptor), CAP)?;
-    if crate::sha256(&bytes) != *digest {
+fn checked_descriptor(path: &str, digest: &str) -> Result<(Vec<u8>, Descriptor, Request), String> {
+    let bytes = read_bounded(Path::new(path), CAP)?;
+    if crate::sha256(&bytes) != digest {
         return Err("diagnostic descriptor changed".into());
     }
     let d: Descriptor = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     let request = verify(&d)?;
+    Ok((bytes, d, request))
+}
+
+pub fn run(args: &[String]) -> Result<Vec<String>, String> {
+    if let [command, descriptor, digest] = args
+        && command == "check-panel-diagnostic"
+    {
+        let (_, _, request) = checked_descriptor(descriptor, digest)?;
+        shell_timing_native::verify_sources(&request)?;
+        shell_timing_native::validate_pam_helper(&request.artifacts["pam-helper"].path)?;
+        return Ok(vec![
+            "panel diagnostic verified; no stage created or Session launched".into(),
+        ]);
+    }
+    let [command, descriptor, digest, stage] = args else {
+        return Err("expected check-panel-diagnostic DESCRIPTOR SHA256 or capture-panel-diagnostic DESCRIPTOR SHA256 NEW_RUN_DIR".into());
+    };
+    if command != "capture-panel-diagnostic" {
+        return Err("unknown panel diagnostic command".into());
+    }
+    let (bytes, d, request) = checked_descriptor(descriptor, digest)?;
     let mut observer = Observer {
         environment: LiveCampaignObserver::new(Condition::Idle, d.target.card.clone()),
         descriptor: &d,

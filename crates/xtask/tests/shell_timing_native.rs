@@ -903,3 +903,38 @@ fn reference_capture_uses_its_config_and_checks_source_cadence_and_hold() {
     f.request.reference_workload = None;
     assert!(validate_captured_config(&metrics, &f.request, config).is_err());
 }
+
+#[test]
+fn prepared_reference_arms_use_reference_decoder_through_reverification() {
+    use xtask::shell_timing::{DrawWorkload, ImageSource};
+    use xtask::shell_timing_native::{verify_panel_prepared, verify_prepared};
+    let mut fixture = Fixture::new("reference-reverify", "files");
+    for (source, expected) in [
+        ("ring", ImageSource::OwnedRing),
+        ("draw", ImageSource::Draw),
+        ("mixed", ImageSource::Mixed),
+    ] {
+        fixture.request.source = expected;
+        fixture.request.reference_workload = Some(DrawWorkload::Retained);
+        let config = serde_json::json!({"wire":"files","output":1,"frames":3,"source":source,"workload":"retained","hold_ms":5000});
+        fixture.put("peer-config", &serde_json::to_vec(&config).unwrap(), false);
+        let argv = validate(&fixture.request).unwrap();
+        let plan = serde_json::json!({"schema":1,"request":fixture.request,"argv":argv});
+        let bytes = serde_json::to_vec(&plan).unwrap();
+        assert_eq!(
+            verify_prepared(&bytes).unwrap_err(),
+            "reference plans require the panel diagnostic"
+        );
+        let (request, probe) = verify_panel_prepared(&bytes).unwrap();
+        assert_eq!(request.source, expected);
+        assert_eq!(probe, 0);
+        assert_eq!(request.reference_workload, Some(DrawWorkload::Retained));
+        // A config mutation after preparation still fails artifact binding.
+        fs::write(&fixture.request.artifacts["peer-config"].path, b"changed").unwrap();
+        assert!(
+            verify_panel_prepared(&bytes)
+                .unwrap_err()
+                .contains("artifact changed")
+        );
+    }
+}
