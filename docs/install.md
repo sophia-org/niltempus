@@ -129,6 +129,22 @@ automatically with the `min-free` and `max-free` settings in
 
 ### Keep authenticated clients in the release
 
+The ISB-only Sophia release also requires ISB-capable image clients. The
+2026-10-20 release `niltempus-f831f88dd353bb121cef` incorrectly paired Sophia
+`ed881c265` with pre-ISB Lom `dc65f56`, Bemenu `6e2efd9`, and Kleis `7927c69`.
+Lom negotiated revision 6 and repeatedly failed service; the operator saw no
+bar. Do not use that release as an acceptance baseline. The compatible client
+checkpoint is Lom `9245bd0`, Bemenu `2a1a73f`, and Kleis `5b31421`. Update all
+three pins when integrating the ISB-only server; profile validation alone
+does not exercise their image publication protocol.
+
+The same attended session exposed a separate broker journal wake defect:
+launching Kitty after idle ended Session with `broker service ended`. The
+broker's local publication must wake its parked journal reader before waiting
+for a response. Isolated real-process idle tests and the ordinary parked-read
+driver test cover that boundary; a replacement release still needs attended
+bar, application-launch, and lock/unlock acceptance.
+
 When updating Sophia, verify the locked revisions of every supervised client,
 not just Hagia. Profile validation checks configuration but does not exercise
 each client's authenticated connection.
