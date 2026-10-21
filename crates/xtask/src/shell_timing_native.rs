@@ -661,6 +661,51 @@ pub fn validate_captured_config(
     Ok(())
 }
 
+/// A reference peer must timestamp submission and receipt in the kernel
+/// completion's clock domain. Corrected vblank timestamps can lead receipt
+/// (about 0.5 ms in d4p-03); allow one nominal refresh after the terminal.
+/// This is a clock-consistency check, not a latency acceptance gate.
+pub fn validate_reference_timestamps(
+    metrics: &crate::shell_timing::Journal,
+    samples: &[crate::shell_timing::Sample],
+    mode_millihz: u64,
+) -> Result<(), String> {
+    if metrics.schema != 6 {
+        return Ok(());
+    }
+    if mode_millihz == 0 {
+        return Err("reference clock check requires a nonzero refresh rate".into());
+    }
+    let refresh_usec = 1_000_000_000u64.div_ceil(mode_millihz);
+    if samples.len() != metrics.offers.len() || samples.len() != metrics.terminal_usec.len() {
+        return Err("reference completion timestamp count differs".into());
+    }
+    for ((sample, offer), observed) in samples
+        .iter()
+        .zip(&metrics.offers)
+        .zip(&metrics.terminal_usec)
+    {
+        if (
+            sample.connection_epoch,
+            sample.content_grant_epoch,
+            sample.output,
+            sample.candidate_generation,
+        ) != (
+            offer.connection_epoch,
+            offer.content_grant_epoch,
+            offer.output,
+            offer.candidate_generation,
+        ) || sample.completed_monotonic_usec < offer.submitted_monotonic_usec
+            || sample.completed_monotonic_usec > observed.saturating_add(refresh_usec)
+        {
+            return Err(
+                "reference kernel completion is outside the submit/terminal clock window".into(),
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Compare profile policy across campaign arms while allowing only the peer
 /// executable/config paths and selected wire to differ. All other KDL values,
 /// properties and nodes remain part of the comparison.
@@ -979,6 +1024,7 @@ fn run_inner(
                 plan.request.mode_millihz,
                 plan.request.frames,
             )?;
+            validate_reference_timestamps(&metrics, &samples, plan.request.mode_millihz)?;
             let counters = std::str::from_utf8(&capture).map_err(|e| e.to_string())?;
             let progress = if plan.request.instrumentation == "progress" {
                 Some(crate::shell_progress::collect(counters)?)

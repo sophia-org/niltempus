@@ -68,6 +68,50 @@ fn mixed_retained_settles_panel_and_value_before_permits() {
 }
 
 #[test]
+fn kernel_completions_must_share_the_reference_clock_window() {
+    use xtask::shell_timing::Sample;
+    use xtask::shell_timing_native::validate_reference_timestamps;
+    let metrics = collect_metrics(&encode(&mixed_retained()), 9).unwrap();
+    let mut samples: Vec<_> = metrics
+        .offers
+        .iter()
+        .map(|offer| Sample {
+            connection_epoch: offer.connection_epoch,
+            content_grant_epoch: offer.content_grant_epoch,
+            output: offer.output,
+            candidate_generation: offer.candidate_generation,
+            native_owner: 1,
+            native_frame: offer.candidate_generation,
+            heads: 1,
+            submitted_monotonic_usec: offer.submitted_monotonic_usec,
+            completed_monotonic_usec: offer.submitted_monotonic_usec + 1,
+            latency_usec: 1,
+        })
+        .collect();
+    validate_reference_timestamps(&metrics, &samples, 60_000).unwrap();
+    // Real d4p-03 completions lead receipt by about 500 us.
+    samples[0].completed_monotonic_usec = metrics.terminal_usec[0] + 500;
+    validate_reference_timestamps(&metrics, &samples, 60_000).unwrap();
+    samples[0].completed_monotonic_usec = metrics.terminal_usec[0] + 16_667;
+    validate_reference_timestamps(&metrics, &samples, 60_000).unwrap();
+    samples[0].completed_monotonic_usec += 1;
+    assert!(validate_reference_timestamps(&metrics, &samples, 60_000).is_err());
+    assert!(validate_reference_timestamps(&metrics, &samples, 0).is_err());
+    // Regression: relative client timestamps used to accept an absolute
+    // kernel completion simply because it was greater than submission.
+    samples[0].completed_monotonic_usec += 1_000_000_000_000;
+    assert!(validate_reference_timestamps(&metrics, &samples, 60_000).is_err());
+    samples[0].completed_monotonic_usec = metrics.offers[0].submitted_monotonic_usec - 1;
+    assert!(validate_reference_timestamps(&metrics, &samples, 60_000).is_err());
+    samples[0].completed_monotonic_usec = metrics.offers[0].submitted_monotonic_usec;
+    validate_reference_timestamps(&metrics, &samples, 60_000).unwrap();
+    samples[0].connection_epoch += 1;
+    assert!(validate_reference_timestamps(&metrics, &samples, 60_000).is_err());
+    samples.pop();
+    assert!(validate_reference_timestamps(&metrics, &samples, 60_000).is_err());
+}
+
+#[test]
 fn update_on_wrong_retained_frame_is_refused() {
     let mut rows = mixed_retained();
     // Insert a value update at frame 2 (not a multiple-of-8 boundary).
