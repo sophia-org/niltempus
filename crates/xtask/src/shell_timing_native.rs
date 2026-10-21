@@ -98,6 +98,8 @@ struct PeerConfig {
     retained_resources: Option<u64>,
     #[serde(default, deserialize_with = "present_u64")]
     interval_msec: Option<u64>,
+    #[serde(default, deserialize_with = "present_u64")]
+    ring_slots: Option<u64>,
     image: Option<ImageConfig>,
 }
 
@@ -119,6 +121,22 @@ impl PeerConfig {
     fn workload(&self) -> Result<(WorkloadMode, Option<u64>), String> {
         let mode = self.workload;
         let retained = mode.check(self.retained_resources)?;
+        if self.source == ImageSource::OwnedRing {
+            if self.wire != "files"
+                || mode != WorkloadMode::Fresh
+                || self.probe_bytes != 0
+                || self.interval_msec.is_some()
+                || !self
+                    .ring_slots
+                    .is_some_and(|slots| (2..=4).contains(&slots))
+            {
+                return Err(
+                    "owned ring requires a fresh file panel and ring_slots in 2..=4".into(),
+                );
+            }
+        } else if self.ring_slots.is_some() {
+            return Err("ring_slots requires owned_ring source".into());
+        }
         if mode == WorkloadMode::Retained
             && (self.wire != "files" || self.source != ImageSource::Isb)
         {
@@ -317,8 +335,10 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
         || (peer.source == ImageSource::Isb && request.wire != "files")
         || match peer.source {
             ImageSource::Isb => !peer.image.as_ref().is_some_and(ImageConfig::valid),
-            ImageSource::Bytes => peer.image.is_some(),
+            ImageSource::Bytes | ImageSource::OwnedRing => peer.image.is_some(),
         }
+        || (peer.source == ImageSource::OwnedRing
+            && (request.instrumentation != "none" || request.external_timing.is_some()))
         || peer.output != request.output
         || peer.frames != request.frames
         || !(1..=512).contains(&peer.height)
@@ -830,6 +850,15 @@ fn run_inner(
                 workload,
                 retained,
             )?;
+            if metrics.ring.as_ref().map(|ring| ring.registration.slots) != peer.ring_slots
+                || metrics.source == ImageSource::OwnedRing
+                    && metrics
+                        .uploads
+                        .iter()
+                        .any(|copy| u64::from(copy.upload.height) != peer.height)
+            {
+                return Err("captured ring geometry differs from prepared configuration".into());
+            }
             let offers = &metrics.offers;
             let samples = crate::shell_timing::join(
                 &host,

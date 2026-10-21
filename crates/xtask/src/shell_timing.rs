@@ -24,6 +24,8 @@ pub enum ImageSource {
     /// Immutable Shared Buffers; retain the source label in frozen evidence.
     #[serde(rename = "sealed")]
     Isb,
+    /// Experimental D4 copy from reusable producer slots.
+    OwnedRing,
 }
 
 /// Peer workload declared in peer-config and echoed in schema 3 journals.

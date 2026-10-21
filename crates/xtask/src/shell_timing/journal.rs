@@ -2,6 +2,9 @@
 use super::{ImageSource, MAX_BYTES, MAX_RECORDS, Offer, WorkloadMode};
 use serde::{Deserialize, Serialize};
 
+mod ring;
+pub use ring::RingEvidence;
+
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Upload {
@@ -77,6 +80,8 @@ pub struct Journal {
     /// Schema-4 paced fresh uploads. Declaration, not proof of scheduled due times.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interval_msec: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ring: Option<RingEvidence>,
     pub offers: Vec<Offer>,
     pub uploads: Vec<AcceptedUpload>,
     pub permits: Vec<PermitTiming>,
@@ -184,6 +189,19 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
     }
     let mut lines = journal.lines();
     let start = lines.next().ok_or("missing start")?;
+    // Dispatch before the legacy event decoder: ring events have their own
+    // custody records and must never masquerade as sealed UploadOffer records.
+    #[derive(Deserialize)]
+    struct Schema {
+        schema: u64,
+    }
+    if serde_json::from_str::<Schema>(start)
+        .map_err(|e| e.to_string())?
+        .schema
+        == 5
+    {
+        return ring::collect(journal, expected);
+    }
     let schema = serde_json::from_str::<Record>(start)
         .map_err(|e| e.to_string())?
         .schema;
@@ -199,7 +217,8 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
             interval_msec,
         } if frames == expected
             && matches!(wire.as_str(), "files" | "ipc")
-            && (source == ImageSource::Bytes || (matches!(schema, 2..=4) && wire == "files"))
+            && (source == ImageSource::Bytes
+                || (source == ImageSource::Isb && matches!(schema, 2..=4) && wire == "files"))
             && matches!(probe_bytes, 0 | 4194304)
             && (schema >= 2 || probe_bytes == 0)
             && match (schema, workload, retained_resources, interval_msec) {
@@ -593,6 +612,7 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
         workload,
         retained_resources: retained,
         interval_msec,
+        ring: None,
         offers,
         uploads,
         permits,

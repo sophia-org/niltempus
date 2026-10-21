@@ -70,6 +70,33 @@ are unchanged. No report by itself establishes a paired performance pass.
 
 ## t331 panel and bulk cost diagnostics
 
+### D4 owned-ring panel preparation
+
+The experimental ring peer uses `source: "owned_ring"`, `wire: "files"`,
+`workload: "fresh"` (or omission), and required `ring_slots` in 2..=4. It
+omits `image`, retained-resource and interval fields and permits no bulk probe.
+Its native request uses `instrumentation: "none"`; the historical comparator
+CPU/cost campaigns do not accept this source. The reviewed peer and Session
+must support the private D4 transport, with its kill switch disabled.
+
+Journal schema 5 records `ring_ready` (including admission/readiness times),
+then `ring_offer`, `ring_accepted`, `slot_released`, permit, candidate offer and
+terminal for every frame. Slot generations and resource generations remain
+distinct. The parser requires exact identity, geometry, success and ordering;
+it never interprets ring offers as sealed `upload_offer` records. The native
+join still requires kernel completion evidence covering every head. Frozen
+configuration binds the slot count and panel height to the captured journal.
+
+`prepare-native` and `run-native` can prepare and capture this arm, subject to
+the existing clean signed source, artifact and seated-console checks. A joined
+capture reports provenance and timings only. CPU accounting requires separately
+bracketed Session and peer process snapshots over the measured frame window;
+absent comparator counters are not zero CPU. Use a matched sealed peer with the
+same frame sequencing for the first lifecycle diagnostic. This does not qualify
+the four-workload Wayland/XLibre bar, bulk, retained or bursty ring workloads.
+
+### Historical cost pilot
+
 The separate cost pilot freezes six prepared plans and nine attempts.
 Schema 1 retains the original bulk-only contract. New schema-2 requests must
 include `"workload": "panel"` or `"workload": "bulk"`; the frozen descriptor

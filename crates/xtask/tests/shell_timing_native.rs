@@ -342,6 +342,48 @@ fn retained_peer_config_requires_files_sealed_and_an_explicit_pool() {
 }
 
 #[test]
+fn owned_ring_plan_requires_explicit_slots_and_refuses_unsupported_workloads() {
+    use xtask::shell_timing::ImageSource;
+    let mut f = Fixture::new("ring-config", "files");
+    f.request.source = ImageSource::OwnedRing;
+    let base = serde_json::json!({"wire":"files","source":"owned_ring","output":1,
+        "frames":3,"height":24,"hold_msec":60000,"ring_slots":2});
+    f.put("peer-config", base.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_ok());
+    for (key, value) in [
+        ("ring_slots", serde_json::json!(1)),
+        ("ring_slots", serde_json::json!(5)),
+        ("ring_slots", serde_json::Value::Null),
+        ("workload", serde_json::json!("retained")),
+        ("interval_msec", serde_json::json!(250)),
+        ("probe_bytes", serde_json::json!(4194304)),
+        (
+            "image",
+            serde_json::json!({"max_resource_bytes":1,"max_width":1,"max_height":1,
+            "max_admitted_outputs":1,"transfer_slots":1,"transfer_timeout_ms":1}),
+        ),
+    ] {
+        let mut config = base.clone();
+        config[key] = value;
+        f.put("peer-config", config.to_string().as_bytes(), false);
+        assert!(validate(&f.request).is_err(), "accepted {config}");
+    }
+    let mut config = base.clone();
+    config.as_object_mut().unwrap().remove("ring_slots");
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_err());
+    f.put("peer-config", base.to_string().as_bytes(), false);
+    f.request.instrumentation = "cpu-only".into();
+    assert!(validate(&f.request).is_err());
+    f.request.instrumentation = "none".into();
+    f.request.source = ImageSource::Bytes;
+    config = base;
+    config["source"] = "bytes".into();
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_err());
+}
+
+#[test]
 fn captured_source_cannot_be_substituted_after_preparation() {
     use xtask::shell_timing::{ImageSource, Journal, WorkloadMode};
     use xtask::shell_timing_native::validate_captured_workload;
@@ -350,6 +392,7 @@ fn captured_source_cannot_be_substituted_after_preparation() {
     // Parsing and native-custody joins have their own complete-journal controls.
     // This guard binds the parsed arm to the prepared request.
     let mut metrics = Journal {
+        ring: None,
         schema: 2,
         wire: "files".into(),
         source: ImageSource::Bytes,
