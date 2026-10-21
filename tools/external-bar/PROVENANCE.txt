@@ -1,0 +1,3 @@
+External reference clients handed back by Claude wB:pH and Muse wB:pJ, 2026-10-21. Original sources compiled only; no display/server/Session runs. Original 19 source hashes verified and frozen at /home/niltempus/.local/state/sophia/development-evidence/t331-d4-owned-copy-20261021/external-bar-handback-01; verified-sources.json records the hashes. This copy is the integration lane; local changes and qualification must be recorded separately. No Sophia production dependency.
+
+Second handback: 20 rev-4 source hashes verified at external-bar-handback-02 in the same evidence root. The integration copy includes local fixes; see docs/desktop-comparison.md October 21 section. Native comparison remains unqualified.

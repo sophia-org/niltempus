@@ -79,3 +79,94 @@ distributions with `verdict=none`.
 
 See `validation/desktop-comparison/README.md` for the row-by-row operator
 workflow and profile admission.
+
+
+## October 21: shell-path reference integration (t331), separate from wmbench
+
+Niltempus's t331 direction replaces the former IPC +10% gates with external
+Wayland/XLibre performance references. IPC remains diagnostic. This does not
+replace the older whole-desktop comparison's correctness scope or promote its
+`verdict=none` rows into shell-path evidence. Numerical t331 ceilings await the
+operator's choice; the proposed R=2.0 is not approved.
+
+The standalone reference sources are under `tools/external-bar`, imported from
+Claude wB:pH and Muse wB:pJ's October 21 handbacks. Twenty rev-4 source hashes
+were checked against their receipts and preserved before local fixes in
+`t331-d4-owned-copy-20261021/external-bar-handback-02`. Earlier rev-3 sources and
+failures remain separately retained. They add no Sophia production dependency.
+
+Build and offline checks:
+
+```sh
+make -C tools/external-bar
+python3 tools/external-bar/test/test_account.py
+tools/external-bar/build/fill-parity
+```
+
+`headless_smoke.py` creates a new private output directory, runs bubblewrap with
+private namespaces and no DRM/input nodes, and launches only a headless pixman
+River and the reference client. It always terminates that owned compositor.
+It is a protocol smoke, not a native performance run. Pass explicit compositor,
+client, lifecycle and output paths; binaries are recorded by path/hash and never
+copied into evidence. The wrapper's first attempt could not create `/runtime`
+under its read-only root; the corrected private path is `/tmp/runtime`.
+
+The unmodified rev-3 client failed with `no presentation clock_id`. Registry
+bind requests need another roundtrip before checking initial clock events.
+The local fix also destroys presentation-feedback proxies, timestamps before
+the surface commit, and calls fallocate in the fresh path (the delivered code
+said fallocate but only called ftruncate). Both revised fresh and reuse smokes
+completed 8/8 feedback rows after two warmups, with two buffers. This qualifies
+neither physical scanout nor the native workload. Sources are not yet frozen
+as a seated campaign.
+
+Use an exact River binary. The delivered `~/.local/bin/river` is
+0.5.0-dev.75+d4fef52, whose empty-init run explicitly closed the layer surface
+because no WM bound river_layer_shell_v1. `/usr/bin/river` 0.3.7 with `-c true`
+passed the isolated smoke. The original 0.5 launch recipe and binary-string
+protocol table are not qualification. A 0.5 native arm needs its separate WM
+and complete process accounting; a 0.3.7 arm needs its own frozen protocol and
+GPU evidence. Do not silently switch versions within a pair.
+
+The accepted comparison axes are fresh lifecycle on all gated arms, matched
+buffer count (two for the current peer), heads/modes, visuals and GPU-backed
+composition; fill-start to presented is the proposed latency quantity. Reuse
+is a separate currently ungated matrix for ordinary external behavior and the
+B experiment. Never join fresh and reuse. Whole-desktop wmbench gets a separate
+Sophia/XLibre/River campaign under t289, including backend and unsupported-row
+reporting; its X compatibility clients do not exercise shell image admission.
+
+The following issues still prevent a native performance verdict:
+
+* The Wayland bulk surface is visible; X's bulk pixmap and Sophia's existing
+  accepted/released bulk resource are offscreen. Matching byte counts does not
+  match their rendering work. Define and implement a common bulk workload.
+* Pin the actual output and geometry. The received Wayland client passes NULL
+  for its output and ignores configured dimensions; this is not proof of (0,0)
+  on a specified head. Match counted-frame shade generations too: the historical
+  Sophia converter drops warmup but references currently restart their shade
+  counter. The fill routine itself passes its byte/guard parity check.
+* Synchronize CPU windows after warmup and before teardown on every arm, with
+  server and client counters collected the same way. The reporter currently
+  sees caller-selected snapshots and whole-process client rusage, so it cannot
+  establish that interval. Its output is explicitly diagnostic-only. Missing
+  client CPU remains unavailable, never zero; the Sophia converter no longer
+  disguises a CPU upper bound as getrusage or invents zero major faults.
+* Establish the composed X scanout endpoint. XLibre source at 79dee7378 rejects
+  direct flip of a Composite-redirected window (`present_scmd.c`); its copy path
+  copies into the window drawable and emits PresentCompleteModeCopy
+  (`present_execute.c`). A client Present timestamp alone therefore supplies
+  no association to xcompmgr's subsequent composed frame. Also distinguish Skip,
+  client-receipt fallback and SHM copy completion from physical presentation.
+* The Sophia converter consumes a schema-2 xtask join, checking exact offer
+  identities and duplicate samples; its input must be re-derived by the native
+  join validator from captured evidence. It does not independently certify
+  kernel sources or complete physical heads. The historical 880-row conversion
+  is a parser check, not a new native capture.
+
+The reporter now handles spaced clock notes, rejects duplicate header fields,
+malformed/noncontiguous rows, mixed lifecycles, reversed timestamps, changed or
+empty/duplicate PID sets, changed tick rates and decreasing counters. Quantile
+sample counts stay counts rather than being divided by 1000. These controls
+prevent several misleading reports but are not the unfinished gate analyzer.
+No X server smoke, seated reference pair, x13 run or GPU parity is claimed.
