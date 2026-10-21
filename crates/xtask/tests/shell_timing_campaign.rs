@@ -222,6 +222,7 @@ fn request(arm: &Arm) -> xtask::shell_timing_native::Request {
         mode_millihz: 120_000,
         instrumentation: "none".into(),
         environment_readback: true,
+        external_timing: None,
     }
 }
 

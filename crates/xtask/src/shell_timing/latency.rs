@@ -36,8 +36,8 @@ pub fn latency_report(
     expected: usize,
 ) -> Result<serde_json::Value, String> {
     let metrics = super::collect_metrics(journal, expected)?;
-    if metrics.workload == super::WorkloadMode::Retained {
-        return Err("retained workload has no latency acceptance until designed".into());
+    if metrics.workload == super::WorkloadMode::Retained || metrics.interval_msec.is_some() {
+        return Err("retained/bursty workload requires the external latency recipe".into());
     }
     let native = super::join(host, &metrics.offers, mode, expected)?;
     let presentation: Vec<_> = native.iter().map(|s| s.latency_usec).collect();
@@ -159,8 +159,8 @@ pub fn latency_window(
         .filter(|_| window.warmup != 0 && window.measured != 0)
         .ok_or("window requires positive warmup and measured frame counts")?;
     let metrics = super::collect_metrics(journal, offered)?;
-    if metrics.workload == super::WorkloadMode::Retained {
-        return Err("retained workload has no latency acceptance until designed".into());
+    if metrics.workload == super::WorkloadMode::Retained || metrics.interval_msec.is_some() {
+        return Err("retained/bursty workload requires the external latency recipe".into());
     }
     let native = super::join(host, &metrics.offers, mode, offered)?;
     if native.len() != offered {

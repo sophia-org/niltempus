@@ -859,6 +859,7 @@ fn prepared_plan(
         },
         output: E2E_OUTPUT,
         environment_readback: true,
+        external_timing: None,
         frames: arm.frames,
         mode_millihz: 120_000,
         instrumentation: match arm.measurement {

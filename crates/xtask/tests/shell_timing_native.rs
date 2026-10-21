@@ -34,6 +34,7 @@ impl Fixture {
                 mode_millihz: 60_000,
                 instrumentation: "none".into(),
                 environment_readback: false,
+                external_timing: None,
             },
         };
         // These fixtures are hashed only. None may be executed by validation.
@@ -248,6 +249,56 @@ fn sealed_preparation_requires_matching_files_source_without_running_artifacts()
 }
 
 #[test]
+fn external_timing_requires_matching_interval_and_a_complete_idle_hold() {
+    use xtask::shell_timing::ImageSource;
+    use xtask::shell_timing_native::ExternalTiming;
+    let mut f = Fixture::new("external-timing", "files");
+    f.request.source = ImageSource::Isb;
+    let mut config = serde_json::json!({
+        "wire":"files", "source":"sealed", "output":1, "frames":3,
+        "height":24, "hold_msec":60000, "interval_msec":250,
+        "image": { "max_resource_bytes":4194304, "max_width":4096,
+            "max_height":4096, "max_admitted_outputs":8,
+            "transfer_slots":4, "transfer_timeout_ms":2000 }
+    });
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_err()); // no accidental old fresh plan
+    f.request.external_timing = Some(ExternalTiming::Bursty {
+        interval_msec: 250,
+        warmup: 1,
+    });
+    assert!(validate(&f.request).is_ok());
+    for interval in [
+        serde_json::json!(0),
+        serde_json::json!(251),
+        serde_json::Value::Null,
+    ] {
+        let mut bad = config.clone();
+        bad["interval_msec"] = interval;
+        f.put("peer-config", bad.to_string().as_bytes(), false);
+        assert!(validate(&f.request).is_err());
+    }
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    f.request.external_timing = Some(ExternalTiming::Bursty {
+        interval_msec: 250,
+        warmup: 3,
+    });
+    assert!(validate(&f.request).is_err());
+    f.request.external_timing = Some(ExternalTiming::Idle { seconds: 60 });
+    f.request.frames = 1;
+    config["frames"] = 1.into();
+    config.as_object_mut().unwrap().remove("interval_msec");
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_err()); // 60s hold cannot cover +2..+62s
+    f.request.runtime_ms = 90_000;
+    config["hold_msec"] = 90_000.into();
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_ok());
+    f.request.instrumentation = "cpu-only".into();
+    assert!(validate(&f.request).is_err());
+}
+
+#[test]
 fn retained_peer_config_requires_files_sealed_and_an_explicit_pool() {
     use xtask::shell_timing::ImageSource;
     let mut f = Fixture::new("retained-config", "files");
@@ -305,6 +356,7 @@ fn captured_source_cannot_be_substituted_after_preparation() {
         probe_bytes: 0,
         workload: WorkloadMode::Fresh,
         retained_resources: None,
+        interval_msec: None,
         offers: vec![],
         uploads: vec![],
         permits: vec![],
@@ -340,6 +392,21 @@ fn captured_source_cannot_be_substituted_after_preparation() {
     );
     assert!(
         validate_captured_workload(&metrics, &f.request, 0, WorkloadMode::Fresh, Some(4)).is_err()
+    );
+    metrics.workload = WorkloadMode::Fresh;
+    metrics.retained_resources = None;
+    metrics.interval_msec = Some(250);
+    assert!(
+        validate_captured_workload(&metrics, &f.request, 0, WorkloadMode::Fresh, None).is_err()
+    );
+    f.request.external_timing = Some(xtask::shell_timing_native::ExternalTiming::Bursty {
+        interval_msec: 250,
+        warmup: 1,
+    });
+    assert!(validate_captured_workload(&metrics, &f.request, 0, WorkloadMode::Fresh, None).is_ok());
+    metrics.interval_msec = Some(251);
+    assert!(
+        validate_captured_workload(&metrics, &f.request, 0, WorkloadMode::Fresh, None).is_err()
     );
 }
 

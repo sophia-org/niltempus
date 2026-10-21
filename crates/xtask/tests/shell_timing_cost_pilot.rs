@@ -230,6 +230,7 @@ impl World {
             },
             output: shape.output,
             environment_readback: shape.readback,
+            external_timing: None,
             frames: shape.frames,
             mode_millihz: 120_000,
             instrumentation: shape.instrumentation.into(),

@@ -2,6 +2,8 @@
 use crate::shell_timing::{ImageSource, WorkloadMode};
 use crate::{hex, output_file_native_run::process, sha256};
 use serde::{Deserialize, Serialize};
+mod external;
+pub use external::ExternalTiming;
 use std::{
     collections::BTreeMap,
     fs,
@@ -60,6 +62,9 @@ pub struct Request {
     /// Legacy single-arm capture plans leave this false.
     #[serde(default)]
     pub environment_readback: bool,
+    /// Explicit new timing policies; absent preserves historical plans.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_timing: Option<ExternalTiming>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -91,6 +96,8 @@ struct PeerConfig {
     /// collapsing it to absence.
     #[serde(default, deserialize_with = "present_u64")]
     retained_resources: Option<u64>,
+    #[serde(default, deserialize_with = "present_u64")]
+    interval_msec: Option<u64>,
     image: Option<ImageConfig>,
 }
 
@@ -304,6 +311,7 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
     let peer: PeerConfig =
         serde_json::from_slice(&texts["peer-config"]).map_err(|e| e.to_string())?;
     peer.workload()?;
+    external::validate(request, &peer)?;
     if peer.wire != request.wire
         || peer.source != request.source
         || (peer.source == ImageSource::Isb && request.wire != "files")
@@ -510,6 +518,11 @@ pub fn validate_captured_workload(
         || metrics.wire != request.wire
         || metrics.workload != workload
         || metrics.retained_resources != retained_resources
+        || metrics.interval_msec
+            != request
+                .external_timing
+                .as_ref()
+                .and_then(ExternalTiming::interval)
     {
         return Err("captured upload workload differs from prepared configuration".into());
     }
@@ -849,7 +862,13 @@ fn run_inner(
             } else {
                 crate::shell_timing_cost::for_mode(&plan.request.instrumentation, counters, offers)?
             };
-            let report = serde_json::json!({"schema":2,"verdict":"joined_only","instrumentation":plan.request.instrumentation,"offered":offers.len(),"samples":samples,"costs":costs,"journal":metrics,"progress":progress});
+            let mut report = serde_json::json!({"schema":2,"verdict":"joined_only","instrumentation":plan.request.instrumentation,"offered":offers.len(),"samples":samples,"costs":costs,"journal":metrics,"progress":progress});
+            if let Some(timing) = &plan.request.external_timing {
+                report["external_timing"] =
+                    serde_json::to_value(timing).map_err(|e| e.to_string())?;
+                report["external_measurement_status"] =
+                    "frame_join_only_sampling_window_unproven".into();
+            }
             write(
                 &stage.join("native-samples.json"),
                 &serde_json::to_vec_pretty(&report).map_err(|e| e.to_string())?,

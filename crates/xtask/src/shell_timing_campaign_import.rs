@@ -358,9 +358,11 @@ pub fn derive_arm_for_output(
     let metrics = crate::shell_timing::collect_metrics(&client, arm.frames)?;
     let (wire, source) = identity(arm.variant);
     let (workload, probe_bytes) = workload(arm.workload);
-    if metrics.workload != crate::shell_timing::WorkloadMode::Fresh {
+    if metrics.workload != crate::shell_timing::WorkloadMode::Fresh
+        || metrics.interval_msec.is_some()
+    {
         return Err(
-            "campaign arms declare fresh workloads; a retained journal cannot supply one".into(),
+            "campaign arms declare fresh workloads; retained or bursty cannot supply one".into(),
         );
     }
     if metrics.wire != wire || metrics.source != source || metrics.probe_bytes != probe_bytes {

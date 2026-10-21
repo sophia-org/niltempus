@@ -1,6 +1,47 @@
 use xtask::shell_timing::{collect, collect_metrics};
 
 #[test]
+fn bursty_schema_preserves_upload_custody_without_claiming_legacy_acceptance() {
+    let old = upload_journal();
+    let bursty = old.replace("\"schema\":2", "\"schema\":4").replacen(
+        "\"event\":\"start\"",
+        "\"event\":\"start\",\"source\":\"sealed\",\"interval_msec\":250",
+        1,
+    );
+    let metrics = collect_metrics(&bursty, 1).unwrap();
+    assert_eq!(metrics.schema, 4);
+    assert_eq!(metrics.interval_msec, Some(250));
+    assert_eq!(metrics.uploads.len(), 1);
+    let joined = xtask::shell_timing::join(&native_host(140), &metrics.offers, 60000, 1).unwrap();
+    assert_eq!(joined.len(), 1);
+    assert!(
+        xtask::shell_timing::join(
+            &native_host(140).replace("timestamp_source=kernel", "timestamp_source=monotonic"),
+            &metrics.offers,
+            60000,
+            1,
+        )
+        .is_err()
+    );
+    assert!(xtask::shell_timing::latency_report(&native_host(140), &bursty, 60000, 1).is_err());
+    for bad in [
+        bursty.replace("\"interval_msec\":250", "\"interval_msec\":0"),
+        bursty.replace("\"interval_msec\":250", "\"interval_msec\":10001"),
+        bursty.replace(",\"interval_msec\":250", ""),
+        bursty.replace("\"source\":\"sealed\"", "\"source\":\"bytes\""),
+        bursty.replace("\"wire\":\"files\"", "\"wire\":\"ipc\""),
+        bursty.replace("\"schema\":4", "\"schema\":2"),
+        bursty.replacen("\"schema\":4", "\"schema\":3", 1),
+        bursty.replace("\"resource_id\":1", "\"resource_id\":99"),
+    ] {
+        assert!(collect_metrics(&bad, 1).is_err(), "accepted {bad}");
+    }
+    // No new field is emitted for historical fresh evidence.
+    let historical = serde_json::to_value(collect_metrics(&old, 1).unwrap()).unwrap();
+    assert!(historical.get("interval_msec").is_none());
+}
+
+#[test]
 fn sealed_evidence_is_explicit_and_cannot_claim_the_ipc_or_legacy_path() {
     use xtask::shell_timing::ImageSource;
     let bytes = upload_journal();

@@ -201,3 +201,50 @@ Raw artifacts are under
 the source hashes, binary identities and outcome inventory are in
 `external-bar-xorg-protocol-01` under that evidence root. The reporter remains
 diagnostic-only and all native matching and interval requirements above remain.
+
+### Four-workload handback and explicit runner choice — October 21
+
+Niltempus approved idle, bursty and retained as representative CPU-backed shell
+workloads, with fresh the worst-case bound. The authoritative t331 amendment is
+Sophia's `mvbubiv9` plan. The rev-5 handback is frozen, with 23 verified source
+hashes, at `t331-d4-owned-copy-20261021/external-bar-handback-03`. It has not yet
+replaced the corrected rev-4 integration clients above.
+
+**Choose (b): extend this typed runner before bursty/idle captures.** The
+converter stays downstream of a validated native join. The runner now parses
+schema-4 sealed, files-only fresh uploads with `interval_msec` in 1..=10000,
+preserving the existing acceptance/resource/permit/terminal checks. It cannot
+feed the historical fresh/IPC cost or latency gate. Schema 1–3 serialization
+remains unchanged. A native request explicitly declares either
+`"external_timing":{"workload":"bursty","interval_msec":250,"warmup":8}`
+or `"external_timing":{"workload":"idle","seconds":60}`. Bursty's peer
+configuration must have the same interval and leave at least one counted frame;
+its schedule must fit the capture duration with margin. Idle requires one frame
+and at least a 64-second hold; a 90-second capture is a practical preparation
+choice, but only actual presentation/sampling brackets prove window coverage.
+These modes require the uninstrumented sealed panel path and forbid bulk.
+
+The frozen declaration is checked again against captured journal metadata.
+`native-samples.json` retains the declaration and explicitly says
+`frame_join_only_sampling_window_unproven`. Kernel/all-head joining remains
+mandatory. Idle sampling and synchronized client/server windows still need an
+observer; this support does not score external CPU, idle or latency gates.
+
+The incoming clients also need corrections before workload smokes: bursty
+changes every pixel's shade despite declaring small damage, X back pixmaps lack
+a complete initial fill, and 60-second client sleeps cannot cover the proposed
++2..+62-second idle window. Keep background pixels constant while filling the
+whole fresh buffer; initialize X buffers fully, then use the true changed
+rectangle. Record scheduled bursty deadlines separately from observed upload
+start. Count context switches as context switches, retaining thread identity
+and refusing incomplete coverage after thread creation/exit. The new converter
+also reintroduces the CPU-upper-bound-as-rusage substitution removed locally;
+do not import that regression or weaken identity/duplicate checks.
+
+Validation of the runner slice: 425 xtask tests pass with 13 ignored when run
+serially, plus the final 22-test native-runner group and strict all-target
+Clippy. The first parallel suite hit `ETXTBSY` in an unchanged desktop-launcher
+fixture; its isolated serial retry passed. Both outcomes are retained at
+`t331-d4-owned-copy-20261021/external-runner-schema4-01`. No bursty/idle desktop
+or protocol smoke was run by these checks; the 90-second idle example above is
+configuration guidance, not an observed window.

@@ -74,6 +74,9 @@ pub struct Journal {
     pub workload: WorkloadMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retained_resources: Option<u64>,
+    /// Schema-4 paced fresh uploads. Declaration, not proof of scheduled due times.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interval_msec: Option<u64>,
     pub offers: Vec<Offer>,
     pub uploads: Vec<AcceptedUpload>,
     pub permits: Vec<PermitTiming>,
@@ -98,6 +101,8 @@ enum Event {
         workload: Option<WorkloadMode>,
         #[serde(default)]
         retained_resources: Option<u64>,
+        #[serde(default)]
+        interval_msec: Option<u64>,
     },
     CandidatePlacements {
         candidate_generation: u64,
@@ -160,7 +165,7 @@ struct Record {
 
 fn event(line: &str, schema: u64) -> Result<Event, String> {
     let record: Record = serde_json::from_str(line).map_err(|e| e.to_string())?;
-    if record.schema != schema || !(1..=3).contains(&schema) {
+    if record.schema != schema || !(1..=4).contains(&schema) {
         return Err("missing or unsupported journal schema".into());
     }
     Ok(record.event)
@@ -182,7 +187,8 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
     let schema = serde_json::from_str::<Record>(start)
         .map_err(|e| e.to_string())?
         .schema;
-    let (probe_bytes, source, wire, workload, retained) = match event(start, schema)? {
+    let (probe_bytes, source, wire, workload, retained, interval_msec) = match event(start, schema)?
+    {
         Event::Start {
             frames,
             wire,
@@ -190,17 +196,25 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
             probe_bytes,
             workload,
             retained_resources,
+            interval_msec,
         } if frames == expected
             && matches!(wire.as_str(), "files" | "ipc")
-            && (source == ImageSource::Bytes || (matches!(schema, 2 | 3) && wire == "files"))
+            && (source == ImageSource::Bytes || (matches!(schema, 2..=4) && wire == "files"))
             && matches!(probe_bytes, 0 | 4194304)
             && (schema >= 2 || probe_bytes == 0)
-            && match (schema, workload, retained_resources) {
+            && match (schema, workload, retained_resources, interval_msec) {
                 // Fresh journals stay schema 1/2 and never declare a pool.
-                (1 | 2, None, None) => true,
+                (1 | 2, None, None, None) => true,
                 // Schema 3 is retained-only: files + sealed, explicit pool.
-                (3, Some(WorkloadMode::Retained), Some(count)) => {
+                (3, Some(WorkloadMode::Retained), Some(count), None) => {
                     (2..=8).contains(&count) && wire == "files" && source == ImageSource::Isb
+                }
+                // External bursty arm only. No legacy IPC/cost acceptance.
+                (4, None, None, Some(interval)) => {
+                    (1..=10_000).contains(&interval)
+                        && wire == "files"
+                        && source == ImageSource::Isb
+                        && probe_bytes == 0
                 }
                 _ => false,
             } =>
@@ -211,6 +225,7 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
                 wire,
                 workload.unwrap_or_default(),
                 retained_resources,
+                interval_msec,
             )
         }
         _ => return Err("wrong start count or wire".into()),
@@ -291,7 +306,7 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
     }
     for generation in 1..=expected as u64 {
         let first_upload = uploads.len();
-        if schema == 2 {
+        if matches!(schema, 2 | 4) {
             for probe in [true, false] {
                 if probe && probe_bytes == 0 {
                     continue;
@@ -577,6 +592,7 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
         probe_bytes,
         workload,
         retained_resources: retained,
+        interval_msec,
         offers,
         uploads,
         permits,
