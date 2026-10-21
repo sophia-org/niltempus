@@ -190,3 +190,23 @@ graphics libraries find that Mesa's drivers through paths compiled into the
 binaries, with no environment variables, so the desktop does not depend on the
 host's graphics packages, and programs that the desktop starts keep using the
 host's own.
+
+## Kleis image-channel repair, 2026-10-20
+
+The first ISB-compatible client release, `niltempus-91f35cfc0899e1af92f9`,
+still restarted Kleis at image discovery. Unlock authentication worked through
+Session's cover, but the provider never drew matrix rain. Kleis configured
+four image slots while Sophia's lock role granted two; the C adapter used the
+caller estimate instead of the negotiated role Limits.
+
+Kleis `574d400` pins C SDK `7a8f77e`, whose lock adapter derives the complete
+role bounds from negotiated Limits, matching Rust. The C suite covers one,
+two and four slots; the missing-fix control fails discovery. Twelve Rust
+image tests also pass with two slots. The pinned Kleis package and format
+checks pass. A protected production-owner test keeps the executable idle for
+three seconds, then receives three sealed images/candidates under supplied
+lock state, permits and outcomes. This is offline integration evidence;
+visible rain and lock/unlock still require attended acceptance.
+
+Evidence: `~/.local/state/sophia/development-evidence/kleis-matrix-20261020/`.
+The c43 comparison remains on hold until the live desktop is accepted.
