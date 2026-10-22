@@ -1,0 +1,29 @@
+# Arms I (comparison IPC bytes) and S (sealed ISB over files), run only by the
+# comparator Sophia (built at 4f5bdd564). Its own workspace and lock, so neither the
+# niltempus Sophia pin nor arm G's SDK is touched. See ../PROVENANCE.txt.
+[package]
+name = "gpu-bar-historical"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96.1"
+license = "BSD-3-Clause"
+publish = false
+
+[workspace]
+
+[dependencies]
+imaging = "0.0.1"
+rustix = { version = "1.1", default-features = false, features = ["std", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sophia-shell-gpu = { git = "https://github.com/sophia-org/lom", rev = "ae28569a4ed6b4fbb6382e2cdfd1637bcdb21575" }
+sophia-protocol = { git = "https://github.com/sophia-org/sophia.git", rev = "8ea9e1406a2c1cab1fe4f7f776e00a4deb483c5c" }
+sophia-shell-client = { git = "https://github.com/sophia-org/sophia.git", rev = "8ea9e1406a2c1cab1fe4f7f776e00a4deb483c5c" }
+sophia-launch-client = { git = "https://github.com/sophia-org/sophia.git", rev = "8ea9e1406a2c1cab1fe4f7f776e00a4deb483c5c" }
+sophia-9p-client = { git = "https://github.com/sophia-org/sophia.git", rev = "8ea9e1406a2c1cab1fe4f7f776e00a4deb483c5c" }
+sophia-linux-peer = { git = "https://github.com/sophia-org/sophia.git", rev = "8ea9e1406a2c1cab1fe4f7f776e00a4deb483c5c" }
+sophia-image-producer = { git = "https://github.com/sophia-org/sophia.git", rev = "8ea9e1406a2c1cab1fe4f7f776e00a4deb483c5c" }
+
+[lints.rust]
+# The copied peer keeps its comparator-only counter hooks; they are not built here.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("comparator-progress", "comparator-counters", "comparator-allocation-counting"))'] }

@@ -1,0 +1,54 @@
+--- a/shell_timing_peer.rs
++++ b/historical/src/main.rs
+@@ -16,7 +16,7 @@
+ #[path = "shell_timing_peer/journal.rs"]
+ mod journal;
+ use journal::{Event, Upload};
+-#[path = "shell_timing_peer/canvas.rs"]
++#[path = "../../common/gpu_canvas.rs"]
+ mod canvas;
+ #[path = "shell_timing_peer/sealed.rs"]
+ mod sealed;
+@@ -342,6 +342,10 @@
+     if let Some(config) = sealed {
+         sealed::check_limits(config, &limits)?;
+     }
++    canvas::open(
++        limits.grant.connection_epoch,
++        if sealed.is_some() { "sealed" } else { "ipc" },
++    )?;
+     let ShellContentRecord::OutputFacts(facts) = wire.receive()? else {
+         return Err("missing output facts".into());
+     };
+@@ -515,6 +519,7 @@
+                 return Err("row exceeds chunk limit".into());
+             }
+             let chunks = usize::try_from(length)?.div_ceil(chunk_bytes) as u32;
++            let prepare_usec = clock_usec();
+             let source = match sealed {
+                 Some(_) => Some(sealed::prepare(
+                     width,
+@@ -525,10 +530,11 @@
+                 None => None,
+             };
+             let bytes = if source.is_none() {
+-                canvas.fill(usize::try_from(length)?, generation)?
++                canvas.fill(usize::try_from(length)?, width, height, generation)?
+             } else {
+                 &[]
+             };
++            canvas::prepared(generation, resource.id, prepare_usec, clock_usec());
+             // Preserve the attempt before sending. This conservative interval includes
+             // flushing the offer journal, but excludes pixel preparation above.
+             let begin_usec = clock_usec();
+--- a/shell_timing_peer/sealed.rs
++++ b/historical/src/shell_timing_peer/sealed.rs
+@@ -116,7 +116,7 @@
+ /// Pixel preparation, kept before the offer is journalled like the byte path.
+ pub fn prepare(width: u32, height: u32, max_bytes: u64, generation: u64) -> Result<OwnedFd> {
+     let mut source = create_mapped_isb(width, height, max_bytes).map_err(|e| format!("{e:?}"))?;
+-    super::canvas::fill_pixels(source.pixels_mut(), generation);
++    super::canvas::fill_pixels(source.pixels_mut(), width, height, generation)?;
+     source.finish().map_err(|e| format!("{e:?}").into())
+ }
+ 

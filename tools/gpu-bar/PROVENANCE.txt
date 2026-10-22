@@ -1,0 +1,75 @@
+GPU comparison peers for the t339 matched comparison (arms I, S, G). One GPU
+producer, common/gpu_canvas.rs, on Lom sophia-shell-gpu at signed
+ae28569a4ed6b4fbb6382e2cdfd1637bcdb21575. Every Sophia, SDK and Lom input is an
+immutable git dependency on its public URL; no sibling path is named. All
+three revisions were fetched anonymously on 2026-10-22: sophia 8ea9e1406a2c is
+the head of performance/t331-isb-cost, SDK 0706ea2c is the head of
+development/t339-gpu-capture, and Lom ae28569a is an ancestor of public HEAD.
+
+Measurement: the schema 2 journal's frame cadence is the primary result.
+GPU execution time is unavailable. Each upload's preparation (GPU render plus
+readback or export, plus ISB creation for S) is reported on stderr only, on
+the journal's monotonic clock:
+  gpu_bar_prepare schema=1 arm=<ipc|sealed|dma_buf> generation=G resource_id=R start_usec=A end_usec=B
+After admission and before the first offer, one stderr line also gives
+  gpu_bar schema=1 arm=... producer=vello_wgpu gpu_time=unavailable <gpu_bar_gpu_admission record>
+
+historical/ (arms I and S; run only by the comparator Sophia)
+  Sources were COPIED from https://github.com/sophia-org/sophia.git at signed
+  4f5bdd5645f5070f3e9c4ebf8969098c5ec48c60 (local; the comparator host's build),
+  crates/sophia-runtime/examples/:
+    shell_timing_peer.rs           4db546a5df35c3abd51f284b9b3af9473bdfd4fe0c9e42401a680cfd3811590d -> src/main.rs
+    shell_timing_peer/journal.rs   e514486d87b53d624d955144d90498af59c3b00a088c4de8c772b6d8cf4939f4 (verbatim)
+    shell_timing_peer/retained.rs  d39c5f50ee18b7fe5415253a75bc3a9b2d1f8ccb8e64e338fabe960da5dc616c (verbatim)
+    shell_timing_peer/sealed.rs    883f5055e8436ea740271981fb066a9aac02661d2c791d98926595d01efb052d
+    shell_timing_peer/canvas.rs    6eb85a5bbaedb92a83f80d27c334a64c607f2aa203912825f6b8b950c7037160 (replaced by common/gpu_canvas.rs)
+  The DEPENDENCY pin is the public signed ancestor
+  8ea9e1406a2c1cab1fe4f7f776e00a4deb483c5c (3 commits behind 4f5bdd564), which is
+  byte-identical for every locked package, both workspace manifests the
+  packages inherit from, and every copied source. Git object ids, equal at
+  both revisions (`git rev-parse <rev>:<path>`):
+    6b09834d732043725906dadc0f288c20d3b5f041 vendor/rust-desktop-sdk/source/crates/sophia-9p-client
+    9900490e257fa23e9b28a7cafa7caabf5fc85605 vendor/rust-desktop-sdk/source/crates/sophia-9p-records
+    4f07ed4cda93dbe4c601c5f9b112e62915c5080c vendor/rust-desktop-sdk/source/crates/sophia-desktop-ids
+    f816ec1a4e81853d0c768767add85f22b404d707 vendor/rust-desktop-sdk/source/crates/sophia-image-producer
+    9f82b23b1ddb4fdc09ba9c002a437ec9aeb57987 vendor/rust-desktop-sdk/source/crates/sophia-isb
+    44683c58881b2400084d31e1cb9a8c04ceca519c vendor/rust-desktop-sdk/source/crates/sophia-launch-client
+    3e548815ff3a1a7d9a0f17bfca14a10f82e9fb4d crates/sophia-linux-peer
+    bc4380480595a49b91a9404bcbaf24fd1585c54c vendor/rust-desktop-sdk/source/crates/sophia-lock-protocol
+    a21ffc5ad285e8c7d319eb831fcbcc518f575b81 crates/sophia-protocol
+    3fb32c8de50c8debf98a074cbb9ff96e716d3018 vendor/rust-desktop-sdk/source/crates/sophia-shell-client
+    98de142baaf03c7dc02634aa9815620bdf95c2ce vendor/rust-desktop-sdk/source/crates/sophia-shell-protocol
+    ef7a0c671ed4c54349454c27dee1bb60d94db5f7 Cargo.toml
+    ada95f52ca2801a3a6765d24a034790a928c5410 vendor/rust-desktop-sdk/source/Cargo.toml
+    818b99fe0002ff08d10cd89fb9b17d6a43cae289 vendor/rust-desktop-sdk/manifest.json
+    c6e3efbe60778472c889a3ea673bd536b29895fe crates/sophia-runtime/examples/shell_timing_peer.rs
+    339546228d3b3379140d8abf39f476c61d76cc58 crates/sophia-runtime/examples/shell_timing_peer/journal.rs
+    3d4f5020095cecfc039ccb0c43caa9274ca6f6d7 crates/sophia-runtime/examples/shell_timing_peer/retained.rs
+    37bb09bf7da1164022af6869e889a4dcaea77c74 crates/sophia-runtime/examples/shell_timing_peer/sealed.rs
+    0df4cbc326fefc926a61e0be913f62189c6bcab3 crates/sophia-runtime/examples/shell_timing_peer/canvas.rs
+  The vendored SDK in that tree is e319d10601961799ac9721aa563da586a54862d1.
+  Local changes, all of them: local-changes.patch (5 hunks): GPU canvas path,
+  canvas::open after ContentLimits, the stderr preparation span, and fill
+  width/height in main.rs and sealed.rs. Resulting sha256: src/main.rs
+  5fee107f6e5e73483584227f7f70e091593af0bebc6022a6e39f624a5643a74b, sealed.rs
+  d62590d2a7032c7e09255a33fb3b43988cb582dd30e44a4f2bd09d55f21c8717. Config keys,
+  bounds and the schema 2/3 journal are unchanged.
+
+dma/ (arm G; current Sophia master, revision 10) is the same peer's fresh
+workload with only the files wire and a DMA-BUF source. It shares journal.rs
+from historical/ by #[path] and the producer from common/. SDK:
+  https://github.com/sophia-org/sophia-desktop-sdk-rs
+  0706ea2c78cd16ba59ed209620354f30a2c78906 (Lom's pin; Sophia master vendors the same)
+Image bounds come from ContentLimits as in Lom. Metadata follows the r10 kind-2
+rules: declared_bytes = width*height*4, stride 0; the plane offset and stride
+go beside the fd. The SDK checks the descriptor size against
+max_dma_source_bytes. Upload acceptance requires ResourceStatus Accepted and a
+Settled offer with disposition 2 (captured); Ambiguous or Expired offers keep
+waiting until the deadline, as in Lom. The export is freed only after that
+settlement, or after a refusal that returned the descriptor. On any other
+ending (no descriptor back, status other than Accepted, Refused, Unknown or
+timeout) the frame is retained until process exit.
+
+Both locks were seeded from Lom ae28569's Cargo.lock so the GPU stack matches
+Lom's tested versions. Build:
+  cargo-slot niltempus cargo build --release --offline --locked --manifest-path tools/gpu-bar/<historical|dma>/Cargo.toml

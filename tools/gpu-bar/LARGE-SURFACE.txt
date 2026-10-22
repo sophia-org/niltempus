@@ -1,0 +1,36 @@
+Large presented workload for the t339 matched comparison (plan h38nf8bk:
+"a separately reported larger fully presented surface, initially 1920x1080 if
+supported by the admitted target").
+
+Decision (2026-10-22): one opaque bar surface of 1920x512, fully presented,
+alone, on the existing HDMI 1920x1080 at 60 Hz, scale 1. Arms I, S and G use
+the same peers and config, height=512. This is the plan's admitted-target
+clause, not a policy waiver; no ADR, limit or lock-role change is made.
+
+Why 1920x1080 is excluded: no shell content role in either Session admits it.
+The rules below are identical in the comparator Sophia (pinned 8ea9e1406a2c,
+equal to 4f5bdd564 here) and current master f9fd5f1:
+- Shell content ADR docs/notes/decisions/6ndjwffd-content-capability-design-
+  for-sophia_shell_v1.md section 5: full-screen shell content is excluded by a
+  resolved-coverage check, not by image size and not by role label alone.
+- ContentLimits::prototype (vendored SDK sophia-shell-protocol
+  shell/content/limits.rs): max_resource_bytes 4 MiB, max_panel_extent 512,
+  max_popout_extent_px 1024, max_content_coverage_percent 50. Session
+  role_limits changes only staging, resident and retiring budgets.
+- sophia-runtime shell_content/allocations.rs (byte-identical in both trees)
+  enforces panel thickness <= 512, popouts <= 1024 per axis, and the summed
+  resolved area per output <= 50%.
+- A 1920x1080 frame is 8,294,400 bytes, over 4 MiB. It is also 100% coverage,
+  and as a panel its thickness of 1080 is over 512. Popouts can't reach it
+  either: at most 3, each <= 1024 per axis, under the same 50% total.
+- The lock role is full-output, but the SDK at 0706ea2 refuses DMA-BUF
+  sources for any role except shell, and the comparator has no lock IPC arm,
+  so it can't give matched I/S/G arms.
+
+1920x512 against the same limits:
+- 3,932,160 bytes (<= 4 MiB);
+- thickness 512 (<= 512);
+- coverage 983,040 / 2,073,600 = 47.4% (<= 50%);
+- two live alternating resources = 7.5 MiB, within resident 12 MiB (bar alone).
+For arm I that is 8 rows per 65,488-byte chunk, so 64 IPC chunks per frame,
+which is the baseline's real cost.
