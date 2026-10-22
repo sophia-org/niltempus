@@ -806,6 +806,39 @@ impl Binder {
         }
     }
 
+    /// Whether the process with this exact identity has exited: absent,
+    /// in an ended state, or its pid now names another process. Under an
+    /// exited parent a broken link is the reparenting of teardown; under a
+    /// live one it stays an error.
+    pub fn exited(&self, identity: ProcessIdentity) -> Result<bool, String> {
+        Ok(self
+            .stat(identity.pid)?
+            .is_none_or(|facts| facts.identity != identity || ended(facts.state)))
+    }
+
+    /// Exact protected position: the supervisor is the host's direct
+    /// child and the peer is its only child.
+    fn exact_position(&self, binding: &ProcessBinding) -> Result<(), String> {
+        let supervisor = self.live_stat(binding.supervisor.pid, "supervisor")?;
+        if supervisor.identity != binding.supervisor || supervisor.parent_pid != binding.host.pid {
+            return Err(format!(
+                "supervisor pid {} is no longer the host's direct child",
+                binding.supervisor.pid
+            ));
+        }
+        let peer = self.live_stat(binding.peer.pid, "peer")?;
+        if peer.identity != binding.peer
+            || peer.parent_pid != binding.supervisor.pid
+            || self.children_of(binding.supervisor.pid)? != [binding.peer.pid]
+        {
+            return Err(format!(
+                "supervisor pid {} no longer has peer pid {} as its only child",
+                binding.supervisor.pid, binding.peer.pid
+            ));
+        }
+        Ok(())
+    }
+
     /// Recheck every retained fact. Absence or an ended state anywhere
     /// in the chain is `Ended`; a changed identity, parent link,
     /// executable or namespace proof is an error.
@@ -826,6 +859,9 @@ impl Binder {
                 return Ok(BindingRecheck::Ended);
             }
             if facts.parent_pid != node.parent_pid {
+                if index > 0 && self.exited(binding.chain[index - 1].identity)? {
+                    return Ok(BindingRecheck::Ended);
+                }
                 return Err(format!(
                     "pid {} parent changed: {} replaced {}",
                     node.identity.pid, facts.parent_pid, node.parent_pid
@@ -840,6 +876,9 @@ impl Binder {
                     ));
                 }
                 if !self.children_of(parent)?.contains(&node.identity.pid) {
+                    if self.exited(binding.chain[index - 1].identity)? {
+                        return Ok(BindingRecheck::Ended);
+                    }
                     return Err(format!(
                         "pid {} no longer lists pid {} as a child",
                         parent, node.identity.pid
@@ -847,24 +886,16 @@ impl Binder {
                 }
             }
         }
-        // Exact protected position: the supervisor is the host's direct
-        // child and the peer is its only child.
-        let supervisor = self.live_stat(binding.supervisor.pid, "supervisor")?;
-        if supervisor.identity != binding.supervisor || supervisor.parent_pid != binding.host.pid {
-            return Err(format!(
-                "supervisor pid {} is no longer the host's direct child",
-                binding.supervisor.pid
-            ));
-        }
-        let peer = self.live_stat(binding.peer.pid, "peer")?;
-        if peer.identity != binding.peer
-            || peer.parent_pid != binding.supervisor.pid
-            || self.children_of(binding.supervisor.pid)? != [binding.peer.pid]
-        {
-            return Err(format!(
-                "supervisor pid {} no longer has peer pid {} as its only child",
-                binding.supervisor.pid, binding.peer.pid
-            ));
+        // The walk above read each process once; one that exited since is
+        // the same teardown race, not a broken position.
+        if let Err(error) = self.exact_position(binding) {
+            if self.exited(binding.host)?
+                || self.exited(binding.supervisor)?
+                || self.exited(binding.peer)?
+            {
+                return Ok(BindingRecheck::Ended);
+            }
+            return Err(error);
         }
         match self.cmdline_matches(binding.host.pid, &cmdline_bytes(&binding.host_argv)?)? {
             Some(true) => {}

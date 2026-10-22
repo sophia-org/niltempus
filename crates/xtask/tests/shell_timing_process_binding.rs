@@ -485,6 +485,33 @@ fn zero_namespace_inode_is_refused() {
 }
 
 #[test]
+fn exited_parent_ends_a_broken_link_but_a_live_one_does_not() {
+    // A live parent: a reparented peer is still an error.
+    let fx = fixture();
+    let binding = fx.bound();
+    assert!(!fx.binder.exited(binding.supervisor).unwrap());
+    fx.set_stat(PEER, REF, binding.peer.start_time_ticks);
+    let err = fx.binder.recheck(&binding).unwrap_err();
+    assert!(err.contains("parent changed"), "{err}");
+    // Gone, ended or reused: the original process has exited.
+    let fx = fixture();
+    let binding = fx.bound();
+    fs::remove_file(fx.proc_root.join(format!("{SUPERVISOR}/stat"))).unwrap();
+    assert!(fx.binder.exited(binding.supervisor).unwrap());
+    let fx = fixture();
+    let binding = fx.bound();
+    write(
+        &fx.proc_root.join(format!("{SUPERVISOR}/stat")),
+        &stat(SUPERVISOR, HOST, binding.supervisor.start_time_ticks, "Z"),
+    );
+    assert!(fx.binder.exited(binding.supervisor).unwrap());
+    let fx = fixture();
+    let binding = fx.bound();
+    fx.set_stat(SUPERVISOR, HOST, binding.supervisor.start_time_ticks + 1);
+    assert!(fx.binder.exited(binding.supervisor).unwrap());
+}
+
+#[test]
 fn recheck_detects_exit_reuse_and_broken_links() {
     // Ancestor gone: Ended.
     let fx = fixture();
