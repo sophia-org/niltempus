@@ -160,8 +160,8 @@ fn validate_reference(request: &Request, bytes: &[u8]) -> Result<(), String> {
 }
 
 impl PeerConfig {
-    /// Validated workload declaration: retained needs files + sealed and an
-    /// explicit 2..=8 pool; fresh forbids a pool declaration.
+    /// Validated workload declaration: retained needs files, a sealed or ring
+    /// source and an explicit 2..=8 pool; fresh forbids a pool declaration.
     /// Tile geometry is deliberately not plan-checked here: neither the
     /// request nor this config carries the output/allocation width, so the
     /// package analyzer must bind every retained upload's width to
@@ -171,25 +171,27 @@ impl PeerConfig {
         let mode = self.workload;
         let retained = mode.check(self.retained_resources)?;
         if self.source == ImageSource::OwnedRing {
+            // Retained ring tiles are vsync-paced, as the peer refuses an interval.
             if self.wire != "files"
-                || mode != WorkloadMode::Fresh
                 || self.probe_bytes != 0
-                || self.interval_msec.is_some()
+                || (mode == WorkloadMode::Retained && self.interval_msec.is_some())
                 || !self
                     .ring_slots
                     .is_some_and(|slots| (2..=4).contains(&slots))
             {
                 return Err(
-                    "owned ring requires a fresh file panel and ring_slots in 2..=4".into(),
+                    "owned ring requires a file panel, ring_slots in 2..=4 and no paced retained pool"
+                        .into(),
                 );
             }
         } else if self.ring_slots.is_some() {
             return Err("ring_slots requires owned_ring source".into());
         }
         if mode == WorkloadMode::Retained
-            && (self.wire != "files" || self.source != ImageSource::Isb)
+            && (self.wire != "files"
+                || !matches!(self.source, ImageSource::Isb | ImageSource::OwnedRing))
         {
-            return Err("retained workload requires files wire and sealed source".into());
+            return Err("retained workload requires files wire and a sealed or ring source".into());
         }
         Ok((mode, retained))
     }
@@ -400,8 +402,7 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
                 // reference_workload branch above.
                 ImageSource::Draw | ImageSource::Mixed => true,
             }
-            || (peer.source == ImageSource::OwnedRing
-                && (request.instrumentation != "none" || request.external_timing.is_some()))
+            || (peer.source == ImageSource::OwnedRing && request.instrumentation != "none")
             || peer.output != request.output
             || peer.frames != request.frames
             || !(1..=512).contains(&peer.height)

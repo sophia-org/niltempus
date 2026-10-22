@@ -370,6 +370,14 @@ fn owned_ring_plan_requires_explicit_slots_and_refuses_unsupported_workloads() {
         assert!(validate(&f.request).is_err(), "accepted {config}");
     }
     let mut config = base.clone();
+    config["workload"] = "retained".into();
+    config["retained_resources"] = 8.into();
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_ok());
+    config["interval_msec"] = 250.into();
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_err());
+    let mut config = base.clone();
     config.as_object_mut().unwrap().remove("ring_slots");
     f.put("peer-config", config.to_string().as_bytes(), false);
     assert!(validate(&f.request).is_err());
@@ -381,6 +389,45 @@ fn owned_ring_plan_requires_explicit_slots_and_refuses_unsupported_workloads() {
     config = base;
     config["source"] = "bytes".into();
     f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_err());
+}
+
+#[test]
+fn owned_ring_accepts_external_idle_and_bursty_timing_only_with_matching_plans() {
+    use xtask::shell_timing::ImageSource;
+    use xtask::shell_timing_native::ExternalTiming;
+    let mut f = Fixture::new("ring-external", "files");
+    f.request.source = ImageSource::OwnedRing;
+    let mut config = serde_json::json!({"wire":"files","source":"owned_ring","output":1,
+        "frames":3,"height":24,"hold_msec":60000,"ring_slots":2,"interval_msec":250});
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_err()); // a paced peer needs a paced plan
+    f.request.external_timing = Some(ExternalTiming::Bursty {
+        interval_msec: 250,
+        warmup: 1,
+    });
+    assert!(validate(&f.request).is_ok());
+    for (key, value) in [
+        ("interval_msec", serde_json::json!(251)),
+        ("height", serde_json::json!(23)),
+        ("workload", serde_json::json!("retained")),
+    ] {
+        let mut bad = config.clone();
+        bad[key] = value;
+        f.put("peer-config", bad.to_string().as_bytes(), false);
+        assert!(validate(&f.request).is_err(), "accepted {bad}");
+    }
+    f.request.external_timing = Some(ExternalTiming::Idle { seconds: 60 });
+    f.request.frames = 1;
+    f.request.runtime_ms = 90_000;
+    config["frames"] = 1.into();
+    config["hold_msec"] = 90_000.into();
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_err()); // idle declares no interval
+    config.as_object_mut().unwrap().remove("interval_msec");
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_ok());
+    f.request.instrumentation = "cpu-only".into();
     assert!(validate(&f.request).is_err());
 }
 

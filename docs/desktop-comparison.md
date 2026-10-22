@@ -81,6 +81,33 @@ See `validation/desktop-comparison/README.md` for the row-by-row operator
 workflow and profile admission.
 
 
+## Current t331/t252 exit — October 21
+
+Niltempus accepted a smaller critical-path exit: t331 requires working owned-ring
+idle, bursty, retained and fresh workloads plus one report-only native CPU/latency
+run on crunch; t252 then requires one attended 60 Hz selected-desktop run covering
+input, component replacement and rollback. Reuse existing correctness/security
+evidence. There is no numerical performance pass/fail gate. The x13/120 Hz matrix,
+full Wayland/XLibre comparison and numerical qualification are deferred to Sophia
+t343. Historical requirements below do not override that decision, and recorded
+failures do not become passes.
+
+The typed runner now accepts production owned rings for idle/bursty timing and
+retained pools. Schema 5 preserves slot-copy custody separately from resource
+lifetime; optional interval and per-copy due times bind absolute bursty pacing.
+Retained pools upload each tile once, then validate every rotated placement
+against its accepted resource. The converter reads these validated records,
+preserves actual fill/due times and refuses mismatched raw evidence. Reusable
+producer slots are labelled `lifecycle=reuse`; accepted images remain immutable
+copies. Historical sealed journals retain their original labels and limits.
+
+Focused validation: six Sophia peer checks, 47 runner/journal checks and three
+converter tests (including all four ring workloads and changed-evidence refusals)
+pass. Strict xtask clippy passes. No new native result is claimed here. The next
+capture uses the existing schema-1 fresh-panel diagnostic and CPU sampler once,
+with pinned source and executable identities; it is a report, not an external
+comparison or a performance pass.
+
 ## October 21: shell-path reference integration (t331), separate from wmbench
 
 Niltempus's t331 direction replaces the former IPC +10% gates with external

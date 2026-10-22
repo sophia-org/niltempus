@@ -26,15 +26,19 @@ pub(super) fn validate(request: &Request, peer: &PeerConfig) -> Result<(), Strin
             Err("interval_msec requires an explicit external bursty timing plan".into())
         };
     };
+    // Owned ring is the production shell path; sealed ISB stays for history.
     if request.wire != "files"
-        || request.source != ImageSource::Isb
+        || !matches!(request.source, ImageSource::Isb | ImageSource::OwnedRing)
         || request.instrumentation != "none"
         || peer.workload != WorkloadMode::Fresh
         || peer.probe_bytes != 0
         || peer.height != 24
         || peer.interval_msec != timing.interval()
     {
-        return Err("external idle/bursty timing requires an uninstrumented sealed panel".into());
+        return Err(
+            "external idle/bursty timing requires an uninstrumented sealed or owned-ring panel"
+                .into(),
+        );
     }
     match timing {
         ExternalTiming::Idle { seconds } => {
