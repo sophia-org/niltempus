@@ -13,6 +13,7 @@ shell {
     gpu "direct"
 }
 session {
+    exclude-gpu "pci-0000:16:00.0"
     shell-component "panel" "bar" {
         executable "@LOM_BIN@"
         config "@LOM_CONFIG@"
