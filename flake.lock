@@ -9,12 +9,13 @@
         "nixpkgs-sophia": "nixpkgs-sophia"
       },
       "locked": {
-        "lastModified": 1792356183,
-        "narHash": "sha256-jOqhFfzU2d/C40lxboJsLtHxmNEV7xJpduDuKut9uMo=",
-        "owner": "sophia-org",
-        "repo": "bemenu",
-        "rev": "2a1a73fbec1e0c5552d965b3b7aa3fd6b2e4977b",
-        "type": "github"
+        "lastModified": 1792639273,
+        "narHash": "sha256-P+zP8fr+mce6jHW+VDvKGspJ/C0q+6MA1Li2mCS8IVQ=",
+        "ref": "master",
+        "rev": "f73a3b8d0bce36196a601ea15099663e1eb79905",
+        "revCount": 658,
+        "type": "git",
+        "url": "file:///home/niltempus/src/bemenu"
       },
       "original": {
         "owner": "sophia-org",
@@ -137,12 +138,13 @@
         "rust-overlay": "rust-overlay"
       },
       "locked": {
-        "lastModified": 1792354871,
-        "narHash": "sha256-nCizaoXWJhkC/S7HesHkWRgcAT9dlbb84ElzgMUuTI4=",
-        "owner": "sophia-org",
-        "repo": "lom",
-        "rev": "9245bd05b95cec795819fbb9cee14b472722dc9a",
-        "type": "github"
+        "lastModified": 1792602088,
+        "narHash": "sha256-72k6AsiaD3xvABp7ocYmwQJx+zUJJ8mZ6/Z0YZm55nY=",
+        "ref": "master",
+        "rev": "27b64c5c79e2186895178ff05cbbaac63e15c322",
+        "revCount": 49,
+        "type": "git",
+        "url": "file:///home/niltempus/dev/lom"
       },
       "original": {
         "owner": "sophia-org",
@@ -207,12 +209,13 @@
     "provlita": {
       "flake": false,
       "locked": {
-        "lastModified": 1791780972,
-        "narHash": "sha256-8UlF8V43KBl5HNrE/l5obew3hQPZPBZIdHUMnixcMYA=",
-        "owner": "sophia-org",
-        "repo": "provlita",
-        "rev": "da4a15adb9a6555441653a9dd9ec0e4d69f3d6af",
-        "type": "github"
+        "lastModified": 1792602148,
+        "narHash": "sha256-I32P9gPrKjlwqgSrjwuWtjpbyLyHo1EIREqIOtKLFYQ=",
+        "ref": "master",
+        "rev": "109f5cb220eb2efb54b4c074ba4e57910952db1d",
+        "revCount": 24,
+        "type": "git",
+        "url": "file:///home/niltempus/dev/provlita"
       },
       "original": {
         "owner": "sophia-org",
@@ -306,12 +309,13 @@
         "rust-overlay": "rust-overlay_3"
       },
       "locked": {
-        "lastModified": 1792549226,
-        "narHash": "sha256-M+FYZCzdonJ1Yk144FrwF3/OhZu8e9QsUmUZheS9S90=",
-        "owner": "sophia-org",
-        "repo": "sophia",
-        "rev": "1c9638093337012a9a0fb6597d9a0c4a785d4637",
-        "type": "github"
+        "lastModified": 1792638217,
+        "narHash": "sha256-8XHG2372zyGXSF/ar9jih7xYtQlJ4Q8+WA4aYIBuwCg=",
+        "ref": "HEAD",
+        "rev": "7b13b6cae3c8d4dbd63f2efcf0b57378fe77d900",
+        "revCount": 5257,
+        "type": "git",
+        "url": "file:///home/niltempus/dev/sophia-t331-acceptance"
       },
       "original": {
         "owner": "sophia-org",

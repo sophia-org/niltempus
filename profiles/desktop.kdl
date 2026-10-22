@@ -324,12 +324,12 @@ output {
     named DP-1 {
         gpu "pci-0000:03:00.0"
         policy-key 1
-        mode "2560x1440@120"
-        scale auto
+        mode "1920x1080@60"
+        scale 1
         position 0 0
         enabled #true
         focus-at-startup #true
-        vrr 1
+        vrr 0
     }
     named HDMI-A-1 {
         gpu "pci-0000:03:00.0"
@@ -337,7 +337,7 @@ output {
         mode "1920x1080@60"
         scale 1
         position 2560 0
-        enabled #true
+        enabled #false
         focus-at-startup #false
         vrr 0
     }
