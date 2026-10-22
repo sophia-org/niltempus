@@ -13,7 +13,8 @@ umask 077
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 required=(SOPHIA_SOURCE SOPHIA_BIN SOPHIA_SHA256 SOPHIA_INTEGRATION_XTASK SOPHIA_SESSION_PREFLIGHT
-    SOPHIA_LOM_BIN SOPHIA_LOM_COMMIT SOPHIA_LOM_SHA256 SOPHIA_HAGIA_BIN)
+SOPHIA_LOM_BIN SOPHIA_LOM_COMMIT SOPHIA_LOM_SHA256 SOPHIA_HAGIA_BIN
+SOPHIA_FACTOTUM_AGENT SOPHIA_FACTOTUM_PAM_HELPER)
 EVIDENCE_DIR="${SOPHIA_T339_EVIDENCE_DIR:-$ROOT_DIR/.artifacts/t339-capture-native/$(date -u +%Y%m%dT%H%M%SZ)}"
 RENDER_NODE="/dev/dri/renderD128"
 
@@ -22,7 +23,7 @@ RENDER_NODE="/dev/dri/renderD128"
 for name in "${required[@]}"; do
     [[ -n "${!name:-}" ]] || { echo "$name is required (no default)" >&2; exit 2; }
 done
-for name in SOPHIA_BIN SOPHIA_INTEGRATION_XTASK SOPHIA_SESSION_PREFLIGHT SOPHIA_LOM_BIN SOPHIA_HAGIA_BIN; do
+for name in SOPHIA_BIN SOPHIA_INTEGRATION_XTASK SOPHIA_SESSION_PREFLIGHT SOPHIA_LOM_BIN SOPHIA_HAGIA_BIN SOPHIA_FACTOTUM_AGENT SOPHIA_FACTOTUM_PAM_HELPER; do
     [[ "${!name}" == /* && -f "${!name}" && -x "${!name}" ]] || {
         echo "$name must name an absolute prebuilt executable" >&2; exit 2;
     }
@@ -88,6 +89,8 @@ sed -e "s|@LOM_BIN@|$SOPHIA_LOM_BIN|g" -e "s|@LOM_CONFIG@|$LOM_CONFIG|g" \
     printf 'profile_template_sha256=%s\n' "$(sha256sum "$ROOT_DIR/tools/fixtures/t339_capture_desktop.kdl.tmpl" | cut -d' ' -f1)"
     printf 'hagia_binary=%s\nhagia_binary_sha256=%s\n' \
         "$SOPHIA_HAGIA_BIN" "$(sha256sum "$SOPHIA_HAGIA_BIN" | cut -d' ' -f1)"
+    printf 'factotum_agent=%s\nfactotum_agent_sha256=%s\n' "$SOPHIA_FACTOTUM_AGENT" "$(sha256sum "$SOPHIA_FACTOTUM_AGENT" | cut -d' ' -f1)"
+    printf 'factotum_pam_helper=%s\nfactotum_pam_helper_sha256=%s\n' "$SOPHIA_FACTOTUM_PAM_HELPER" "$(sha256sum "$SOPHIA_FACTOTUM_PAM_HELPER" | cut -d' ' -f1)"
     printf 'core_config_sha256=%s\n' "$(sha256sum "$LOM_CORE_CONFIG" | cut -d' ' -f1)"
     printf 'desktop_profile_sha256=%s\n' "$(sha256sum "$EVIDENCE_DIR/desktop.kdl" | cut -d' ' -f1)"
     printf 'render_node=%s\nenabled_outputs=1 (HDMI-A-1 disabled in profile)\n' "$RENDER_NODE"
@@ -131,8 +134,11 @@ SOPHIA_SESSION_STARTUP=none \
 SOPHIA_SESSION_WATCHDOG_SECONDS=110 \
 SOPHIA_DIAGNOSTIC_DIR="$EVIDENCE_DIR/session" \
 SOPHIA_UNTRUSTED_SESSION_OUTPUT_LOG="$EVIDENCE_DIR/session/untrusted-session-output.log" \
+    env -u SOPHIA_FACTOTUM_AGENT -u SOPHIA_FACTOTUM_PAM_HELPER \
     "$ROOT_DIR/tools/session/run_desktop_session.sh" --max-runtime-ms=90000 \
-    --wm-process="$SOPHIA_HAGIA_BIN"
+    --wm-process="$SOPHIA_HAGIA_BIN" \
+    --factotum-agent="$SOPHIA_FACTOTUM_AGENT" \
+    --factotum-pam-helper="$SOPHIA_FACTOTUM_PAM_HELPER"
 native_status=$?
 set -e
 printf 'native_exit_status=%s\n' "$native_status" > "$EVIDENCE_DIR/native-outcome.txt"
