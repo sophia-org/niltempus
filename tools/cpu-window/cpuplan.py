@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a cpuwin analysis plan from schema-2 panel diagnostic run directories.
+"""Build a cpuwin analysis plan from panel diagnostic run directories.
 
   cpuplan.py --out PLAN.json [--baseline ARM] --run NAME ARM RUN_DIR [--run ...]
 
@@ -115,9 +115,11 @@ def anchor_ns(sample, lines, generation):
 def build_run(name, arm, stage):
     stage = Path(stage).resolve()
     d = load(stage / "panel-diagnostic.json")
-    if d.get("schema") != 2 or not is_int(d.get("warmup"), 1) or not is_int(d.get("counted"), 1) \
-            or not isinstance(d.get("raster"), dict):
-        raise Refused("panel-diagnostic.json: not a schema-2 descriptor with a pinned raster helper")
+    plain_ring = d.get("schema") == 1
+    if d.get("schema") not in (1, 2) or not is_int(d.get("warmup"), 1) or not is_int(d.get("counted"), 1) \
+            or (not plain_ring and not isinstance(d.get("raster"), dict)) \
+            or (plain_ring and ("raster" in d or "workload" in d)):
+        raise Refused("panel-diagnostic.json: expected a plain schema-1 or pinned-helper schema-2 descriptor")
     start, end = d["warmup"], d["warmup"] + d["counted"]
     plan_bytes = (stage / "plan.json").read_bytes()
     if hashlib.sha256(plan_bytes).hexdigest() != (d.get("plan") or {}).get("sha256"):
@@ -125,8 +127,8 @@ def build_run(name, arm, stage):
     request = json.loads(plan_bytes).get("request") or {}
     compared = {"workload": d.get("workload"), "target": d.get("target"),
                 "sophia_sha256": ((request.get("artifacts") or {}).get("sophia") or {}).get("sha256"),
-                "raster_sha256": d["raster"].get("sha256")}
-    if not (isinstance(compared["sophia_sha256"], str) and isinstance(compared["raster_sha256"], str)
+                "raster_sha256": None if plain_ring else d["raster"].get("sha256")}
+    if not (isinstance(compared["sophia_sha256"], str) and (plain_ring or isinstance(compared["raster_sha256"], str))
             and isinstance(compared["target"], dict)):
         raise Refused("descriptor or plan lacks the target, Session or helper pin")
 
@@ -143,7 +145,12 @@ def build_run(name, arm, stage):
     if native.get("schema") != 2 or native.get("verdict") != "joined_only" or source not in SOURCES:
         raise Refused(f"native-samples.json: want a schema-2 joined_only {sorted(SOURCES)} arm")
     draw = journal.get("draw") or {}
-    if journal.get("schema") != 6 or DRAW_SOURCES.get(draw.get("source")) != source \
+    if plain_ring:
+        if journal.get("schema") != 5 or source != "owned_ring" or draw \
+                or journal.get("workload", "fresh") != "fresh" \
+                or journal.get("interval_msec") is not None or journal.get("retained_resources") is not None:
+            raise Refused("schema-1 descriptor requires a fresh schema-5 owned-ring journal")
+    elif journal.get("schema") != 6 or DRAW_SOURCES.get(draw.get("source")) != source \
             or d.get("workload") not in WORKLOADS or draw.get("workload") != d.get("workload"):
         raise Refused("descriptor workload or source differs from the schema-6 draw journal")
     samples = {s.get("candidate_generation"): s for s in native.get("samples", [])}

@@ -129,6 +129,30 @@ class Base(unittest.TestCase):
 
 
 class Positive(Base):
+    def test_plain_schema1_ring_report(self):
+        def plain(files):
+            descriptor = files["panel-diagnostic.json"]
+            descriptor["schema"] = 1
+            del descriptor["raster"], descriptor["workload"]
+            files["native-samples.json"]["journal"] = {"schema": 5, "source": "owned_ring"}
+        stage = self.run_dir(source="owned_ring", edit=plain)
+        plan = cpuplan.build([("ring", "ring", stage)])
+        self.assertEqual(set(plan["runs"][0]["expect"]), {"session", "peer"})
+        descriptor = stage / "panel-diagnostic.json"
+        value = json.loads(descriptor.read_text())
+        value["raster"] = {"path": RASTER_EXE, "sha256": "0" * 64}
+        descriptor.write_text(json.dumps(value))
+        with self.assertRaises(cpuplan.Refused):
+            cpuplan.build([("ring", "ring", stage)])
+        del value["raster"]
+        descriptor.write_text(json.dumps(value))
+        native = stage / "native-samples.json"
+        value = json.loads(native.read_text())
+        value["journal"]["schema"] = 6
+        native.write_text(json.dumps(value))
+        with self.assertRaises(cpuplan.Refused):
+            cpuplan.build([("ring", "ring", stage)])
+
     def test_draw_plan_derives_identity_and_kernel_anchors(self):
         run = cpuplan.build([("d1", "draw", self.run_dir())], "draw")["runs"][0]
         self.assertEqual(run["expect"], {"session": {"pid": 11, "starttime": 101},
