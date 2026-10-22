@@ -173,8 +173,10 @@ grep -q '^sophia_tty_recovery schema=3 .*termios_restored=true ' \
 output_log="$EVIDENCE_DIR/session/untrusted-session-output.log"
 host_join="$EVIDENCE_DIR/host-presented.join"
 lom_join="$EVIDENCE_DIR/lom-dma-candidates.join"
-sed -n 's/^sophia_live_shell_content schema=1 status=presented output=\([0-9]*\) candidate_generation=\([0-9]*\) presentation_epoch=[0-9]* staging_bytes=[0-9]* resident_bytes=[0-9]* retiring_bytes=[0-9]* backing_bytes=[0-9]* connection_epoch=\([0-9]*\) content_grant_epoch=\([0-9]*\)$/\3 \4 \1 \2/p' \
-    "$output_log" | sort -u > "$host_join"
+# Session records are tab-prefixed in its event journal, separate from client output.
+cut -f4- -- "$EVIDENCE_DIR/session"/events.*.log | \
+    sed -n 's/^sophia_live_shell_content schema=1 status=presented output=\([0-9]*\) candidate_generation=\([0-9]*\) presentation_epoch=[0-9]* staging_bytes=[0-9]* resident_bytes=[0-9]* retiring_bytes=[0-9]* backing_bytes=[0-9]* connection_epoch=\([0-9]*\) content_grant_epoch=\([0-9]*\)$/\3 \4 \1 \2/p' | \
+    sort -u > "$host_join"
 sed -n 's/^lom_panel_candidate schema=2 status=presented connection_epoch=\([0-9]*\) content_grant_epoch=\([0-9]*\) output=\([0-9]*\) candidate_generation=\([0-9]*\) .* checksum=unavailable .*$/\1 \2 \3 \4/p' \
     "$output_log" | sort -u > "$lom_join"
 host_presented="$(wc -l < "$host_join")"
