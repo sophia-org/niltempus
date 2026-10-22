@@ -137,12 +137,13 @@ impl Wire {
             },
             transfer_timeout_ms: limits.transfer_timeout_ms,
             startup_deadline_ms: origin_ms + WAIT.as_millis() as u64,
-            formats_capacity: 64,
+            formats_capacity: 4096,
             ring_slots: 0,
             ring_capacity: 0,
             content_grant_epoch: limits.grant.content_grant_epoch,
         };
-        self.client.enable_image(image, Instant::now(), origin_ms)?;
+        self.client
+            .enable_dma_image(image, Instant::now(), origin_ms)?;
         Ok(())
     }
 
