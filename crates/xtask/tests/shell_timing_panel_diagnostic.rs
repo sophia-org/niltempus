@@ -18,6 +18,7 @@ fn fixture() -> (Descriptor, Request) {
             schema: 1,
             raster: None,
             workload: None,
+            bar_height: None,
             plan: artifact(),
             python: artifact(),
             sampler: artifact(),
@@ -52,6 +53,7 @@ fn fixture() -> (Descriptor, Request) {
             environment_readback: true,
             external_timing: None,
             reference_workload: None,
+            producer: Default::default(),
         },
     )
 }
@@ -150,6 +152,52 @@ fn changed_descriptor_never_creates_a_stage_or_reaches_launch() {
     );
     assert!(!stage.exists());
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn gpu_schema3_admits_only_explicit_gpu_producer_arms() {
+    use xtask::shell_timing_native::ProducerKind;
+    let (mut d, mut r) = fixture();
+    d.schema = 3;
+    d.bar_height = Some(24);
+    r.producer = ProducerKind::Gpu;
+    // I: IPC bytes.
+    r.source = ImageSource::Bytes;
+    r.wire = "ipc".into();
+    policy(&d, &r, 0).unwrap();
+    // S: files sealed; G: files dma_buf.
+    r.wire = "files".into();
+    r.source = ImageSource::Isb;
+    policy(&d, &r, 0).unwrap();
+    r.source = ImageSource::DmaBuf;
+    policy(&d, &r, 0).unwrap();
+    d.bar_height = Some(512);
+    policy(&d, &r, 0).unwrap();
+    // The binding, not the source, qualifies: CPU producer refused.
+    r.producer = ProducerKind::Cpu;
+    assert!(policy(&d, &r, 0).is_err());
+    r.producer = ProducerKind::Gpu;
+    // Wrong wire for the source refused both ways.
+    r.source = ImageSource::Bytes;
+    assert!(policy(&d, &r, 0).is_err());
+    r.wire = "ipc".into();
+    r.source = ImageSource::DmaBuf;
+    assert!(policy(&d, &r, 0).is_err());
+    // Unpinned or wrong bar height refused.
+    d.bar_height = None;
+    r.source = ImageSource::Bytes;
+    assert!(policy(&d, &r, 0).is_err());
+    d.bar_height = Some(108);
+    assert!(policy(&d, &r, 0).is_err());
+    // Frozen schemas refuse the GPU binding and the new field.
+    d.bar_height = None;
+    d.schema = 1;
+    r.wire = "files".into();
+    r.source = ImageSource::Isb;
+    assert!(policy(&d, &r, 0).is_err());
+    d.bar_height = Some(24);
+    r.producer = ProducerKind::Cpu;
+    assert!(policy(&d, &r, 0).is_err());
 }
 
 #[test]

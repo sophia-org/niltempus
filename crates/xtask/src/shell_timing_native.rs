@@ -72,6 +72,27 @@ pub struct Request {
     /// `validate_reference` instead of the legacy `PeerConfig` shape.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference_workload: Option<DrawWorkload>,
+    /// Explicit producer binding: absent means the historical CPU
+    /// producer (GPU denied). `gpu` permits and requires the direct
+    /// grant for the GPU peers (I/S/G); `dma_buf` necessarily requires
+    /// it. Frozen into the plan like every other request field.
+    #[serde(default, skip_serializing_if = "ProducerKind::is_cpu")]
+    pub producer: ProducerKind,
+}
+
+/// Who renders the peer's pixels.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProducerKind {
+    #[default]
+    Cpu,
+    Gpu,
+}
+
+impl ProducerKind {
+    fn is_cpu(&self) -> bool {
+        matches!(self, Self::Cpu)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -170,6 +191,23 @@ impl PeerConfig {
     fn workload(&self) -> Result<(WorkloadMode, Option<u64>), String> {
         let mode = self.workload;
         let retained = mode.check(self.retained_resources)?;
+        if self.source == ImageSource::DmaBuf {
+            // GPU DMA-BUF uploads are fresh-only: bounds come from the
+            // negotiated content limits, never from config image bounds,
+            // a probe, a pool or a pacing interval.
+            if self.wire != "files"
+                || mode != WorkloadMode::Fresh
+                || self.probe_bytes != 0
+                || self.ring_slots.is_some()
+                || self.interval_msec.is_some()
+                || self.image.is_some()
+            {
+                return Err(
+                    "dma_buf requires the files wire, a fresh workload and no image/probe/pool keys"
+                        .into(),
+                );
+            }
+        }
         if self.source == ImageSource::OwnedRing {
             // Retained ring tiles are vsync-paced, as the peer refuses an interval.
             if self.wire != "files"
@@ -397,7 +435,9 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
             || (peer.source == ImageSource::Isb && request.wire != "files")
             || match peer.source {
                 ImageSource::Isb => !peer.image.as_ref().is_some_and(ImageConfig::valid),
-                ImageSource::Bytes | ImageSource::OwnedRing => peer.image.is_some(),
+                ImageSource::Bytes | ImageSource::OwnedRing | ImageSource::DmaBuf => {
+                    peer.image.is_some()
+                }
                 // Reference sources only validate through the
                 // reference_workload branch above.
                 ImageSource::Draw | ImageSource::Mixed => true,
@@ -450,11 +490,21 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
     } else {
         "comparison-ipc"
     };
+    // The producer binding, not the source, decides the grant: GPU
+    // peers (I/S/G) require direct, CPU peers stay denied, and a
+    // DMA-BUF source without the GPU binding is refused outright.
+    let gpu = match (request.producer, request.source) {
+        (ProducerKind::Gpu, _) => "direct",
+        (ProducerKind::Cpu, ImageSource::DmaBuf) => {
+            return Err("dma_buf requires the gpu producer binding".into());
+        }
+        (ProducerKind::Cpu, _) => "denied",
+    };
     for (name, expected) in [
         ("executable", absolute(&request.artifacts["peer"].path)?),
         ("config", absolute(&request.artifacts["peer-config"].path)?),
         ("transport", wire),
-        ("gpu", "denied"),
+        ("gpu", gpu),
     ] {
         if field(name)?.get(0).and_then(|v| v.as_string()) != Some(expected) {
             return Err(format!("wrong component {name}"));

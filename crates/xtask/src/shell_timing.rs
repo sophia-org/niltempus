@@ -27,6 +27,9 @@ pub enum ImageSource {
     Isb,
     /// Experimental D4 copy from reusable producer slots.
     OwnedRing,
+    /// GPU DMA-BUF source (schema 2, files wire only).
+    #[serde(rename = "dma_buf")]
+    DmaBuf,
     /// r11 server-rasterized draw batches (schema 6).
     Draw,
     /// r11 draw and owned-ring uploads on one connection (schema 6).

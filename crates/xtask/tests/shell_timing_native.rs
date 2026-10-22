@@ -36,6 +36,7 @@ impl Fixture {
                 environment_readback: false,
                 external_timing: None,
                 reference_workload: None,
+                producer: xtask::shell_timing_native::ProducerKind::Cpu,
             },
         };
         // These fixtures are hashed only. None may be executed by validation.
@@ -244,6 +245,123 @@ fn sealed_preparation_requires_matching_files_source_without_running_artifacts()
     f.put(
         "peer-config",
         br#"{"wire":"ipc","source":"sealed","output":1,"frames":3,"height":24,"hold_msec":60000}"#,
+        false,
+    );
+    assert!(validate(&f.request).is_err());
+}
+
+#[test]
+fn dma_buf_preparation_requires_files_fresh_direct_and_no_image_bounds() {
+    use xtask::shell_timing::ImageSource;
+    use xtask::shell_timing_native::ProducerKind;
+    let mut f = Fixture::new("dma", "files");
+    f.request.source = ImageSource::DmaBuf;
+    f.request.producer = ProducerKind::Gpu;
+    // The profile must grant the GPU directly for a DMA peer.
+    let profile = fs::read_to_string(f.request.artifacts["profile"].path.clone()).unwrap();
+    f.put(
+        "profile",
+        profile
+            .replace("gpu \"denied\"", "gpu \"direct\"")
+            .as_bytes(),
+        false,
+    );
+    let good = serde_json::json!({
+        "wire":"files", "source":"dma_buf", "output":1, "frames":3,
+        "height":24, "hold_msec":60000
+    });
+    f.put("peer-config", good.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_ok());
+    for (key, value) in [
+        (
+            "image",
+            serde_json::json!({ "max_resource_bytes":4194304, "max_width":4096,
+            "max_height":4096, "max_admitted_outputs":8,
+            "transfer_slots":4, "transfer_timeout_ms":2000 }),
+        ),
+        ("probe_bytes", serde_json::json!(4194304)),
+        ("ring_slots", serde_json::json!(2)),
+        ("interval_msec", serde_json::json!(250)),
+        ("workload", serde_json::json!("retained")),
+        ("retained_resources", serde_json::json!(2)),
+    ] {
+        let mut bad = good.clone();
+        bad[key] = value;
+        f.put("peer-config", bad.to_string().as_bytes(), false);
+        assert!(
+            validate(&f.request).is_err(),
+            "accepted dma config with {key}"
+        );
+    }
+    f.put("peer-config", good.to_string().as_bytes(), false);
+    f.request.source = ImageSource::Isb;
+    assert!(validate(&f.request).is_err());
+    f.request.source = ImageSource::DmaBuf;
+    f.request.wire = "ipc".into();
+    f.put(
+        "peer-config",
+        br#"{"wire":"ipc","source":"dma_buf","output":1,"frames":3,"height":24,"hold_msec":60000}"#,
+        false,
+    );
+    assert!(validate(&f.request).is_err());
+}
+
+#[test]
+fn producer_binding_controls_the_gpu_grant_for_every_source() {
+    use xtask::shell_timing::ImageSource;
+    use xtask::shell_timing_native::ProducerKind;
+    // DMA without the GPU binding is refused before any profile check.
+    let mut f = Fixture::new("binding-dma-cpu", "files");
+    f.request.source = ImageSource::DmaBuf;
+    f.put(
+        "peer-config",
+        br#"{"wire":"files","source":"dma_buf","output":1,"frames":3,"height":24,"hold_msec":60000}"#,
+        false,
+    );
+    assert!(validate(&f.request).is_err());
+    // GPU binding with a denied profile is refused for sealed (S)...
+    let mut f = Fixture::new("binding-sealed", "files");
+    f.request.source = ImageSource::Isb;
+    f.request.producer = ProducerKind::Gpu;
+    let config = serde_json::json!({
+        "wire":"files", "source":"sealed", "output":1, "frames":3,
+        "height":24, "hold_msec":60000,
+        "image": { "max_resource_bytes":4194304, "max_width":4096,
+            "max_height":4096, "max_admitted_outputs":8,
+            "transfer_slots":4, "transfer_timeout_ms":2000 }
+    });
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_err());
+    let profile = fs::read_to_string(f.request.artifacts["profile"].path.clone()).unwrap();
+    f.put(
+        "profile",
+        profile
+            .replace("gpu \"denied\"", "gpu \"direct\"")
+            .as_bytes(),
+        false,
+    );
+    assert!(validate(&f.request).is_ok());
+    // ...and for the IPC bytes arm (I) as well.
+    let mut f = Fixture::new("binding-ipc", "ipc");
+    f.request.producer = ProducerKind::Gpu;
+    assert!(validate(&f.request).is_err());
+    let profile = fs::read_to_string(f.request.artifacts["profile"].path.clone()).unwrap();
+    f.put(
+        "profile",
+        profile
+            .replace("gpu \"denied\"", "gpu \"direct\"")
+            .as_bytes(),
+        false,
+    );
+    assert!(validate(&f.request).is_ok());
+    // Historical default: CPU binding with a direct profile is refused.
+    let mut f = Fixture::new("binding-cpu-direct", "files");
+    let profile = fs::read_to_string(f.request.artifacts["profile"].path.clone()).unwrap();
+    f.put(
+        "profile",
+        profile
+            .replace("gpu \"denied\"", "gpu \"direct\"")
+            .as_bytes(),
         false,
     );
     assert!(validate(&f.request).is_err());

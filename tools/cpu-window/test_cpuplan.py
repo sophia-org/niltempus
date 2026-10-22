@@ -128,6 +128,104 @@ class Base(unittest.TestCase):
         self.assertIn(needle, str(cm.exception))
 
 
+def write_run_gpu(root, source="sealed", sophia="5" * 64, bar_height=24, edit=None):
+    """A schema-3 GPU-producer run stage (fresh schema-2 journal)."""
+    stage = Path(root)
+    stage.mkdir(parents=True)
+    host = {"wrapper": ident(10, 100), "host": ident(11, 101), "supervisor": ident(12, 102),
+            "peer": ident(13, 102), "time": time_proof()}
+    files = {
+        "panel-diagnostic.json": {"schema": 3, "warmup": WARMUP, "counted": COUNTED,
+                                  "bar_height": bar_height,
+                                  "plan": {"path": "plan.json", "sha256": "AUTO"},
+                                  "target": {"card": "card0", "output": 1, "mode_millihz": 60000}},
+        "plan.json": {"schema": 1, "request": {
+            "artifacts": {"sophia": {"sha256": sophia}}, "producer": "gpu",
+            "source": source, "wire": "ipc" if source == "bytes" else "files"}},
+        "result.json": {"schema": 1, "status": "captured_only", "error": None},
+        "environment.json": {"finish_error": None, "binding": dict(host)},
+        "cpu-binding.json": dict(host),
+        "native-samples.json": {
+            "schema": 2, "verdict": "joined_only",
+            "journal": {"source": source, "schema": 2,
+                        "wire": "ipc" if source == "bytes" else "files"},
+            "samples": [{"candidate_generation": g, "connection_epoch": 1, "content_grant_epoch": 1,
+                         "output": 1, "native_owner": 1, "native_frame": g + 4, "heads": 2,
+                         "completed_monotonic_usec": usec(g)} for g in range(1, END + 1)]},
+        "native.log": [completion_line(g) for g in range(1, END + 1)],
+    }
+    if edit:
+        edit(files)
+    for name, value in files.items():
+        if value is None:
+            continue
+        text = "\n".join(value) + "\n" if name == "native.log" else json.dumps(value)
+        (stage / name).write_text(text)
+    descriptor = files["panel-diagnostic.json"]
+    if descriptor["plan"]["sha256"] == "AUTO":
+        descriptor["plan"]["sha256"] = hashlib.sha256((stage / "plan.json").read_bytes()).hexdigest()
+        (stage / "panel-diagnostic.json").write_text(json.dumps(descriptor))
+    return stage
+
+
+class GpuPositive(Base):
+    def gpu_dir(self, **kw):
+        self.count += 1
+        return write_run_gpu(self.root / f"g{self.count}", **kw)
+
+    def test_gpu_arms_split_hosts_per_arm_and_analyze(self):
+        i = self.gpu_dir(source="bytes", sophia="5" * 64)
+        s = self.gpu_dir(source="sealed", sophia="5" * 64)
+        g = self.gpu_dir(source="dma_buf", sophia="6" * 64)
+        plan = cpuplan.build([("i1", "i", i), ("s1", "s", s), ("g1", "g", g)], "i")
+        for run in plan["runs"]:
+            self.assertEqual(set(run["expect"]), {"session", "peer"})
+        sampler_file(g / "cpu-window.jsonl",
+                     {"session": HEADER["session"], "peer": HEADER["peer"]})
+        result = cpuwin.analyze_run(plan["runs"][2], plan["max_gap_ms"])
+        self.assertEqual(set(result["procs"]), {"session", "peer"})
+        self.assertEqual(result["intervals"], COUNTED)
+
+    def test_gpu_arm_mixing_hosts_or_heights_is_refused(self):
+        a = self.gpu_dir(source="sealed", sophia="5" * 64)
+        b = self.gpu_dir(source="sealed", sophia="6" * 64)
+        with self.assertRaises(cpuplan.Refused) as cm:
+            cpuplan.build([("s1", "s", a), ("s2", "s", b)])
+        self.assertIn("mixes Session binaries", str(cm.exception))
+        tall = self.gpu_dir(source="sealed", sophia="5" * 64, bar_height=512)
+        with self.assertRaises(cpuplan.Refused) as cm:
+            cpuplan.build([("s1", "s", a), ("s3", "s", tall)])
+        self.assertIn("differ in bar_height", str(cm.exception))
+
+    def test_gpu_descriptor_and_journal_shape_refusals(self):
+        def refused(needle, **kw):
+            with self.assertRaises(cpuplan.Refused) as cm:
+                cpuplan.build([("s1", "s", self.gpu_dir(**kw))])
+            self.assertIn(needle, str(cm.exception))
+        refused("GPU journal", source="draw")
+        refused("GPU journal", edit=setter(["native-samples.json", "journal", "schema"], 6))
+        refused("GPU schema-3", edit=setter(["panel-diagnostic.json", "bar_height"], 108))
+        refused("GPU schema-3", edit=lambda f: f["panel-diagnostic.json"].update(
+            raster={"path": RASTER_EXE, "sha256": "0" * 64}))
+        refused("non-raster arm", edit=lambda f: f.update({"cpu-raster-binding.json": {}}))
+
+    def test_gpu_unbound_or_mismatched_request_is_refused(self):
+        def refused(needle, **kw):
+            with self.assertRaises(cpuplan.Refused) as cm:
+                cpuplan.build([("s1", "s", self.gpu_dir(**kw))])
+            self.assertIn(needle, str(cm.exception))
+        # Missing producer (CPU/unbound request labeled GPU).
+        refused("producer=gpu", edit=lambda f: f["plan.json"]["request"].pop("producer"))
+        refused("producer=gpu", edit=setter(["plan.json", "request", "producer"], "cpu"))
+        # Request source or wire disagreeing with the journal.
+        refused("producer=gpu", edit=setter(["plan.json", "request", "source"], "dma_buf"))
+        refused("producer=gpu", edit=setter(["plan.json", "request", "wire"], "ipc"))
+        refused("producer=gpu", source="bytes",
+                edit=setter(["plan.json", "request", "wire"], "files"))
+        refused("producer=gpu", source="bytes",
+                edit=setter(["native-samples.json", "journal", "wire"], "files"))
+
+
 class Positive(Base):
     def test_plain_schema1_ring_report(self):
         def plain(files):
@@ -276,7 +374,7 @@ class Negative(Base):
     def test_ring_arm_with_a_helper(self):
         def edit(files):
             files["cpu-raster-binding.json"] = {}
-        self.refused("ring arm", source="owned_ring", edit=edit)
+        self.refused("non-raster arm", source="owned_ring", edit=edit)
 
     def test_descriptor_workload_contradicts_the_draw_journal(self):
         self.refused("draw journal", edit=setter(["native-samples.json", "journal", "draw", "workload"], "bursty"))

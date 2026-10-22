@@ -69,6 +69,27 @@ fn sealed_evidence_is_explicit_and_cannot_claim_the_ipc_or_legacy_path() {
 }
 
 #[test]
+fn dma_buf_evidence_is_schema2_files_only() {
+    use xtask::shell_timing::ImageSource;
+    let dma = upload_journal().replacen(
+        "\"event\":\"start\"",
+        "\"event\":\"start\",\"source\":\"dma_buf\"",
+        1,
+    );
+    let metrics = collect_metrics(&dma, 1).unwrap();
+    assert_eq!(metrics.source, ImageSource::DmaBuf);
+    assert_eq!(metrics.schema, 2);
+    assert_eq!(metrics.uploads.len(), 1);
+    for bad in [
+        dma.replace("files", "ipc"),
+        dma.replace("\"schema\":2", "\"schema\":3"),
+        dma.replace("\"schema\":2", "\"schema\":5"),
+    ] {
+        assert!(collect_metrics(&bad, 1).is_err(), "accepted {bad}");
+    }
+}
+
+#[test]
 fn nearest_rank_preserves_tail_and_distinguishes_missing_measurements() {
     use xtask::shell_timing::Distribution;
     assert!(Distribution::from_samples(&[]).is_none());

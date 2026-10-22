@@ -224,6 +224,7 @@ fn request(arm: &Arm) -> xtask::shell_timing_native::Request {
         environment_readback: true,
         external_timing: None,
         reference_workload: None,
+        producer: Default::default(),
     }
 }
 

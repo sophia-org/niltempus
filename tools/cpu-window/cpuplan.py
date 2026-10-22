@@ -40,6 +40,8 @@ COMPLETION_FIELDS = {"schema", "output", "native_owner", "native_frame", "heads"
                      "drm_timestamp_monotonic"}
 RASTER_SOURCES = {"draw", "mixed"}
 SOURCES = RASTER_SOURCES | {"owned_ring"}
+# Schema-3 GPU-producer arms: fresh schema-2 journals, no raster helper.
+GPU_SOURCES = {"bytes", "sealed", "dma_buf"}
 DRAW_SOURCES = {"draw": "draw", "mixed": "mixed", "ring": "owned_ring"}  # journal -> plan
 WORKLOADS = {"retained", "continuous", "bursty"}
 MAX_GAP_MS = 20
@@ -116,10 +118,13 @@ def build_run(name, arm, stage):
     stage = Path(stage).resolve()
     d = load(stage / "panel-diagnostic.json")
     plain_ring = d.get("schema") == 1
-    if d.get("schema") not in (1, 2) or not is_int(d.get("warmup"), 1) or not is_int(d.get("counted"), 1) \
-            or (not plain_ring and not isinstance(d.get("raster"), dict)) \
-            or (plain_ring and ("raster" in d or "workload" in d)):
-        raise Refused("panel-diagnostic.json: expected a plain schema-1 or pinned-helper schema-2 descriptor")
+    gpu = d.get("schema") == 3
+    if d.get("schema") not in (1, 2, 3) or not is_int(d.get("warmup"), 1) or not is_int(d.get("counted"), 1) \
+            or (not plain_ring and not gpu and not isinstance(d.get("raster"), dict)) \
+            or ((plain_ring or gpu) and ("raster" in d or "workload" in d)) \
+            or (gpu and d.get("bar_height") not in (24, 512)) \
+            or (not gpu and "bar_height" in d):
+        raise Refused("panel-diagnostic.json: expected a plain schema-1, pinned-helper schema-2 or GPU schema-3 descriptor")
     start, end = d["warmup"], d["warmup"] + d["counted"]
     plan_bytes = (stage / "plan.json").read_bytes()
     if hashlib.sha256(plan_bytes).hexdigest() != (d.get("plan") or {}).get("sha256"):
@@ -127,8 +132,9 @@ def build_run(name, arm, stage):
     request = json.loads(plan_bytes).get("request") or {}
     compared = {"workload": d.get("workload"), "target": d.get("target"),
                 "sophia_sha256": ((request.get("artifacts") or {}).get("sophia") or {}).get("sha256"),
-                "raster_sha256": None if plain_ring else d["raster"].get("sha256")}
-    if not (isinstance(compared["sophia_sha256"], str) and (plain_ring or isinstance(compared["raster_sha256"], str))
+                "bar_height": d.get("bar_height"),
+                "raster_sha256": None if (plain_ring or gpu) else d["raster"].get("sha256")}
+    if not (isinstance(compared["sophia_sha256"], str) and (plain_ring or gpu or isinstance(compared["raster_sha256"], str))
             and isinstance(compared["target"], dict)):
         raise Refused("descriptor or plan lacks the target, Session or helper pin")
 
@@ -142,14 +148,28 @@ def build_run(name, arm, stage):
     native = load(stage / "native-samples.json")
     journal = native.get("journal") or {}
     source = journal.get("source")
-    if native.get("schema") != 2 or native.get("verdict") != "joined_only" or source not in SOURCES:
-        raise Refused(f"native-samples.json: want a schema-2 joined_only {sorted(SOURCES)} arm")
+    if native.get("schema") != 2 or native.get("verdict") != "joined_only" \
+            or (source not in SOURCES and not (gpu and source in GPU_SOURCES)):
+        raise Refused(f"native-samples.json: want a schema-2 joined_only {sorted(SOURCES | GPU_SOURCES)} arm")
     draw = journal.get("draw") or {}
     if plain_ring:
         if journal.get("schema") != 5 or source != "owned_ring" or draw \
                 or journal.get("workload", "fresh") != "fresh" \
                 or journal.get("interval_msec") is not None or journal.get("retained_resources") is not None:
             raise Refused("schema-1 descriptor requires a fresh schema-5 owned-ring journal")
+    elif gpu:
+        if journal.get("schema") != 2 or source not in GPU_SOURCES or draw \
+                or journal.get("workload", "fresh") != "fresh" \
+                or journal.get("interval_msec") is not None or journal.get("retained_resources") is not None:
+            raise Refused("schema-3 descriptor requires a fresh schema-2 GPU journal (bytes, sealed or dma_buf)")
+        # The journal alone cannot prove the GPU binding: the pinned
+        # request must declare it and agree on source and wire.
+        want_wire = "ipc" if source == "bytes" else "files"
+        if request.get("producer") != "gpu" \
+                or request.get("source") != source \
+                or request.get("wire") != want_wire \
+                or journal.get("wire") != want_wire:
+            raise Refused("schema-3 descriptor requires request producer=gpu with source and wire matching the GPU journal")
     elif journal.get("schema") != 6 or DRAW_SOURCES.get(draw.get("source")) != source \
             or d.get("workload") not in WORKLOADS or draw.get("workload") != d.get("workload"):
         raise Refused("descriptor workload or source differs from the schema-6 draw journal")
@@ -178,7 +198,7 @@ def build_run(name, arm, stage):
                     if (stage / f).exists()]
     if source not in RASTER_SOURCES:
         if raster_files:
-            raise Refused(f"ring arm has raster helper evidence: {raster_files}")
+            raise Refused(f"non-raster arm has raster helper evidence: {raster_files}")
     else:
         rb = load(stage / "cpu-raster-binding.json")
         for role in ("wrapper", "host"):
@@ -219,7 +239,7 @@ def build_run(name, arm, stage):
 
 
 def build(runs, baseline=None):
-    plan, errors, arms = [], [], {}
+    plan, errors, arms, hosts = [], [], {}, {}
     for name, arm, stage in runs:
         try:
             run = build_run(name, arm, stage)
@@ -229,10 +249,18 @@ def build(runs, baseline=None):
         source = run["evidence"]["source"]
         if arms.setdefault(arm, source) != source:
             errors.append(f"{name}: arm {arm!r} mixes {arms[arm]} and {source}")
+        host = run["evidence"]["compared"]["sophia_sha256"]
+        if hosts.setdefault(arm, host) != host:
+            errors.append(f"{name}: arm {arm!r} mixes Session binaries")
         plan.append(run)
-    for key in ("workload", "target", "sophia_sha256", "raster_sha256"):
+    # GPU arms legitimately split hosts per arm (comparator for I/S,
+    # master for G); the per-arm check above replaces the global one.
+    gpu_plan = plan and all(r["evidence"]["source"] in GPU_SOURCES for r in plan)
+    for key in ("workload", "target", "raster_sha256", "bar_height"):
         if len({json.dumps(r["evidence"]["compared"][key], sort_keys=True) for r in plan}) > 1:
             errors.append(f"compared runs differ in {key}")
+    if not gpu_plan and len({r["evidence"]["compared"]["sophia_sha256"] for r in plan}) > 1:
+        errors.append("compared runs differ in sophia_sha256")
     if len({n for n, _, _ in runs}) != len(runs):
         errors.append("run names must be unique")
     if baseline is not None and baseline not in {a for _, a, _ in runs}:

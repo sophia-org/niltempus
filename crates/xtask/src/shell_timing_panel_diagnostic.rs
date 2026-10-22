@@ -5,7 +5,7 @@ use crate::shell_timing_calibration::{absolute, read_bounded, write_new};
 use crate::shell_timing_campaign::Condition;
 use crate::shell_timing_campaign_observer::LiveCampaignObserver;
 use crate::shell_timing_campaign_provenance::ProvenanceTarget;
-use crate::shell_timing_native::{self, Artifact, CampaignObserver, Request};
+use crate::shell_timing_native::{self, Artifact, CampaignObserver, ProducerKind, Request};
 use crate::shell_timing_process_binding::{
     Binder, BindingRecheck, Executables, ProcessBinding, ResolveOutcome,
 };
@@ -32,6 +32,10 @@ pub struct Descriptor {
     pub raster: Option<Artifact>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workload: Option<DrawWorkload>,
+    /// Schema 3 (explicit GPU-producer arms) pins the bar height so
+    /// compared runs cannot mix 24- and 512-line workloads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bar_height: Option<u64>,
 }
 
 /// Deliberately narrow diagnostic. Neither historical comparator
@@ -42,11 +46,15 @@ pub fn policy(d: &Descriptor, r: &Request, probe: u64) -> Result<(), String> {
         1 => {
             d.raster.is_none()
                 && d.workload.is_none()
+                && d.bar_height.is_none()
+                && r.producer == ProducerKind::Cpu
                 && r.reference_workload.is_none()
                 && matches!(r.source, ImageSource::Isb | ImageSource::OwnedRing)
         }
         2 => {
             d.raster.is_some()
+                && d.bar_height.is_none()
+                && r.producer == ProducerKind::Cpu
                 && d.workload == r.reference_workload
                 && matches!(
                     d.workload,
@@ -56,6 +64,20 @@ pub fn policy(d: &Descriptor, r: &Request, probe: u64) -> Result<(), String> {
                     r.source,
                     ImageSource::OwnedRing | ImageSource::Draw | ImageSource::Mixed
                 )
+        }
+        // Schema 3 is the explicit GPU-producer admission: the binding,
+        // not the source alone, qualifies an arm, exactly as at launch.
+        3 => {
+            d.raster.is_none()
+                && d.workload.is_none()
+                && matches!(d.bar_height, Some(24 | 512))
+                && r.producer == ProducerKind::Gpu
+                && r.reference_workload.is_none()
+                && match r.source {
+                    ImageSource::Bytes => r.wire == "ipc",
+                    ImageSource::Isb | ImageSource::DmaBuf => r.wire == "files",
+                    _ => false,
+                }
         }
         _ => false,
     };
@@ -71,12 +93,12 @@ pub fn policy(d: &Descriptor, r: &Request, probe: u64) -> Result<(), String> {
         || r.instrumentation != "none"
         || r.external_timing.is_some()
         || !r.environment_readback
-        || r.wire != "files"
+        || (d.schema != 3 && r.wire != "files")
         || probe != 0
         || r.output != d.target.output
         || r.mode_millihz != d.target.mode_millihz
     {
-        return Err("panel diagnostic requires an observed files arm, 120 warmup, 2000 intervals/60 seconds (or schema 2: 6000/120 seconds), and 5 ms sampling".into());
+        return Err("panel diagnostic requires an observed arm, 120 warmup, 2000 intervals/60 seconds (or schema 2: 6000/120 seconds), and 5 ms sampling".into());
     }
     Ok(())
 }
@@ -105,6 +127,12 @@ fn verify(d: &Descriptor) -> Result<Request, String> {
     if d.schema == 1 {
         if config["height"] != 24 || config.get("workload").is_some_and(|v| v != "fresh") {
             return Err("panel diagnostic requires fresh 24-pixel content".into());
+        }
+    } else if d.schema == 3 {
+        if config["height"] != serde_json::json!(d.bar_height)
+            || config.get("workload").is_some_and(|v| v != "fresh")
+        {
+            return Err("GPU diagnostic requires fresh content at the pinned bar height".into());
         }
     } else {
         if config["workload"] != serde_json::to_value(d.workload).map_err(|e| e.to_string())? {

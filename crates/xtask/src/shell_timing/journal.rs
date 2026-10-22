@@ -224,7 +224,8 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
         } if frames == expected
             && matches!(wire.as_str(), "files" | "ipc")
             && (source == ImageSource::Bytes
-                || (source == ImageSource::Isb && matches!(schema, 2..=4) && wire == "files"))
+                || (source == ImageSource::Isb && matches!(schema, 2..=4) && wire == "files")
+                || (source == ImageSource::DmaBuf && schema == 2 && wire == "files"))
             && matches!(probe_bytes, 0 | 4194304)
             && (schema >= 2 || probe_bytes == 0)
             && match (schema, workload, retained_resources, interval_msec) {

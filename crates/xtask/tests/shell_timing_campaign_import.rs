@@ -861,6 +861,7 @@ fn prepared_plan(
         environment_readback: true,
         external_timing: None,
         reference_workload: None,
+        producer: Default::default(),
         frames: arm.frames,
         mode_millihz: 120_000,
         instrumentation: match arm.measurement {
