@@ -1,0 +1,39 @@
+schema 1
+
+// t339 capture qualification profile: one real shell component (Lom,
+// explicit DMA image source selected by its protected config), one
+// enabled output. @LOM_BIN@ and @LOM_CONFIG@ are substituted by the
+// gate with the pinned original paths; the result is hashed into the
+// run's identity manifest.
+shell {
+    enabled #true
+    content #true
+    content-input #true
+    panel 24
+    gpu "direct"
+}
+session {
+    shell-component "panel" "bar" {
+        executable "@LOM_BIN@"
+        config "@LOM_CONFIG@"
+        gpu "direct"
+        transport "9p2000.L"
+        reservation "top" 24
+    }
+    application-catalog "lom-panel-gate"
+    startup
+}
+input { inherit-sophia #true; }
+output {
+    availability "adaptive"
+    inherit-sophia #false
+    named "DP-1" {
+        enabled #true
+        focus-at-startup #true
+        gpu "pci-0000:03:00.0"
+        mode "preferred"
+        vrr 0
+    }
+    named "HDMI-A-1" { enabled #false; }
+}
+broker { enabled #false; }

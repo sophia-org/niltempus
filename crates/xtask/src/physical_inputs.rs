@@ -83,7 +83,11 @@ const PRODUCT_KEYS: [&str; 9] = [
     "nim_stdlib_sha256",
     "nim_command",
 ];
-pub const FEATURES: [&str; 2] = ["native-session", "atomic-scanout-live"];
+pub const FEATURES: [&str; 3] = [
+    "native-session",
+    "atomic-scanout-live",
+    "native-session,experimental-shell-capture",
+];
 pub const PACKAGES: [&str; 3] = [
     "sophia-cli",
     "sophia-cli,sophia-wm-demo",
@@ -313,7 +317,12 @@ impl<'a> Request<'a> {
         for package in &self.packages {
             cargo_args.extend(["-p", *package]);
         }
-        let feature = format!("sophia-cli/{}", self.features);
+        let feature = self
+            .features
+            .split(',')
+            .map(|feature| format!("sophia-cli/{feature}"))
+            .collect::<Vec<_>>()
+            .join(",");
         cargo_args.extend(["--features", feature.as_str()]);
         let target = self.build_dir.join("sophia-target");
         cargo(
