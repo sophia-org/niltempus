@@ -15,6 +15,10 @@ R/G comparison measures.
 
 Configuration is exactly `wire` (`files`), `output`, `frames`, `height`,
 `hold_msec` and `source`, plus `ring_slots` (2..=4) only for `owned_ring`.
+Optional `dma_reuse` (boolean) is accepted only for `dma_buf`; absent or
+`false` is the unchanged fresh G arm. `true` is diagnostic only and requires
+`capture_profile: true` (and so its bounds), so no comparison plan can treat
+reused backing as fresh G before a separate measured acceptance.
 
 Optional `capture_profile: true` enables cumulative producer DMA-stage timing
 for a 24-row, 2120-frame, 60000-ms diagnostic. The runner must also pin
@@ -28,7 +32,21 @@ the same queue. Its final fence covers both, followed by bounded wgpu cleanup
 before export. `draw` now measures encoding/submission; `release` includes the
 combined wait, cleanup poll and source drop. Compare `draw + release` against
 older profiles that waited between submissions; individual stage times changed
-meaning. Every frame still uses a fresh allocation.
+meaning. Fresh mode still uses a fresh allocation every frame.
+
+With `dma_reuse: true` (`src/dma_frame.rs`), frame 1 is a fresh export. Each
+later frame redraws that same export through Lom's unsafe
+`render_dma_buf_reusing`, and only after the previous offer settled Accepted
+with a capture-complete (disposition 2) release and `image_forget`
+succeeded. Offers, resource identities and the schema 2 journal are
+unchanged; Session sees the same buffer every frame. Uncertain begin or
+settle outcomes keep the export allocated until exit, as in fresh mode. The
+retained export is destroyed after the counted window. Every `dma_buf` run
+prints `gpu_bar_dma_mode schema=1 mode=fresh|reuse` to stderr. The reuse
+profile is `gpu_bar_dma_timing schema=2 mode=reuse`: it requires exactly 2000
+reuse stages in generations 121..2120, and no change at all to the setup,
+draw, release, export or destroy totals. The fresh profile stays schema 1 and
+refuses any reuse change.
 
 Schema 7 keeps schema 5's ring records. `admitted_usec` and `slot_generation`
 are null because the SDK exposes neither, and `slot` is the SDK's actual slot,

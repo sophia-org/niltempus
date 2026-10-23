@@ -15,7 +15,7 @@ imaging = "0.0.1"
 rustix = { version = "1.1", default-features = false, features = ["std", "time"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sophia-shell-gpu = { git = "https://github.com/sophia-org/lom", rev = "b8ec26a311cd7fe384250ac90bf93dea120faf3e" }
+sophia-shell-gpu = { git = "https://github.com/sophia-org/lom", rev = "dcb1eb88cb1e386ed3d3f1f22400de37174e88ea" }
 sophia-shell-protocol = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "0706ea2c78cd16ba59ed209620354f30a2c78906" }
 sophia-shell-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "0706ea2c78cd16ba59ed209620354f30a2c78906" }
 sophia-launch-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "0706ea2c78cd16ba59ed209620354f30a2c78906" }

@@ -8,8 +8,8 @@
 use sophia_image_producer::ResourceStatusKind;
 use sophia_shell_client::{
     IMAGE_CAPABILITY_DMA_BUF, IMAGE_CAPABILITY_OWNED_RING, ImageChannelState, OfferState,
-    ProducerMetadata, ProducerRoleBounds, RingOfferState, RingUpload, ShellClientError,
-    ShellClientOptions, ShellConnection, ShellImageConfig,
+    ProducerRoleBounds, RingOfferState, RingUpload, ShellClientError, ShellClientOptions,
+    ShellConnection, ShellImageConfig,
 };
 use sophia_shell_protocol::*;
 use std::{
@@ -27,6 +27,7 @@ mod journal;
 use journal::{Event, Upload};
 #[path = "../../common/gpu_canvas.rs"]
 mod canvas;
+mod dma_frame;
 mod profile;
 mod ring_journal;
 
@@ -59,6 +60,8 @@ impl Source {
 struct Config {
     source: Source,
     capture_profile: bool,
+    /// Diagnostic DMA arm that redraws one export (see dma_frame.rs).
+    dma_reuse: bool,
     output: u64,
     frames: u64,
     height: u64,
@@ -74,14 +77,21 @@ fn parse_config(text: &str) -> Result<Config> {
     const KEYS: [&str; 6] = ["wire", "output", "frames", "height", "hold_msec", "source"];
     let ring = config["source"].as_str() == Some("owned_ring");
     let profiling = object.contains_key("capture_profile");
-    let allowed =
-        |k: &str| KEYS.contains(&k) || (ring && k == "ring_slots") || k == "capture_profile";
-    if object.len() != KEYS.len() + usize::from(ring) + usize::from(profiling)
+    let reusing = object.contains_key("dma_reuse");
+    let allowed = |k: &str| {
+        KEYS.contains(&k)
+            || (ring && k == "ring_slots")
+            || k == "capture_profile"
+            || k == "dma_reuse"
+    };
+    if object.len()
+        != KEYS.len() + usize::from(ring) + usize::from(profiling) + usize::from(reusing)
         || object.keys().any(|k| !allowed(k))
     {
         return Err(
             "configuration requires exactly wire, output, frames, height, hold_msec \
-                    and source, plus ring_slots for owned_ring and optional capture_profile"
+                    and source, plus ring_slots for owned_ring, optional capture_profile \
+                    and, for dma_buf, optional dma_reuse"
                 .into(),
         );
     }
@@ -110,6 +120,16 @@ fn parse_config(text: &str) -> Result<Config> {
         } else {
             false
         },
+        dma_reuse: if reusing {
+            if source != Source::DmaBuf {
+                return Err("dma_reuse is only for source dma_buf".into());
+            }
+            config["dma_reuse"]
+                .as_bool()
+                .ok_or("dma_reuse must be boolean")?
+        } else {
+            false
+        },
         output: number("output")?,
         frames: number("frames")?,
         height: number("height")?,
@@ -126,6 +146,11 @@ fn parse_config(text: &str) -> Result<Config> {
         && (parsed.height != 24 || parsed.frames != 2120 || parsed.hold_msec != 60000)
     {
         return Err("capture_profile requires height 24, 2120 frames and 60000 ms".into());
+    }
+    // Diagnostic only until a separate acceptance package measures it, so no
+    // comparison plan can mistake reused backing for the fresh G arm.
+    if parsed.dma_reuse && !parsed.capture_profile {
+        return Err("dma_reuse requires capture_profile".into());
     }
     Ok(parsed)
 }
@@ -406,6 +431,7 @@ fn run() -> Result<()> {
     let Config {
         source,
         capture_profile,
+        dma_reuse,
         output: output_id,
         frames,
         height,
@@ -430,6 +456,10 @@ fn run() -> Result<()> {
             "gpu_bar_profile schema=1 source={} enabled=true",
             source.label()
         );
+    }
+    let mut backing = dma_frame::Backing::new(dma_reuse);
+    if source == Source::DmaBuf {
+        eprintln!("gpu_bar_dma_mode schema=1 mode={}", backing.mode());
     }
     let ShellContentRecord::OutputFacts(facts) = wire.receive()? else {
         return Err("missing output facts".into());
@@ -553,8 +583,9 @@ fn run() -> Result<()> {
                 facts.facts_generation,
             )?;
         } else {
-            dma_frame(
+            dma_frame::dma_frame(
                 &mut wire,
+                &mut backing,
                 grant,
                 resource,
                 generation,
@@ -584,109 +615,27 @@ fn run() -> Result<()> {
             }
         }
     }
+    // A reused export is destroyed only now, after the counted window.
+    drop(backing);
     emit(Event::End {
         offered: frames,
         completed: frames,
     })?;
     if capture_profile && source == Source::DmaBuf {
+        let record = if dma_reuse {
+            profile::reuse_record
+        } else {
+            profile::record
+        };
         eprintln!(
             "{}",
-            profile::record(
+            record(
                 timing_start.ok_or("missing timing start")?,
                 timing_end.ok_or("missing timing end")?
             )?
         );
     }
     std::thread::sleep(Duration::from_millis(hold));
-    Ok(())
-}
-
-/// One DMA-BUF frame through Accepted and capture-complete release.
-#[allow(clippy::too_many_arguments)]
-fn dma_frame(
-    wire: &mut Wire,
-    grant: ContentGrant,
-    resource: ContentResourceId,
-    generation: u64,
-    width: u32,
-    height: u32,
-    length: u64,
-    output: ContentOutputId,
-    allocation_id: u64,
-    facts_generation: u64,
-) -> Result<()> {
-    let prepare_usec = clock_usec();
-    let frame = canvas::render_dma(width, height, generation)?;
-    canvas::prepared(generation, resource.id, prepare_usec, clock_usec());
-    // As in the comparator, the offer is journalled after pixel preparation.
-    emit(Event::UploadOffer {
-        upload: Upload {
-            connection_epoch: grant.connection_epoch,
-            content_grant_epoch: grant.content_grant_epoch,
-            output: output.id,
-            candidate_generation: generation,
-            resource_id: resource.id,
-            resource_generation: resource.generation,
-            width,
-            height,
-            total_bytes: length,
-            begin_usec: clock_usec(),
-        },
-    })?;
-    let metadata = ProducerMetadata {
-        offer_id: 0,
-        resource: resource.id,
-        resource_generation: resource.generation,
-        admission_epoch: grant.content_grant_epoch,
-        output_id: output.id,
-        allocation_id,
-        topology_generation: facts_generation,
-        source_kind: 2,
-        source_format: u32::from_le_bytes(*b"XR24"),
-        width,
-        height,
-        stride: 0,
-        plane_count: 1,
-        descriptor_count: 1,
-        declared_bytes: length,
-        modifier: 0,
-    };
-    let source_bytes = frame.source_bytes();
-    let begun = wire.client.image_begin_dma_buf(
-        metadata,
-        frame.dup_fd()?,
-        frame.offset(),
-        frame.stride(),
-        Instant::now(),
-    );
-    let offer = match begun {
-        Ok(admission) => admission.offer,
-        Err(refused) => {
-            // Without the descriptor back, Session may hold the export.
-            if refused.source.is_none() {
-                std::mem::forget(frame);
-            }
-            return Err(format!(
-                "image begin refused: {:?} (source_bytes {source_bytes})",
-                refused.error
-            )
-            .into());
-        }
-    };
-    let settled =
-        expect_status(wire, grant, resource, 2).and_then(|()| wire.settle(offer, resource));
-    if let Err(error) = settled {
-        // Release is unproven: keep the export allocated until process exit.
-        std::mem::forget(frame);
-        return Err(error);
-    }
-    // Session holds its own captured copy; the export may now be freed.
-    drop(frame);
-    emit(Event::UploadAccepted {
-        resource_id: resource.id,
-        resource_generation: resource.generation,
-        accepted_usec: clock_usec(),
-    })?;
     Ok(())
 }
 

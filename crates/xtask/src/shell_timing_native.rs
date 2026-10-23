@@ -130,7 +130,16 @@ struct PeerConfig {
     ring_slots: Option<u64>,
     #[serde(default)]
     capture_profile: bool,
+    #[serde(default, deserialize_with = "present_bool")]
+    dma_reuse: Option<bool>,
     image: Option<ImageConfig>,
+}
+
+fn present_bool<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    bool::deserialize(deserializer).map(Some)
 }
 
 fn present_u64<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
@@ -193,8 +202,15 @@ impl PeerConfig {
     fn workload(&self) -> Result<(WorkloadMode, Option<u64>), String> {
         let mode = self.workload;
         let retained = mode.check(self.retained_resources)?;
+        if self.dma_reuse.is_some() && self.source != ImageSource::DmaBuf {
+            return Err("dma_reuse requires dma_buf source".into());
+        }
+        if self.dma_reuse == Some(true) && !self.capture_profile {
+            return Err("DMA reuse requires capture-profile diagnostics".into());
+        }
         if self.source == ImageSource::DmaBuf {
-            // GPU DMA-BUF uploads are fresh-only: bounds come from the
+            // GPU DMA-BUF content changes each frame, even when backing is
+            // reused in a diagnostic. Bounds come from the
             // negotiated content limits, never from config image bounds,
             // a probe, a pool or a pacing interval.
             if self.wire != "files"

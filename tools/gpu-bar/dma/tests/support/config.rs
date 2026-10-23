@@ -41,3 +41,30 @@ fn capture_profile_is_explicit_boolean_and_bounded() {
         assert!(parse_config(&changed).is_err());
     }
 }
+
+#[test]
+fn dma_reuse_is_a_dma_only_boolean_diagnostic() {
+    let profiled = DMA
+        .replace("512", "24")
+        .replace('}', r#","capture_profile":true}"#);
+    // Absent or explicitly false is the unchanged fresh arm.
+    assert!(!parse_config(DMA).unwrap().dma_reuse);
+    let fresh = parse_config(&DMA.replace('}', r#","dma_reuse":false}"#)).unwrap();
+    assert!(!fresh.dma_reuse && !fresh.capture_profile);
+    let reuse = parse_config(&profiled.replace('}', r#","dma_reuse":true}"#)).unwrap();
+    assert!(reuse.dma_reuse && reuse.capture_profile);
+    // Reuse is diagnostic only: it needs capture_profile and its bounds.
+    assert!(parse_config(&DMA.replace('}', r#","dma_reuse":true}"#)).is_err());
+    assert!(
+        parse_config(&DMA.replace('}', r#","capture_profile":false,"dma_reuse":true}"#)).is_err()
+    );
+    for value in ["null", "1", "\"true\""] {
+        let text = profiled.replace('}', &format!(r#","dma_reuse":{value}}}"#));
+        assert!(parse_config(&text).is_err(), "{value}");
+    }
+    // Any presence outside dma_buf is refused, even false.
+    for value in ["true", "false"] {
+        let ring = RING.replace('}', &format!(r#","dma_reuse":{value}}}"#));
+        assert!(parse_config(&ring).is_err(), "{value}");
+    }
+}

@@ -1086,7 +1086,7 @@ dependencies = [
 [[package]]
 name = "sophia-shell-gpu"
 version = "0.1.0"
-source = "git+https://github.com/sophia-org/lom?rev=b8ec26a311cd7fe384250ac90bf93dea120faf3e#b8ec26a311cd7fe384250ac90bf93dea120faf3e"
+source = "git+https://github.com/sophia-org/lom?rev=dcb1eb88cb1e386ed3d3f1f22400de37174e88ea#dcb1eb88cb1e386ed3d3f1f22400de37174e88ea"
 dependencies = [
  "ash",
  "imaging",

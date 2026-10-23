@@ -229,6 +229,60 @@ fn capture_profiling_requires_matching_peer_and_gpu_binding() {
 }
 
 #[test]
+fn dma_reuse_is_an_explicit_dma_only_diagnostic() {
+    use xtask::shell_timing::ImageSource;
+    use xtask::shell_timing_native::ProducerKind;
+    let mut f = Fixture::new("dma-reuse", "files");
+    f.request.source = ImageSource::DmaBuf;
+    f.request.producer = ProducerKind::Gpu;
+    f.request.frames = 2120;
+    f.request.environment_readback = true;
+    f.request.instrumentation = "capture-profile".into();
+    let profile = fs::read_to_string(&f.request.artifacts["profile"].path).unwrap();
+    f.put(
+        "profile",
+        profile
+            .replace("gpu \"denied\"", "gpu \"direct\"")
+            .as_bytes(),
+        false,
+    );
+    let mut config = serde_json::json!({"wire":"files","source":"dma_buf","output":1,
+        "frames":2120,"height":24,"hold_msec":60000,"capture_profile":true,"dma_reuse":true});
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_ok());
+    for value in [serde_json::Value::Null, 1.into(), "true".into()] {
+        let mut bad = config.clone();
+        bad["dma_reuse"] = value;
+        f.put("peer-config", bad.to_string().as_bytes(), false);
+        assert!(validate(&f.request).is_err());
+    }
+    f.request.instrumentation = "none".into();
+    config["capture_profile"] = false.into();
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(
+        validate(&f.request).is_err(),
+        "reuse escaped diagnostic mode"
+    );
+    config["dma_reuse"] = false.into();
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(
+        validate(&f.request).is_ok(),
+        "explicit fresh DMA remains valid"
+    );
+    f.request.source = ImageSource::OwnedRing;
+    config["source"] = "owned_ring".into();
+    config["ring_slots"] = 2.into();
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(
+        validate(&f.request).is_err(),
+        "ring accepted a DMA-only key"
+    );
+    config.as_object_mut().unwrap().remove("dma_reuse");
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_ok());
+}
+
+#[test]
 fn sealed_preparation_requires_matching_files_source_without_running_artifacts() {
     use xtask::shell_timing::ImageSource;
     let mut f = Fixture::new("sealed", "files");

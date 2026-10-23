@@ -44,7 +44,7 @@ pub(crate) fn with_gpu<T>(
 
 /// The comparator's pixels: opaque, every channel the generation's shade.
 /// A grey is byte-identical in RGBA readback and XR24 export.
-fn scene(width: u32, height: u32, generation: u64) -> Scene {
+pub(crate) fn scene(width: u32, height: u32, generation: u64) -> Scene {
     let shade = (generation % 128) as u8;
     let mut scene = Scene::new();
     {
