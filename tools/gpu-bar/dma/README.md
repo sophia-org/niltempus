@@ -23,6 +23,13 @@ Timing is disabled by default. Profile captures are attribution evidence and
 are refused by cpuplan as comparison arms. Timing records go to stderr after
 the counted window, leaving the image journal unchanged.
 
+The current producer submits the foreign release immediately after drawing on
+the same queue. Its final fence covers both, followed by bounded wgpu cleanup
+before export. `draw` now measures encoding/submission; `release` includes the
+combined wait, cleanup poll and source drop. Compare `draw + release` against
+older profiles that waited between submissions; individual stage times changed
+meaning. Every frame still uses a fresh allocation.
+
 Schema 7 keeps schema 5's ring records. `admitted_usec` and `slot_generation`
 are null because the SDK exposes neither, and `slot` is the SDK's actual slot,
 which is 0 every frame while offers settle one at a time. RingReady `slots`
