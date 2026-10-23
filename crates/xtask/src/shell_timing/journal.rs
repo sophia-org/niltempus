@@ -202,8 +202,8 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
     let start_schema = serde_json::from_str::<Schema>(start)
         .map_err(|e| e.to_string())?
         .schema;
-    if start_schema == 5 {
-        return ring::collect(journal, expected);
+    if matches!(start_schema, 5 | 7) {
+        return ring::collect(journal, expected, start_schema);
     }
     if start_schema == 6 {
         return draw::collect(journal, expected);

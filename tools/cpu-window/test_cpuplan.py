@@ -128,8 +128,8 @@ class Base(unittest.TestCase):
         self.assertIn(needle, str(cm.exception))
 
 
-def write_run_gpu(root, source="sealed", sophia="5" * 64, bar_height=24, edit=None):
-    """A schema-3 GPU-producer run stage (fresh schema-2 journal)."""
+def write_run_gpu(root, source="sealed", sophia="5" * 64, peer="8" * 64, bar_height=24, edit=None):
+    """A schema-3 GPU-producer run stage (schema-7 SDK ring, otherwise schema-2)."""
     stage = Path(root)
     stage.mkdir(parents=True)
     host = {"wrapper": ident(10, 100), "host": ident(11, 101), "supervisor": ident(12, 102),
@@ -140,14 +140,14 @@ def write_run_gpu(root, source="sealed", sophia="5" * 64, bar_height=24, edit=No
                                   "plan": {"path": "plan.json", "sha256": "AUTO"},
                                   "target": {"card": "card0", "output": 1, "mode_millihz": 60000}},
         "plan.json": {"schema": 1, "request": {
-            "artifacts": {"sophia": {"sha256": sophia}}, "producer": "gpu",
+            "artifacts": {"sophia": {"sha256": sophia}, "peer": {"sha256": peer}}, "producer": "gpu",
             "source": source, "wire": "ipc" if source == "bytes" else "files"}},
         "result.json": {"schema": 1, "status": "captured_only", "error": None},
         "environment.json": {"finish_error": None, "binding": dict(host)},
         "cpu-binding.json": dict(host),
         "native-samples.json": {
             "schema": 2, "verdict": "joined_only",
-            "journal": {"source": source, "schema": 2,
+            "journal": {"source": source, "schema": 7 if source == "owned_ring" else 2,
                         "wire": "ipc" if source == "bytes" else "files"},
             "samples": [{"candidate_generation": g, "connection_epoch": 1, "content_grant_epoch": 1,
                          "output": 1, "native_owner": 1, "native_frame": g + 4, "heads": 2,
@@ -172,6 +172,25 @@ class GpuPositive(Base):
     def gpu_dir(self, **kw):
         self.count += 1
         return write_run_gpu(self.root / f"g{self.count}", **kw)
+
+    def test_sdk_ring_and_dma_require_the_same_host_and_peer(self):
+        r = self.gpu_dir(source="owned_ring")
+        g = self.gpu_dir(source="dma_buf")
+        plan = cpuplan.build([("r1", "r", r), ("g1", "g", g)], "r")
+        self.assertEqual(len(plan["runs"]), 2)
+        for kw, needle in [
+            ({"sophia": "6" * 64}, "sophia_sha256"),
+            ({"peer": "9" * 64}, "peer_sha256"),
+            ({"peer": None}, "peer_sha256"),
+        ]:
+            with self.assertRaises(cpuplan.Refused) as cm:
+                cpuplan.build([("r1", "r", r), ("g1", "g", self.gpu_dir(source="dma_buf", **kw))])
+            self.assertIn(needle, str(cm.exception))
+        for schema in (2, 5, 6):
+            bad = self.gpu_dir(source="owned_ring", edit=setter(
+                ["native-samples.json", "journal", "schema"], schema))
+            with self.assertRaises(cpuplan.Refused):
+                cpuplan.build([("r1", "r", bad)])
 
     def test_gpu_arms_split_hosts_per_arm_and_analyze(self):
         i = self.gpu_dir(source="bytes", sophia="5" * 64)

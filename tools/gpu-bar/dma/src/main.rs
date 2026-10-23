@@ -2,11 +2,14 @@
 //! a producer-completed GPU DMA-BUF source. Records, resource identities,
 //! cadence and journal match ../../historical (see PROVENANCE.txt); only the
 //! source differs. There is no IPC, byte, sealed, probe or retained path.
+//! Arm R runs the same loop with `source: owned_ring`: the same GPU frame read
+//! back and copied into the SDK's one persistent owned-ring registration,
+//! journalled at schema 7 (see ring_journal.rs).
 use sophia_image_producer::ResourceStatusKind;
 use sophia_shell_client::{
     IMAGE_CAPABILITY_DMA_BUF, IMAGE_CAPABILITY_OWNED_RING, ImageChannelState, OfferState,
-    ProducerMetadata, ProducerRoleBounds, ShellClientError, ShellClientOptions, ShellConnection,
-    ShellImageConfig,
+    ProducerMetadata, ProducerRoleBounds, RingOfferState, RingUpload, ShellClientError,
+    ShellClientOptions, ShellConnection, ShellImageConfig,
 };
 use sophia_shell_protocol::*;
 use std::{
@@ -24,6 +27,90 @@ mod journal;
 use journal::{Event, Upload};
 #[path = "../../common/gpu_canvas.rs"]
 mod canvas;
+mod ring_journal;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Source {
+    DmaBuf,
+    /// Registered owned-ring slots, 2..=4.
+    OwnedRing {
+        slots: u8,
+    },
+}
+
+impl Source {
+    fn label(self) -> &'static str {
+        match self {
+            Source::DmaBuf => "dma_buf",
+            Source::OwnedRing { .. } => "owned_ring",
+        }
+    }
+
+    fn schema(self) -> u8 {
+        match self {
+            Source::DmaBuf => JOURNAL_SCHEMA,
+            Source::OwnedRing { .. } => ring_journal::SCHEMA,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct Config {
+    source: Source,
+    output: u64,
+    frames: u64,
+    height: u64,
+    hold_msec: u64,
+}
+
+/// Exactly the six DMA keys, plus `ring_slots` only for `owned_ring`.
+fn parse_config(text: &str) -> Result<Config> {
+    let config: serde_json::Value = serde_json::from_str(text)?;
+    let object = config
+        .as_object()
+        .ok_or("configuration must be an object")?;
+    const KEYS: [&str; 6] = ["wire", "output", "frames", "height", "hold_msec", "source"];
+    let ring = config["source"].as_str() == Some("owned_ring");
+    let allowed = |k: &str| KEYS.contains(&k) || (ring && k == "ring_slots");
+    if object.len() != KEYS.len() + usize::from(ring) || object.keys().any(|k| !allowed(k)) {
+        return Err(
+            "configuration requires exactly wire, output, frames, height, hold_msec \
+                    and source, plus ring_slots for owned_ring"
+                .into(),
+        );
+    }
+    let number = |key: &str| -> Result<u64> {
+        config[key]
+            .as_u64()
+            .ok_or_else(|| format!("invalid {key}").into())
+    };
+    let source = match config["source"].as_str() {
+        Some("dma_buf") => Source::DmaBuf,
+        Some("owned_ring") => match number("ring_slots")? {
+            slots @ 2..=4 => Source::OwnedRing { slots: slots as u8 },
+            _ => return Err("ring_slots outside 2..=4".into()),
+        },
+        _ => return Err("source must be dma_buf or owned_ring".into()),
+    };
+    if config["wire"].as_str() != Some("files") {
+        return Err("GPU files peer requires wire files".into());
+    }
+    let parsed = Config {
+        source,
+        output: number("output")?,
+        frames: number("frames")?,
+        height: number("height")?,
+        hold_msec: number("hold_msec")?,
+    };
+    if parsed.output == 0
+        || !(1..=10000).contains(&parsed.frames)
+        || !(1..=512).contains(&parsed.height)
+        || parsed.hold_msec > 600000
+    {
+        return Err("configuration outside bounded workload".into());
+    }
+    Ok(parsed)
+}
 
 struct Wire {
     client: ShellConnection,
@@ -44,7 +131,7 @@ fn adopt(fd: i32) -> Result<UnixStream> {
 }
 
 impl Wire {
-    fn connect() -> Result<Self> {
+    fn connect(source: Source) -> Result<Self> {
         if std::env::var_os("SOPHIA_SHELL_SOCKET").is_some() {
             return Err("ambiguous shell wire".into());
         }
@@ -67,6 +154,11 @@ impl Wire {
         }
         let attached = auth.into_authenticated()?;
         // r10 needs the owned-ring capability; the DMA one adds the source.
+        // Negotiation is exact, so without it Session grants the ring alone.
+        let dma = match source {
+            Source::DmaBuf => IMAGE_CAPABILITY_DMA_BUF,
+            Source::OwnedRing { .. } => 0,
+        };
         let options = ShellClientOptions {
             minimum_revision: 10,
             maximum_revision: 10,
@@ -74,7 +166,7 @@ impl Wire {
                 | SOPHIA_SHELL_CAPABILITY_CONTENT_SURFACE
                 | SOPHIA_SHELL_CAPABILITY_CONTENT_DISCRETE_INPUT
                 | IMAGE_CAPABILITY_OWNED_RING
-                | IMAGE_CAPABILITY_DMA_BUF,
+                | dma,
             handshake_timeout: WAIT,
         };
         Ok(Self {
@@ -119,8 +211,14 @@ impl Wire {
         }
     }
 
-    /// Image bounds come from the content limits, as Lom derives them.
-    fn enable_image(&mut self, socket: &std::ffi::OsStr, limits: &ContentLimits) -> Result<()> {
+    /// Image bounds come from the content limits, as Lom derives them. A
+    /// ring registers `slots` slots of exactly `capacity` bytes; DMA has none.
+    fn enable_image(
+        &mut self,
+        socket: &std::ffi::OsStr,
+        limits: &ContentLimits,
+        ring: Option<(u8, u64)>,
+    ) -> Result<()> {
         let endpoint_dir = std::path::Path::new(socket)
             .parent()
             .filter(|dir| !dir.as_os_str().is_empty())
@@ -138,12 +236,16 @@ impl Wire {
             transfer_timeout_ms: limits.transfer_timeout_ms,
             startup_deadline_ms: origin_ms + WAIT.as_millis() as u64,
             formats_capacity: 4096,
-            ring_slots: 0,
-            ring_capacity: 0,
+            ring_slots: ring.map_or(0, |(slots, _)| slots),
+            ring_capacity: ring.map_or(0, |(_, capacity)| capacity),
             content_grant_epoch: limits.grant.content_grant_epoch,
         };
-        self.client
-            .enable_dma_image(image, Instant::now(), origin_ms)?;
+        if ring.is_some() {
+            self.client.enable_image(image, Instant::now(), origin_ms)?;
+        } else {
+            self.client
+                .enable_dma_image(image, Instant::now(), origin_ms)?;
+        }
         Ok(())
     }
 
@@ -154,12 +256,12 @@ impl Wire {
             let adapter = self.client.image_adapter().ok_or("image adapter absent")?;
             match adapter.channel() {
                 Some(ImageChannelState::Ready) => return Ok(()),
-                Some(ImageChannelState::Closed) => return Err("DMA image channel closed".into()),
+                Some(ImageChannelState::Closed) => return Err("image channel closed".into()),
                 _ => {}
             }
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
-                return Err("DMA image channel not ready".into());
+                return Err("image channel not ready".into());
             }
             self.client.wait_for_io(left)?;
         }
@@ -210,6 +312,46 @@ impl Wire {
             self.client.wait_for_io(left)?;
         }
     }
+
+    /// A ring copy is adoptable once the SDK reports Settled: Accepted status
+    /// and its exact successful SlotReleased. Returns the release observation.
+    fn settle_ring(&mut self, offer: u64, resource: ContentResourceId) -> Result<u64> {
+        let deadline = Instant::now() + WAIT;
+        loop {
+            self.client.poll_io()?;
+            let info = self
+                .client
+                .image_ring_offer(offer)
+                .ok_or("ring offer lost")?;
+            if info.resource != resource.id || info.resource_generation != resource.generation {
+                return Err("ring offer names another resource".into());
+            }
+            match info.state {
+                RingOfferState::Settled if info.status == Some(ResourceStatusKind::Accepted) => {
+                    let released_usec = clock_usec();
+                    self.client
+                        .image_forget(offer)
+                        .map_err(|e| format!("image forget refused: {e:?}"))?;
+                    return Ok(released_usec);
+                }
+                RingOfferState::Pending => {}
+                state => {
+                    return Err(
+                        format!("ring offer ended {state:?} status {:?}", info.status).into(),
+                    );
+                }
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(format!(
+                    "ring offer did not settle: {:?} status {:?}",
+                    info.state, info.status
+                )
+                .into());
+            }
+            self.client.wait_for_io(left)?;
+        }
+    }
 }
 
 fn clock_usec() -> u64 {
@@ -217,8 +359,17 @@ fn clock_usec() -> u64 {
     u64::try_from(t.tv_sec).unwrap() * 1_000_000 + u64::try_from(t.tv_nsec).unwrap() / 1000
 }
 
+/// The run's journal schema, fixed once its source is parsed.
+static SCHEMA: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+
 fn emit(event: Event<'_>) -> Result<()> {
-    journal::write(&mut std::io::stdout().lock(), JOURNAL_SCHEMA, event)?;
+    let schema = SCHEMA.get().copied().unwrap_or(JOURNAL_SCHEMA);
+    journal::write(&mut std::io::stdout().lock(), schema, event)?;
+    Ok(())
+}
+
+fn emit_ring(event: ring_journal::Event<'_>) -> Result<()> {
+    ring_journal::write(&mut std::io::stdout().lock(), event)?;
     Ok(())
 }
 
@@ -234,43 +385,23 @@ fn run() -> Result<()> {
     if text.len() > 4096 {
         return Err("configuration too large".into());
     }
-    let config: serde_json::Value = serde_json::from_str(&text)?;
-    let object = config
-        .as_object()
-        .ok_or("configuration must be an object")?;
-    const KEYS: [&str; 6] = ["wire", "output", "frames", "height", "hold_msec", "source"];
-    if object.len() != KEYS.len() || object.keys().any(|k| !KEYS.contains(&k.as_str())) {
-        return Err(
-            "configuration requires exactly wire, output, frames, height, hold_msec and source"
-                .into(),
-        );
-    }
-    if config["wire"].as_str() != Some("files") || config["source"].as_str() != Some("dma_buf") {
-        return Err("DMA peer requires wire files and source dma_buf".into());
-    }
-    let number = |key: &str| -> Result<u64> {
-        config[key]
-            .as_u64()
-            .ok_or_else(|| format!("invalid {key}").into())
-    };
-    let output_id = number("output")?;
-    let frames = number("frames")?;
-    let height = number("height")?;
-    let hold = number("hold_msec")?;
-    if output_id == 0
-        || !(1..=10000).contains(&frames)
-        || !(1..=512).contains(&height)
-        || hold > 600000
-    {
-        return Err("configuration outside bounded workload".into());
-    }
+    let Config {
+        source,
+        output: output_id,
+        frames,
+        height,
+        hold_msec: hold,
+    } = parse_config(&text)?;
+    let _ = SCHEMA.set(source.schema());
     let socket = std::env::var_os("SOPHIA_SHELL_9P_SOCKET").ok_or("missing file endpoint")?;
-    let mut wire = Wire::connect()?;
+    let mut wire = Wire::connect(source)?;
     let ShellContentRecord::Limits(limits) = wire.receive()? else {
         return Err("missing limits".into());
     };
-    wire.enable_image(&socket, &limits)?;
-    canvas::open(limits.grant.connection_epoch, "dma_buf")?;
+    if source == Source::DmaBuf {
+        wire.enable_image(&socket, &limits, None)?;
+    }
+    canvas::open(limits.grant.connection_epoch, source.label())?;
     let ShellContentRecord::OutputFacts(facts) = wire.receive()? else {
         return Err("missing output facts".into());
     };
@@ -320,25 +451,56 @@ fn run() -> Result<()> {
     if allocation.pixel.width != output.local_width || allocation.pixel.height != height as u32 {
         return Err("allocation geometry differs from the requested panel".into());
     }
-    wire.wait_ready()?;
-    emit(Event::Start {
-        frames,
-        wire: "files",
-        probe_bytes: 0,
-        source: Some("dma_buf"),
-        workload: None,
-        retained_resources: None,
-    })?;
     let (width, height) = (allocation.pixel.width, allocation.pixel.height);
     let length = canvas::rgba_bytes(width, height).ok_or("upload size overflow")?;
+    // The ring's fixed slot capacity is the exact frame, known only now.
+    if let Source::OwnedRing { slots } = source {
+        wire.enable_image(&socket, &limits, Some((slots, length)))?;
+    }
+    wire.wait_ready()?;
+    let ready_usec = clock_usec();
+    let mut ring_canvas = None;
+    match source {
+        Source::DmaBuf => emit(Event::Start {
+            frames,
+            wire: "files",
+            probe_bytes: 0,
+            source: Some("dma_buf"),
+            workload: None,
+            retained_resources: None,
+        })?,
+        Source::OwnedRing { slots } => {
+            let identity = wire
+                .client
+                .image_adapter()
+                .and_then(|adapter| adapter.ring_identity())
+                .ok_or("ready ring has no identity")?;
+            emit_ring(ring_journal::Event::Start {
+                frames,
+                wire: "files",
+                probe_bytes: 0,
+                source: "owned_ring",
+                workload: "fresh",
+                ring_slots: u64::from(slots),
+            })?;
+            emit_ring(ring_journal::Event::RingReady {
+                connection_epoch: identity.connection_epoch,
+                content_grant_epoch: identity.content_grant_epoch,
+                channel: identity.channel_generation,
+                ring: identity.ring,
+                ring_generation: identity.generation,
+                slots: u64::from(slots),
+                pixel_bytes: length,
+                admitted_usec: None,
+                ready_usec,
+            })?;
+            ring_canvas = Some(canvas::Canvas::new(usize::try_from(length)?));
+        }
+    }
     for generation in 1..=frames {
         let resource = resource_for_frame(generation);
-        let prepare_usec = clock_usec();
-        let frame = canvas::render_dma(width, height, generation)?;
-        canvas::prepared(generation, resource.id, prepare_usec, clock_usec());
-        // As in the comparator, the offer is journalled after pixel preparation.
-        emit(Event::UploadOffer {
-            upload: Upload {
+        if let Some(canvas) = &mut ring_canvas {
+            let upload = Upload {
                 connection_epoch: grant.connection_epoch,
                 content_grant_epoch: grant.content_grant_epoch,
                 output: output.output.id,
@@ -348,204 +510,362 @@ fn run() -> Result<()> {
                 width,
                 height,
                 total_bytes: length,
-                begin_usec: clock_usec(),
-            },
-        })?;
-        let metadata = ProducerMetadata {
-            offer_id: 0,
-            resource: resource.id,
-            resource_generation: resource.generation,
-            admission_epoch: grant.content_grant_epoch,
-            output_id: output.output.id,
-            allocation_id: allocation.allocation.id,
-            topology_generation: facts.facts_generation,
-            source_kind: 2,
-            source_format: u32::from_le_bytes(*b"XR24"),
-            width,
-            height,
-            stride: 0,
-            plane_count: 1,
-            descriptor_count: 1,
-            declared_bytes: length,
-            modifier: 0,
-        };
-        let source_bytes = frame.source_bytes();
-        let begun = wire.client.image_begin_dma_buf(
-            metadata,
-            frame.dup_fd()?,
-            frame.offset(),
-            frame.stride(),
-            Instant::now(),
-        );
-        let offer = match begun {
-            Ok(admission) => admission.offer,
-            Err(refused) => {
-                // Without the descriptor back, Session may hold the export.
-                if refused.source.is_none() {
-                    std::mem::forget(frame);
-                }
-                return Err(format!(
-                    "image begin refused: {:?} (source_bytes {source_bytes})",
-                    refused.error
-                )
-                .into());
-            }
-        };
-        let settled = expect_status(&mut wire, grant, resource, 2)
-            .and_then(|()| wire.settle(offer, resource));
-        if let Err(error) = settled {
-            // Release is unproven: keep the export allocated until process exit.
-            std::mem::forget(frame);
-            return Err(error);
-        }
-        // Session holds its own captured copy; the export may now be freed.
-        drop(frame);
-        emit(Event::UploadAccepted {
-            resource_id: resource.id,
-            resource_generation: resource.generation,
-            accepted_usec: clock_usec(),
-        })?;
-        let demand_time = clock_usec();
-        wire.send(
-            5,
-            &[ShellContentRecord::FrameDemand(ContentFrameDemand {
-                grant,
-                output: output.output,
-                allocation: ContentAllocationId::default(),
-                demand_id: generation,
-                reason: 1,
-            })],
-        )?;
-        let ShellContentRecord::FramePermit(permit) = wire.receive()? else {
-            return Err("missing permit".into());
-        };
-        if permit.state != 1
-            || permit.grant != grant
-            || permit.output != output.output
-            || permit.demand_id != generation
-            || permit.permit_id == 0
-        {
-            return Err("permit refused or misattributed".into());
-        }
-        emit(Event::Permit {
-            generation,
-            demand_usec: demand_time,
-            received_usec: clock_usec(),
-        })?;
-        let placements = vec![ContentPlacement {
-            resource,
-            surface_index: 0,
-            destination_x_px: 0,
-            destination_y_px: 0,
-        }];
-        let records = [
-            ShellContentRecord::CandidateBegin(ContentCandidateBegin {
-                grant,
-                output: output.output,
-                candidate_generation: generation,
-                facts_generation: facts.facts_generation,
-                pacing_permit: permit.permit_id,
-                interaction_generation: 1,
-                surface_count: 1,
-                placement_count: 1,
-                target_count: 0,
-            }),
-            ShellContentRecord::CandidateChunk(ContentCandidateChunk {
-                grant,
-                candidate_generation: generation,
-                chunk_ordinal: 0,
-                surfaces: vec![ContentSurface {
-                    allocation: allocation.allocation,
-                    scale_generation: allocation.scale_generation,
-                    role: 1,
-                    edge: 1,
-                    margins: allocation.margins,
-                    reservation_extent: 0,
-                    parent_surface_index: u16::MAX,
-                    anchor_parent_rect: ContentPixelRect::default(),
-                }],
-                placements,
-                targets: vec![],
-            }),
-            ShellContentRecord::CandidateEnd(ContentCandidateEnd {
-                grant,
-                candidate_generation: generation,
-                surface_count: 1,
-                placement_count: 1,
-                target_count: 0,
-            }),
-        ];
-        emit(Event::Offer {
-            connection_epoch: grant.connection_epoch,
-            content_grant_epoch: grant.content_grant_epoch,
-            output: output.output.id,
-            candidate_generation: generation,
-            submitted_monotonic_usec: clock_usec(),
-        })?;
-        wire.send(6, &records)?;
-        let mut prepared = false;
-        loop {
-            let ShellContentRecord::CandidateOutcome(outcome) = wire.receive()? else {
-                return Err("unexpected candidate response".into());
+                begin_usec: 0,
             };
-            if outcome.grant != grant
-                || outcome.output != output.output
-                || outcome.candidate_generation != generation
-            {
-                return Err("misattributed candidate outcome".into());
-            }
-            if outcome.kind == 1 {
-                if prepared {
-                    return Err("duplicate prepared outcome".into());
-                }
-                prepared = true;
-                continue;
-            }
-            emit(Event::Terminal {
-                connection_epoch: grant.connection_epoch,
-                content_grant_epoch: grant.content_grant_epoch,
-                output: output.output.id,
-                candidate_generation: generation,
-                outcome: if outcome.kind == 2 {
-                    "presented"
-                } else {
-                    "rejected"
-                },
-                kind: outcome.kind,
-                reason: outcome.reason,
-                observed_monotonic_usec: clock_usec(),
-            })?;
-            if outcome.kind != 2 {
-                return Err("candidate was not presented".into());
-            }
-            if !prepared || outcome.presentation_epoch == 0 {
-                return Err("presentation lacks preparation or epoch".into());
-            }
-            break;
-        }
-        // Keep the currently displayed resource until a successor is shown.
-        if generation > 1 {
-            let old = resource_for_frame(generation - 1);
-            wire.send(
-                7,
-                &[ShellContentRecord::ResourceRetire(ContentResourceRetire {
-                    grant,
-                    resource: old,
-                })],
+            ring_frame(
+                &mut wire,
+                canvas,
+                upload,
+                grant,
+                &allocation,
+                output.output,
+                facts.facts_generation,
             )?;
-            let ShellContentRecord::ResourceReleased(released) = wire.receive()? else {
-                return Err("missing retired resource release".into());
-            };
-            if released.grant != grant || released.resource != old || released.reason != 0 {
-                return Err("wrong retired resource release".into());
-            }
+        } else {
+            dma_frame(
+                &mut wire,
+                grant,
+                resource,
+                generation,
+                width,
+                height,
+                length,
+                output.output,
+                allocation.allocation.id,
+                facts.facts_generation,
+            )?;
         }
+        present(
+            &mut wire,
+            grant,
+            &allocation,
+            output.output,
+            facts.facts_generation,
+            generation,
+        )?;
     }
     emit(Event::End {
         offered: frames,
         completed: frames,
     })?;
     std::thread::sleep(Duration::from_millis(hold));
+    Ok(())
+}
+
+/// One DMA-BUF frame through Accepted and capture-complete release.
+#[allow(clippy::too_many_arguments)]
+fn dma_frame(
+    wire: &mut Wire,
+    grant: ContentGrant,
+    resource: ContentResourceId,
+    generation: u64,
+    width: u32,
+    height: u32,
+    length: u64,
+    output: ContentOutputId,
+    allocation_id: u64,
+    facts_generation: u64,
+) -> Result<()> {
+    let prepare_usec = clock_usec();
+    let frame = canvas::render_dma(width, height, generation)?;
+    canvas::prepared(generation, resource.id, prepare_usec, clock_usec());
+    // As in the comparator, the offer is journalled after pixel preparation.
+    emit(Event::UploadOffer {
+        upload: Upload {
+            connection_epoch: grant.connection_epoch,
+            content_grant_epoch: grant.content_grant_epoch,
+            output: output.id,
+            candidate_generation: generation,
+            resource_id: resource.id,
+            resource_generation: resource.generation,
+            width,
+            height,
+            total_bytes: length,
+            begin_usec: clock_usec(),
+        },
+    })?;
+    let metadata = ProducerMetadata {
+        offer_id: 0,
+        resource: resource.id,
+        resource_generation: resource.generation,
+        admission_epoch: grant.content_grant_epoch,
+        output_id: output.id,
+        allocation_id,
+        topology_generation: facts_generation,
+        source_kind: 2,
+        source_format: u32::from_le_bytes(*b"XR24"),
+        width,
+        height,
+        stride: 0,
+        plane_count: 1,
+        descriptor_count: 1,
+        declared_bytes: length,
+        modifier: 0,
+    };
+    let source_bytes = frame.source_bytes();
+    let begun = wire.client.image_begin_dma_buf(
+        metadata,
+        frame.dup_fd()?,
+        frame.offset(),
+        frame.stride(),
+        Instant::now(),
+    );
+    let offer = match begun {
+        Ok(admission) => admission.offer,
+        Err(refused) => {
+            // Without the descriptor back, Session may hold the export.
+            if refused.source.is_none() {
+                std::mem::forget(frame);
+            }
+            return Err(format!(
+                "image begin refused: {:?} (source_bytes {source_bytes})",
+                refused.error
+            )
+            .into());
+        }
+    };
+    let settled =
+        expect_status(wire, grant, resource, 2).and_then(|()| wire.settle(offer, resource));
+    if let Err(error) = settled {
+        // Release is unproven: keep the export allocated until process exit.
+        std::mem::forget(frame);
+        return Err(error);
+    }
+    // Session holds its own captured copy; the export may now be freed.
+    drop(frame);
+    emit(Event::UploadAccepted {
+        resource_id: resource.id,
+        resource_generation: resource.generation,
+        accepted_usec: clock_usec(),
+    })?;
+    Ok(())
+}
+
+/// One owned-ring frame: the same GPU frame read back, copied into a free
+/// slot of the persistent registration, and journalled once settled.
+fn ring_frame(
+    wire: &mut Wire,
+    canvas: &mut canvas::Canvas,
+    mut upload: Upload,
+    grant: ContentGrant,
+    allocation: &ContentAllocationResult,
+    output: ContentOutputId,
+    facts_generation: u64,
+) -> Result<()> {
+    let resource = ContentResourceId {
+        id: upload.resource_id,
+        generation: upload.resource_generation,
+    };
+    let fill_start_usec = clock_usec();
+    let pixels = canvas.fill(
+        usize::try_from(upload.total_bytes)?,
+        upload.width,
+        upload.height,
+        upload.candidate_generation,
+    )?;
+    canvas::prepared(
+        upload.candidate_generation,
+        resource.id,
+        fill_start_usec,
+        clock_usec(),
+    );
+    upload.begin_usec = clock_usec();
+    let offer = wire
+        .client
+        .image_upload_ring(
+            RingUpload {
+                resource: resource.id,
+                resource_generation: resource.generation,
+                allocation: allocation.allocation.id,
+                allocation_generation: allocation.allocation.generation,
+                output: output.id,
+                output_generation: output.generation,
+                topology_generation: facts_generation,
+                width: upload.width,
+                height: upload.height,
+            },
+            pixels,
+            Instant::now(),
+        )
+        .map_err(|e| format!("ring upload refused: {e:?}"))?;
+    let slot = u64::from(
+        wire.client
+            .image_ring_offer(offer)
+            .ok_or("ring offer lost")?
+            .slot,
+    );
+    emit_ring(ring_journal::Event::RingOffer {
+        upload,
+        offer,
+        slot,
+        slot_generation: None,
+        fill_start_usec,
+    })?;
+    expect_status(wire, grant, resource, 2)?;
+    let accepted_usec = clock_usec();
+    let released_usec = wire.settle_ring(offer, resource)?;
+    emit_ring(ring_journal::Event::RingAccepted {
+        offer,
+        resource_id: resource.id,
+        resource_generation: resource.generation,
+        accepted_usec,
+    })?;
+    emit_ring(ring_journal::Event::SlotReleased {
+        offer,
+        slot,
+        slot_generation: None,
+        resource_id: resource.id,
+        resource_generation: resource.generation,
+        released_usec,
+    })
+}
+
+/// Demand, permit, the one-placement candidate through presentation, then
+/// retirement of the predecessor once its successor is shown.
+fn present(
+    wire: &mut Wire,
+    grant: ContentGrant,
+    allocation: &ContentAllocationResult,
+    output: ContentOutputId,
+    facts_generation: u64,
+    generation: u64,
+) -> Result<()> {
+    let resource = resource_for_frame(generation);
+    let demand_time = clock_usec();
+    wire.send(
+        5,
+        &[ShellContentRecord::FrameDemand(ContentFrameDemand {
+            grant,
+            output,
+            allocation: ContentAllocationId::default(),
+            demand_id: generation,
+            reason: 1,
+        })],
+    )?;
+    let ShellContentRecord::FramePermit(permit) = wire.receive()? else {
+        return Err("missing permit".into());
+    };
+    if permit.state != 1
+        || permit.grant != grant
+        || permit.output != output
+        || permit.demand_id != generation
+        || permit.permit_id == 0
+    {
+        return Err("permit refused or misattributed".into());
+    }
+    emit(Event::Permit {
+        generation,
+        demand_usec: demand_time,
+        received_usec: clock_usec(),
+    })?;
+    let placements = vec![ContentPlacement {
+        resource,
+        surface_index: 0,
+        destination_x_px: 0,
+        destination_y_px: 0,
+    }];
+    let records = [
+        ShellContentRecord::CandidateBegin(ContentCandidateBegin {
+            grant,
+            output,
+            candidate_generation: generation,
+            facts_generation,
+            pacing_permit: permit.permit_id,
+            interaction_generation: 1,
+            surface_count: 1,
+            placement_count: 1,
+            target_count: 0,
+        }),
+        ShellContentRecord::CandidateChunk(ContentCandidateChunk {
+            grant,
+            candidate_generation: generation,
+            chunk_ordinal: 0,
+            surfaces: vec![ContentSurface {
+                allocation: allocation.allocation,
+                scale_generation: allocation.scale_generation,
+                role: 1,
+                edge: 1,
+                margins: allocation.margins,
+                reservation_extent: 0,
+                parent_surface_index: u16::MAX,
+                anchor_parent_rect: ContentPixelRect::default(),
+            }],
+            placements,
+            targets: vec![],
+        }),
+        ShellContentRecord::CandidateEnd(ContentCandidateEnd {
+            grant,
+            candidate_generation: generation,
+            surface_count: 1,
+            placement_count: 1,
+            target_count: 0,
+        }),
+    ];
+    emit(Event::Offer {
+        connection_epoch: grant.connection_epoch,
+        content_grant_epoch: grant.content_grant_epoch,
+        output: output.id,
+        candidate_generation: generation,
+        submitted_monotonic_usec: clock_usec(),
+    })?;
+    wire.send(6, &records)?;
+    let mut prepared = false;
+    loop {
+        let ShellContentRecord::CandidateOutcome(outcome) = wire.receive()? else {
+            return Err("unexpected candidate response".into());
+        };
+        if outcome.grant != grant
+            || outcome.output != output
+            || outcome.candidate_generation != generation
+        {
+            return Err("misattributed candidate outcome".into());
+        }
+        if outcome.kind == 1 {
+            if prepared {
+                return Err("duplicate prepared outcome".into());
+            }
+            prepared = true;
+            continue;
+        }
+        emit(Event::Terminal {
+            connection_epoch: grant.connection_epoch,
+            content_grant_epoch: grant.content_grant_epoch,
+            output: output.id,
+            candidate_generation: generation,
+            outcome: if outcome.kind == 2 {
+                "presented"
+            } else {
+                "rejected"
+            },
+            kind: outcome.kind,
+            reason: outcome.reason,
+            observed_monotonic_usec: clock_usec(),
+        })?;
+        if outcome.kind != 2 {
+            return Err("candidate was not presented".into());
+        }
+        if !prepared || outcome.presentation_epoch == 0 {
+            return Err("presentation lacks preparation or epoch".into());
+        }
+        break;
+    }
+    // Keep the currently displayed resource until a successor is shown.
+    if generation > 1 {
+        let old = resource_for_frame(generation - 1);
+        wire.send(
+            7,
+            &[ShellContentRecord::ResourceRetire(ContentResourceRetire {
+                grant,
+                resource: old,
+            })],
+        )?;
+        let ShellContentRecord::ResourceReleased(released) = wire.receive()? else {
+            return Err("missing retired resource release".into());
+        };
+        if released.grant != grant || released.resource != old || released.reason != 0 {
+            return Err("wrong retired resource release".into());
+        }
+    }
     Ok(())
 }
 
@@ -580,3 +900,7 @@ fn main() {
         std::process::exit(1);
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/support/config.rs"]
+mod tests;

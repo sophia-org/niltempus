@@ -354,6 +354,21 @@ fn producer_binding_controls_the_gpu_grant_for_every_source() {
         false,
     );
     assert!(validate(&f.request).is_ok());
+    // The SDK owned-ring arm (R) uses the same GPU grant as DMA.
+    let mut f = Fixture::new("binding-ring", "files");
+    f.request.source = ImageSource::OwnedRing;
+    f.request.producer = ProducerKind::Gpu;
+    f.put("peer-config", br#"{"wire":"files","source":"owned_ring","output":1,"frames":3,"height":24,"hold_msec":60000,"ring_slots":2}"#, false);
+    assert!(validate(&f.request).is_err());
+    let profile = fs::read_to_string(f.request.artifacts["profile"].path.clone()).unwrap();
+    f.put(
+        "profile",
+        profile
+            .replace("gpu \"denied\"", "gpu \"direct\"")
+            .as_bytes(),
+        false,
+    );
+    assert!(validate(&f.request).is_ok());
     // Historical default: CPU binding with a direct profile is refused.
     let mut f = Fixture::new("binding-cpu-direct", "files");
     let profile = fs::read_to_string(f.request.artifacts["profile"].path.clone()).unwrap();

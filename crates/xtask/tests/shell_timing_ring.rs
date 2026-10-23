@@ -33,6 +33,60 @@ fn encode(rows: &[Value]) -> String {
     rows.iter().map(|row| format!("{row}\n")).collect()
 }
 
+fn sdk_rows() -> Vec<Value> {
+    let mut rows = rows();
+    for row in &mut rows {
+        row["schema"] = 7.into();
+        match row["event"].as_str().unwrap() {
+            "ring_ready" => row["admitted_usec"] = Value::Null,
+            "ring_offer" | "slot_released" => {
+                row["slot"] = 0.into();
+                row["slot_generation"] = Value::Null;
+            }
+            _ => {}
+        }
+    }
+    rows
+}
+
+#[test]
+fn sdk_ring_records_observed_custody_without_private_sdk_fields() {
+    let mut rows = sdk_rows();
+    // Acceptance and settlement may be observed in the same poll.
+    rows[4]["released_usec"] = rows[3]["accepted_usec"].clone();
+    let metrics = collect_metrics(&encode(&rows), 3).unwrap();
+    assert_eq!(metrics.schema, 7);
+    let ring = metrics.ring.unwrap();
+    assert!(ring.registration.admitted_usec.is_none());
+    assert!(
+        ring.copies
+            .iter()
+            .all(|c| c.slot == 0 && c.slot_generation.is_none())
+    );
+
+    for (row, key, value) in [
+        (1, "admitted_usec", json!(1)),
+        (2, "slot_generation", json!(2)),
+        (2, "slot", json!(2)),
+        (4, "slot", json!(1)),
+        (4, "slot_generation", json!(2)),
+        (4, "released_usec", json!(101)),
+        (3, "resource_generation", json!(2)),
+        (0, "interval_msec", json!(100)),
+        (0, "workload", json!("retained")),
+        (3, "schema", json!(5)),
+    ] {
+        let mut bad = sdk_rows();
+        bad[row][key] = value;
+        assert!(collect_metrics(&encode(&bad), 3).is_err(), "{row}:{key}");
+    }
+    // SDK observations cannot be relabeled as raw-protocol evidence.
+    for row in &mut rows {
+        row["schema"] = 5.into();
+    }
+    assert!(collect_metrics(&encode(&rows), 3).is_err());
+}
+
 #[test]
 fn ring_custody_is_distinct_and_slots_can_recycle_before_resource_release() {
     let metrics = collect_metrics(&encode(&rows()), 3).unwrap();
@@ -47,7 +101,7 @@ fn ring_custody_is_distinct_and_slots_can_recycle_before_resource_release() {
     let ring = metrics.ring.unwrap();
     assert_eq!(ring.registration.slots, 2);
     assert_eq!(ring.copies[2].slot, 0);
-    assert_eq!(ring.copies[2].slot_generation, 6);
+    assert_eq!(ring.copies[2].slot_generation, Some(6));
     assert_eq!(ring.copies[2].resource_generation, 2);
     assert_eq!(ring.copies[2].fill_start_usec, 300);
     assert_eq!(metrics.offers[2].candidate_generation, 3);
@@ -97,15 +151,18 @@ fn ring_journal_rejects_identity_geometry_and_lifetime_substitution() {
         (0, "workload", json!("retained")),
         (1, "slots", json!(3)),
         (1, "admitted_usec", json!(3)),
+        (1, "admitted_usec", Value::Null),
         (1, "pixel_bytes", json!(184324)),
         (1, "connection_epoch", json!(0)),
         (2, "event", json!("upload_offer")),
         (2, "slot", json!(1)),
         (2, "slot_generation", json!(1)),
+        (2, "slot_generation", Value::Null),
         (2, "fill_start_usec", json!(0)),
         (3, "offer", json!(2)),
         (3, "resource_generation", json!(2)),
         (4, "slot_generation", json!(4)),
+        (4, "slot_generation", Value::Null),
         (4, "released_usec", json!(101)),
         (5, "demand_usec", json!(102)),
         (6, "output", json!(8)),
@@ -290,7 +347,7 @@ fn retained_ring_pool_is_copied_once_and_every_frame_places_it_rotated() {
     assert_eq!(ring.copies.len(), 3);
     assert_eq!(
         (ring.copies[2].slot, ring.copies[2].slot_generation),
-        (0, 6)
+        (0, Some(6))
     );
     assert_eq!(metrics.offers.len(), 3);
 }

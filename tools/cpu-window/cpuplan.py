@@ -23,10 +23,10 @@ change, a helper in the ring arm, a missing helper elsewhere, or any
 mismatch refuses the whole plan; nothing is written. Analyze the result
 with the unchanged `cpuwin.py analyze PLAN.json`.
 
-Compared runs must share one workload (the descriptor's, equal to the
-schema-6 draw journal's), native target, pinned Session sha256 and pinned
-helper sha256. Recipe obligation, not checked here: the same peer binary
-per arm, one boot and machine state, and the ABBA order.
+Compared runs share workload, native target, bar height and helper pin.
+Historical GPU I/S/G permits a different Session per arm; GPU owned-ring
+comparisons require one Session and peer binary across arms. Other comparisons
+require one Session. One boot, machine state and run order remain recipe checks.
 """
 import argparse
 import hashlib
@@ -40,8 +40,8 @@ COMPLETION_FIELDS = {"schema", "output", "native_owner", "native_frame", "heads"
                      "drm_timestamp_monotonic"}
 RASTER_SOURCES = {"draw", "mixed"}
 SOURCES = RASTER_SOURCES | {"owned_ring"}
-# Schema-3 GPU-producer arms: fresh schema-2 journals, no raster helper.
-GPU_SOURCES = {"bytes", "sealed", "dma_buf"}
+# Schema-3 GPU arms: fresh schema-2 or SDK ring schema-7, no raster helper.
+GPU_SOURCES = {"bytes", "sealed", "owned_ring", "dma_buf"}
 DRAW_SOURCES = {"draw": "draw", "mixed": "mixed", "ring": "owned_ring"}  # journal -> plan
 WORKLOADS = {"retained", "continuous", "bursty"}
 MAX_GAP_MS = 20
@@ -132,6 +132,7 @@ def build_run(name, arm, stage):
     request = json.loads(plan_bytes).get("request") or {}
     compared = {"workload": d.get("workload"), "target": d.get("target"),
                 "sophia_sha256": ((request.get("artifacts") or {}).get("sophia") or {}).get("sha256"),
+                "peer_sha256": ((request.get("artifacts") or {}).get("peer") or {}).get("sha256"),
                 "bar_height": d.get("bar_height"),
                 "raster_sha256": None if (plain_ring or gpu) else d["raster"].get("sha256")}
     if not (isinstance(compared["sophia_sha256"], str) and (plain_ring or gpu or isinstance(compared["raster_sha256"], str))
@@ -158,10 +159,11 @@ def build_run(name, arm, stage):
                 or journal.get("interval_msec") is not None or journal.get("retained_resources") is not None:
             raise Refused("schema-1 descriptor requires a fresh schema-5 owned-ring journal")
     elif gpu:
-        if journal.get("schema") != 2 or source not in GPU_SOURCES or draw \
+        expected_schema = 7 if source == "owned_ring" else 2
+        if journal.get("schema") != expected_schema or source not in GPU_SOURCES or draw \
                 or journal.get("workload", "fresh") != "fresh" \
                 or journal.get("interval_msec") is not None or journal.get("retained_resources") is not None:
-            raise Refused("schema-3 descriptor requires a fresh schema-2 GPU journal (bytes, sealed or dma_buf)")
+            raise Refused("schema-3 descriptor requires a fresh GPU journal (schema-7 SDK ring, otherwise schema-2)")
         # The journal alone cannot prove the GPU binding: the pinned
         # request must declare it and agree on source and wire.
         want_wire = "ipc" if source == "bytes" else "files"
@@ -253,14 +255,18 @@ def build(runs, baseline=None):
         if hosts.setdefault(arm, host) != host:
             errors.append(f"{name}: arm {arm!r} mixes Session binaries")
         plan.append(run)
-    # GPU arms legitimately split hosts per arm (comparator for I/S,
-    # master for G); the per-arm check above replaces the global one.
-    gpu_plan = plan and all(r["evidence"]["source"] in GPU_SOURCES for r in plan)
+    # Historical I/S/G split hosts. The current ring comparison must use one host.
+    gpu_plan = plan and all(r["evidence"]["compared"]["bar_height"] is not None for r in plan)
     for key in ("workload", "target", "raster_sha256", "bar_height"):
         if len({json.dumps(r["evidence"]["compared"][key], sort_keys=True) for r in plan}) > 1:
             errors.append(f"compared runs differ in {key}")
-    if not gpu_plan and len({r["evidence"]["compared"]["sophia_sha256"] for r in plan}) > 1:
+    matched_ring = gpu_plan and any(r["evidence"]["source"] == "owned_ring" for r in plan)
+    if (not gpu_plan or matched_ring) and len({r["evidence"]["compared"]["sophia_sha256"] for r in plan}) > 1:
         errors.append("compared runs differ in sophia_sha256")
+    if matched_ring:
+        peers = [r["evidence"]["compared"]["peer_sha256"] for r in plan]
+        if any(not isinstance(p, str) or len(p) != 64 for p in peers) or len(set(peers)) != 1:
+            errors.append("GPU owned-ring comparison requires one pinned peer_sha256")
     if len({n for n, _, _ in runs}) != len(runs):
         errors.append("run names must be unique")
     if baseline is not None and baseline not in {a for _, a, _ in runs}:

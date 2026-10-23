@@ -75,7 +75,9 @@ pub fn policy(d: &Descriptor, r: &Request, probe: u64) -> Result<(), String> {
                 && r.reference_workload.is_none()
                 && match r.source {
                     ImageSource::Bytes => r.wire == "ipc",
-                    ImageSource::Isb | ImageSource::DmaBuf => r.wire == "files",
+                    ImageSource::Isb | ImageSource::OwnedRing | ImageSource::DmaBuf => {
+                        r.wire == "files"
+                    }
                     _ => false,
                 }
         }

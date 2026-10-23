@@ -1,4 +1,4 @@
-//! Schema 5 is a distinct ring experiment, never a sealed upload journal.
+//! Schema 5 records raw ring custody; schema 7 records SDK observations.
 //! Fresh by default; an optional Start interval adds per-offer due times, and
 //! the retained workload copies a tile pool once, then places it every frame.
 use super::{
@@ -17,7 +17,7 @@ pub struct Ready {
     pub ring_generation: u64,
     pub slots: u64,
     pub pixel_bytes: u64,
-    pub admitted_usec: u64,
+    pub admitted_usec: Option<u64>,
     pub ready_usec: u64,
 }
 
@@ -25,7 +25,7 @@ pub struct Ready {
 pub struct CopyTiming {
     pub offer: u64,
     pub slot: u64,
-    pub slot_generation: u64,
+    pub slot_generation: Option<u64>,
     pub resource_id: u64,
     pub resource_generation: u64,
     pub fill_start_usec: u64,
@@ -66,7 +66,7 @@ enum Event {
         upload: Upload,
         offer: u64,
         slot: u64,
-        slot_generation: u64,
+        slot_generation: Option<u64>,
         fill_start_usec: u64,
         #[serde(default)]
         due_usec: Option<u64>,
@@ -80,14 +80,17 @@ enum Event {
     SlotReleased {
         offer: u64,
         slot: u64,
-        slot_generation: u64,
+        slot_generation: Option<u64>,
         resource_id: u64,
         resource_generation: u64,
         released_usec: u64,
     },
 }
 
-fn next<T: serde::de::DeserializeOwned>(lines: &mut std::str::Lines<'_>) -> Result<T, String> {
+fn next<T: serde::de::DeserializeOwned>(
+    lines: &mut std::str::Lines<'_>,
+    schema: u64,
+) -> Result<T, String> {
     #[derive(Deserialize)]
     struct Record<T> {
         schema: u64,
@@ -96,7 +99,7 @@ fn next<T: serde::de::DeserializeOwned>(lines: &mut std::str::Lines<'_>) -> Resu
     }
     let record: Record<T> = serde_json::from_str(lines.next().ok_or("incomplete ring journal")?)
         .map_err(|e| e.to_string())?;
-    if record.schema != 5 {
+    if record.schema != schema {
         return Err("mixed ring journal schemas".into());
     }
     Ok(record.event)
@@ -113,6 +116,7 @@ struct ExpectedCopy {
 
 fn copy(
     lines: &mut std::str::Lines<'_>,
+    schema: u64,
     ready: &Ready,
     expect: ExpectedCopy,
     not_before: u64,
@@ -124,9 +128,9 @@ fn copy(
         resource_generation,
         candidate_generation,
     } = expect;
-    let slot = (number - 1) % slots;
-    let slot_generation = number.checked_mul(2).ok_or("ring generation overflow")?;
-    let (upload, fill_start_usec, due_usec) = match next(lines)? {
+    let expected_slot = (number - 1) % slots;
+    let expected_generation = number.checked_mul(2).ok_or("ring generation overflow")?;
+    let (upload, slot, slot_generation, fill_start_usec, due_usec) = match next(lines, schema)? {
         Event::RingOffer {
             upload,
             offer,
@@ -135,8 +139,12 @@ fn copy(
             fill_start_usec,
             due_usec,
         } if offer == number
-            && s == slot
-            && g == slot_generation
+            && s < slots
+            && if schema == 5 {
+                s == expected_slot && g == Some(expected_generation)
+            } else {
+                g.is_none()
+            }
             && upload.connection_epoch == ready.connection_epoch
             && upload.content_grant_epoch == ready.content_grant_epoch
             && upload.output > 0
@@ -153,11 +161,11 @@ fn copy(
             && fill_start_usec >= not_before
             && upload.begin_usec >= fill_start_usec =>
         {
-            (upload, fill_start_usec, due_usec)
+            (upload, s, g, fill_start_usec, due_usec)
         }
         _ => return Err("invalid ring offer identity, geometry, slot custody or timing".into()),
     };
-    let accepted_usec = match next(lines)? {
+    let accepted_usec = match next(lines, schema)? {
         Event::RingAccepted {
             offer,
             resource_id: id,
@@ -172,7 +180,7 @@ fn copy(
         }
         _ => return Err("missing or misattributed ring acceptance".into()),
     };
-    let released_usec = match next(lines)? {
+    let released_usec = match next(lines, schema)? {
         Event::SlotReleased {
             offer,
             slot: s,
@@ -204,9 +212,9 @@ fn copy(
     Ok((upload, timing, accepted_usec))
 }
 
-pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String> {
+pub(super) fn collect(journal: &str, expected: usize, schema: u64) -> Result<Journal, String> {
     let mut lines = journal.lines();
-    let (slots, workload, retained, interval_msec) = match next(&mut lines)? {
+    let (slots, workload, retained, interval_msec) = match next(&mut lines, schema)? {
         Event::Start {
             frames,
             wire,
@@ -219,6 +227,10 @@ pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String>
         } if frames == expected
             && wire == "files"
             && (2..=4).contains(&ring_slots)
+            && (schema == 5
+                || (workload == WorkloadMode::Fresh
+                    && interval_msec.is_none()
+                    && retained_resources.is_none()))
             && interval_msec.is_none_or(|n| (1..=10_000).contains(&n))
             // Retained is vsync-paced, as the peer refuses an interval.
             && (workload == WorkloadMode::Fresh || interval_msec.is_none()) =>
@@ -228,7 +240,7 @@ pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String>
         }
         _ => return Err("ring journal requires the declared fresh or retained panel arm".into()),
     };
-    let ready = match next(&mut lines)? {
+    let ready = match next(&mut lines, schema)? {
         Event::RingReady { ready }
             if ready.slots == slots
                 && ![
@@ -237,10 +249,16 @@ pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String>
                     ready.channel,
                     ready.ring,
                     ready.ring_generation,
-                    ready.admitted_usec,
+                    ready.ready_usec,
                 ]
                 .contains(&0)
-                && ready.ready_usec >= ready.admitted_usec
+                && if schema == 5 {
+                    ready
+                        .admitted_usec
+                        .is_some_and(|t| t > 0 && ready.ready_usec >= t)
+                } else {
+                    ready.admitted_usec.is_none()
+                }
                 && (4..=4 * 1024 * 1024).contains(&ready.pixel_bytes)
                 && ready.pixel_bytes % 4 == 0 =>
         {
@@ -249,7 +267,7 @@ pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String>
         _ => return Err("missing or invalid ring readiness".into()),
     };
     let mut result = Journal {
-        schema: 5,
+        schema,
         wire: "files".into(),
         source: ImageSource::OwnedRing,
         probe_bytes: 0,
@@ -279,7 +297,7 @@ pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String>
             resource_generation: 1,
             candidate_generation: 0,
         };
-        let (upload, timing, accepted_usec) = copy(&mut lines, &ready, expect, last)?;
+        let (upload, timing, accepted_usec) = copy(&mut lines, schema, &ready, expect, last)?;
         let current = (upload.output, upload.width, upload.height);
         if upload.width % 2 != 0 || geometry.replace(current).is_some_and(|old| old != current) {
             return Err("retained tiles need one even width, height and output".into());
@@ -309,7 +327,7 @@ pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String>
                 resource_generation: (frame - 1) / 2 + 1,
                 candidate_generation: frame,
             };
-            let (upload, timing, accepted_usec) = copy(&mut lines, &ready, expect, last)?;
+            let (upload, timing, accepted_usec) = copy(&mut lines, schema, &ready, expect, last)?;
             // A paced journal names every due time on one absolute schedule that
             // starts at or after readiness; late fills keep later deadlines fixed.
             let on_schedule = match (interval_msec, timing.due_usec) {
@@ -344,7 +362,7 @@ pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String>
             });
         }
         let output = geometry.map_or(0, |(output, _, _)| output);
-        let received_usec = match next::<LegacyEvent>(&mut lines)? {
+        let received_usec = match next::<LegacyEvent>(&mut lines, schema)? {
             LegacyEvent::Permit {
                 generation,
                 demand_usec,
@@ -364,7 +382,7 @@ pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String>
         };
         if let (Some(count), Some((_, tile_width, _))) = (retained, geometry) {
             // Every candidate places the whole pool, rotated by one tile per frame.
-            match next::<LegacyEvent>(&mut lines)? {
+            match next::<LegacyEvent>(&mut lines, schema)? {
                 LegacyEvent::CandidatePlacements {
                     candidate_generation,
                     placements,
@@ -386,7 +404,7 @@ pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String>
                 _ => return Err("missing, wrong or unaccepted ring candidate placements".into()),
             }
         }
-        let offer = match next::<LegacyEvent>(&mut lines)? {
+        let offer = match next::<LegacyEvent>(&mut lines, schema)? {
             LegacyEvent::Offer {
                 connection_epoch,
                 content_grant_epoch,
@@ -410,7 +428,7 @@ pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String>
             }
             _ => return Err("ring candidate does not match its accepted resource".into()),
         };
-        match next::<LegacyEvent>(&mut lines)? {
+        match next::<LegacyEvent>(&mut lines, schema)? {
             LegacyEvent::Terminal {
                 connection_epoch,
                 content_grant_epoch,
@@ -436,7 +454,7 @@ pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String>
         result.offers.push(offer);
         result.terminal_usec.push(last);
     }
-    if !matches!(next::<LegacyEvent>(&mut lines)?, LegacyEvent::End { offered, completed }
+    if !matches!(next::<LegacyEvent>(&mut lines, schema)?, LegacyEvent::End { offered, completed }
         if offered == expected && completed == expected)
         || lines.next().is_some()
     {

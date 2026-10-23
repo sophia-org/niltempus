@@ -153,6 +153,27 @@ Option: summing per-thread `/proc/PID/task/*/schedstat` gives nanoseconds, but i
 - **Children.** cutime is ignored.
 - **PIDs outside the named set.** Engine or renderer processes, if separate, need their own `--pid`.
 
+## t339 matched GPU owned-ring/DMA diagnostic
+
+Descriptor schema 3 binds `producer=gpu`, files transport and a 24- or 512-row
+bar. R uses GPU render plus readback into the SDK owned ring; G uses the same
+producer's DMA export. Both arms must pin the same Sophia and peer binaries.
+Historical I/S/G reports remain readable, including their split host revisions.
+
+The SDK ring peer emits journal schema 7. It reports the actual slot, which may
+always be slot 0 when offers settle sequentially. `slot_generation` and
+`admitted_usec` are null because the SDK does not expose them. Registration
+`slots` and `pixel_bytes` are configured bounds; identity comes from the SDK.
+Readiness, acceptance and release times are observations, and acceptance and
+release may share a timestamp. Each copy still requires matching offer,
+acceptance and slot release before the candidate permit. Schema 5 retains its
+raw-protocol generation, rotation and admission checks unchanged.
+
+This comparison measures the transport choice after the same GPU rendering.
+Upload-begin timestamps exclude producer rendering/readback/export. Report that
+limit when deriving upload-to-kernel-completion latency; CPU windows include
+producer work across the counted frame cadence. Neither measure is GPU time.
+
 ## t341 schema-2 draw diagnostic
 
 Use the same pinned Session, reference client and sibling raster helper for

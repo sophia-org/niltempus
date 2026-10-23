@@ -165,10 +165,17 @@ fn gpu_schema3_admits_only_explicit_gpu_producer_arms() {
     r.source = ImageSource::Bytes;
     r.wire = "ipc".into();
     policy(&d, &r, 0).unwrap();
-    // S: files sealed; G: files dma_buf.
+    // S: files sealed; R: files owned_ring; G: files dma_buf.
     r.wire = "files".into();
     r.source = ImageSource::Isb;
     policy(&d, &r, 0).unwrap();
+    r.source = ImageSource::OwnedRing;
+    policy(&d, &r, 0).unwrap();
+    d.bar_height = Some(512);
+    policy(&d, &r, 0).unwrap();
+    r.wire = "ipc".into();
+    assert!(policy(&d, &r, 0).is_err());
+    r.wire = "files".into();
     r.source = ImageSource::DmaBuf;
     policy(&d, &r, 0).unwrap();
     d.bar_height = Some(512);
