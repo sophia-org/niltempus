@@ -16,6 +16,13 @@ R/G comparison measures.
 Configuration is exactly `wire` (`files`), `output`, `frames`, `height`,
 `hold_msec` and `source`, plus `ring_slots` (2..=4) only for `owned_ring`.
 
+Optional `capture_profile: true` enables cumulative producer DMA-stage timing
+for a 24-row, 2120-frame, 60000-ms diagnostic. The runner must also pin
+`instrumentation: "capture-profile"`; it enables the host's render counters.
+Timing is disabled by default. Profile captures are attribution evidence and
+are refused by cpuplan as comparison arms. Timing records go to stderr after
+the counted window, leaving the image journal unchanged.
+
 Schema 7 keeps schema 5's ring records. `admitted_usec` and `slot_generation`
 are null because the SDK exposes neither, and `slot` is the SDK's actual slot,
 which is 0 every frame while offers settle one at a time. RingReady `slots`

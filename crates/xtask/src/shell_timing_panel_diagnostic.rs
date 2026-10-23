@@ -92,7 +92,11 @@ pub fn policy(d: &Descriptor, r: &Request, probe: u64) -> Result<(), String> {
         || d.warmup != 120
         || d.interval_ms != 5
         || Some(r.frames) != d.warmup.checked_add(d.counted)
-        || r.instrumentation != "none"
+        || !(r.instrumentation == "none"
+            || (r.instrumentation == "capture-profile"
+                && d.schema == 3
+                && d.bar_height == Some(24)
+                && matches!(r.source, ImageSource::OwnedRing | ImageSource::DmaBuf)))
         || r.external_timing.is_some()
         || !r.environment_readback
         || (d.schema != 3 && r.wire != "files")

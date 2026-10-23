@@ -186,6 +186,49 @@ fn instrumentation_modes_are_explicit_and_bounded() {
 }
 
 #[test]
+fn capture_profiling_requires_matching_peer_and_gpu_binding() {
+    use xtask::shell_timing::ImageSource;
+    use xtask::shell_timing_native::ProducerKind;
+    let mut f = Fixture::new("capture-profile", "files");
+    f.request.source = ImageSource::OwnedRing;
+    f.request.producer = ProducerKind::Gpu;
+    f.request.frames = 2120;
+    f.request.environment_readback = true;
+    f.request.instrumentation = "capture-profile".into();
+    let profile = fs::read_to_string(&f.request.artifacts["profile"].path).unwrap();
+    f.put(
+        "profile",
+        profile
+            .replace("gpu \"denied\"", "gpu \"direct\"")
+            .as_bytes(),
+        false,
+    );
+    let mut config = serde_json::json!({"wire":"files","source":"owned_ring","output":1,
+        "frames":2120,"height":24,"hold_msec":60000,"ring_slots":2,"capture_profile":true});
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_ok());
+    f.request.instrumentation = "none".into();
+    assert!(validate(&f.request).is_err());
+    f.request.instrumentation = "capture-profile".into();
+    f.request.producer = ProducerKind::Cpu;
+    assert!(validate(&f.request).is_err());
+    f.request.producer = ProducerKind::Gpu;
+    config["capture_profile"] = false.into();
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_err());
+    config["capture_profile"] = true.into();
+    config["height"] = 512.into();
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_err());
+    config["height"] = 24.into();
+    config["source"] = "dma_buf".into();
+    config.as_object_mut().unwrap().remove("ring_slots");
+    f.request.source = ImageSource::DmaBuf;
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_ok());
+}
+
+#[test]
 fn sealed_preparation_requires_matching_files_source_without_running_artifacts() {
     use xtask::shell_timing::ImageSource;
     let mut f = Fixture::new("sealed", "files");

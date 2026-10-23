@@ -20,3 +20,24 @@ fn each_source_takes_exactly_its_keys() {
     assert!(parse_config(&DMA.replace('}', r#","extra":1}"#)).is_err());
     assert!(parse_config(&RING.replace("\"height\":24", "\"height\":513")).is_err());
 }
+
+#[test]
+fn capture_profile_is_explicit_boolean_and_bounded() {
+    assert!(!parse_config(RING).unwrap().capture_profile);
+    let profiled = RING.replace('}', r#","capture_profile":true}"#);
+    assert!(parse_config(&profiled).unwrap().capture_profile);
+    let dma = DMA
+        .replace("512", "24")
+        .replace('}', r#","capture_profile":true}"#);
+    assert!(parse_config(&dma).unwrap().capture_profile);
+    for value in ["null", "1", "\"true\""] {
+        assert!(parse_config(&profiled.replace("true", value)).is_err());
+    }
+    for changed in [
+        profiled.replace("2120", "1000"),
+        profiled.replace("60000", "120000"),
+        profiled.replace("\"height\":24", "\"height\":512"),
+    ] {
+        assert!(parse_config(&changed).is_err());
+    }
+}

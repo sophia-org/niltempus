@@ -128,6 +128,8 @@ struct PeerConfig {
     interval_msec: Option<u64>,
     #[serde(default, deserialize_with = "present_u64")]
     ring_slots: Option<u64>,
+    #[serde(default)]
+    capture_profile: bool,
     image: Option<ImageConfig>,
 }
 
@@ -377,7 +379,7 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
         || !matches!(request.wire.as_str(), "files" | "ipc")
         || !matches!(
             request.instrumentation.as_str(),
-            "none" | "rust-global" | "cpu-only" | "profile" | "progress"
+            "none" | "rust-global" | "cpu-only" | "profile" | "progress" | "capture-profile"
         )
         || (request.instrumentation != "none" && request.runtime_ms > 60_000)
         || request.input_seat.is_empty()
@@ -388,6 +390,17 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
     {
         return Err("invalid bounded workload, mode, console, display or seat".into());
+    }
+    if request.instrumentation == "capture-profile"
+        && (request.producer != ProducerKind::Gpu
+            || request.wire != "files"
+            || !matches!(request.source, ImageSource::OwnedRing | ImageSource::DmaBuf)
+            || request.reference_workload.is_some()
+            || !request.environment_readback
+            || request.frames != 2120
+            || request.runtime_ms != 60_000)
+    {
+        return Err("capture profiling requires a bounded observed GPU R/G plan".into());
     }
     let mut texts = BTreeMap::new();
     for (key, artifact) in &request.artifacts {
@@ -429,6 +442,11 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
         let peer: PeerConfig =
             serde_json::from_slice(&texts["peer-config"]).map_err(|e| e.to_string())?;
         peer.workload()?;
+        if peer.capture_profile != (request.instrumentation == "capture-profile")
+            || (peer.capture_profile && peer.height != 24)
+        {
+            return Err("capture profiling requires matching explicit GPU R/G peer diagnostics at height 24".into());
+        }
         external::validate(request, &peer)?;
         if peer.wire != request.wire
             || peer.source != request.source
@@ -442,7 +460,8 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
                 // reference_workload branch above.
                 ImageSource::Draw | ImageSource::Mixed => true,
             }
-            || (peer.source == ImageSource::OwnedRing && request.instrumentation != "none")
+            || (peer.source == ImageSource::OwnedRing
+                && !matches!(request.instrumentation.as_str(), "none" | "capture-profile"))
             || peer.output != request.output
             || peer.frames != request.frames
             || !(1..=512).contains(&peer.height)
@@ -1011,6 +1030,9 @@ fn run_inner(
                     None => None,
                 };
                 let mut environment = vec![("SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE", "1")];
+                if plan.request.instrumentation == "capture-profile" {
+                    environment.push(("SOPHIA_RENDER_TIMING", "1"));
+                }
                 if plan.request.wire == "ipc" {
                     environment.push(("SOPHIA_COMPARATOR_ADMISSION", "protected-legacy-baseline"));
                 }
@@ -1087,7 +1109,10 @@ fn run_inner(
             };
             let costs = if plan.request.instrumentation == "progress" {
                 None
-            } else if plan.request.instrumentation != "none" {
+            } else if !matches!(
+                plan.request.instrumentation.as_str(),
+                "none" | "capture-profile"
+            ) {
                 let report = crate::shell_timing_cost::measure_journal(
                     counters,
                     counters,

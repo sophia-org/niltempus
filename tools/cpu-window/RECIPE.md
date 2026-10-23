@@ -217,3 +217,12 @@ and observer/proc-walk overhead are outside the sum. The sampler reports its own
 overhead. Ring's no-helper observation is sampled, and multiple live matching
 helpers refuse the diagnostic. Helper replacement conservatively refuses the
 whole capture, including a replacement after the measurement window.
+
+## Instrumented capture attribution
+
+Requests with `instrumentation: "capture-profile"` retain the same raw CPU
+sampling and kernel-completion joins, but are deliberately refused by
+`cpuplan.py`. They enable renderer counters and opt-in producer DMA-stage
+timing, and may run under perf. Their CPU totals are diagnostic, not an
+uninstrumented comparison or promotion result. Preserve these runs separately
+from the frozen R/G packages.

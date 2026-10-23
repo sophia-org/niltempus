@@ -130,6 +130,8 @@ def build_run(name, arm, stage):
     if hashlib.sha256(plan_bytes).hexdigest() != (d.get("plan") or {}).get("sha256"):
         raise Refused("plan.json differs from the descriptor's pinned plan")
     request = json.loads(plan_bytes).get("request") or {}
+    if request.get("instrumentation") == "capture-profile":
+        raise Refused("capture-profile is diagnostic attribution, not a CPU comparison arm")
     compared = {"workload": d.get("workload"), "target": d.get("target"),
                 "sophia_sha256": ((request.get("artifacts") or {}).get("sophia") or {}).get("sha256"),
                 "peer_sha256": ((request.get("artifacts") or {}).get("peer") or {}).get("sha256"),

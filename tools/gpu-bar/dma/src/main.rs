@@ -27,6 +27,7 @@ mod journal;
 use journal::{Event, Upload};
 #[path = "../../common/gpu_canvas.rs"]
 mod canvas;
+mod profile;
 mod ring_journal;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,13 +58,14 @@ impl Source {
 #[derive(Debug, PartialEq, Eq)]
 struct Config {
     source: Source,
+    capture_profile: bool,
     output: u64,
     frames: u64,
     height: u64,
     hold_msec: u64,
 }
 
-/// Exactly the six DMA keys, plus `ring_slots` only for `owned_ring`.
+/// Diagnostics are explicit; ordinary runs retain the original exact keys.
 fn parse_config(text: &str) -> Result<Config> {
     let config: serde_json::Value = serde_json::from_str(text)?;
     let object = config
@@ -71,11 +73,15 @@ fn parse_config(text: &str) -> Result<Config> {
         .ok_or("configuration must be an object")?;
     const KEYS: [&str; 6] = ["wire", "output", "frames", "height", "hold_msec", "source"];
     let ring = config["source"].as_str() == Some("owned_ring");
-    let allowed = |k: &str| KEYS.contains(&k) || (ring && k == "ring_slots");
-    if object.len() != KEYS.len() + usize::from(ring) || object.keys().any(|k| !allowed(k)) {
+    let profiling = object.contains_key("capture_profile");
+    let allowed =
+        |k: &str| KEYS.contains(&k) || (ring && k == "ring_slots") || k == "capture_profile";
+    if object.len() != KEYS.len() + usize::from(ring) + usize::from(profiling)
+        || object.keys().any(|k| !allowed(k))
+    {
         return Err(
             "configuration requires exactly wire, output, frames, height, hold_msec \
-                    and source, plus ring_slots for owned_ring"
+                    and source, plus ring_slots for owned_ring and optional capture_profile"
                 .into(),
         );
     }
@@ -97,6 +103,13 @@ fn parse_config(text: &str) -> Result<Config> {
     }
     let parsed = Config {
         source,
+        capture_profile: if profiling {
+            config["capture_profile"]
+                .as_bool()
+                .ok_or("capture_profile must be boolean")?
+        } else {
+            false
+        },
         output: number("output")?,
         frames: number("frames")?,
         height: number("height")?,
@@ -108,6 +121,11 @@ fn parse_config(text: &str) -> Result<Config> {
         || parsed.hold_msec > 600000
     {
         return Err("configuration outside bounded workload".into());
+    }
+    if parsed.capture_profile
+        && (parsed.height != 24 || parsed.frames != 2120 || parsed.hold_msec != 60000)
+    {
+        return Err("capture_profile requires height 24, 2120 frames and 60000 ms".into());
     }
     Ok(parsed)
 }
@@ -387,6 +405,7 @@ fn run() -> Result<()> {
     }
     let Config {
         source,
+        capture_profile,
         output: output_id,
         frames,
         height,
@@ -402,6 +421,16 @@ fn run() -> Result<()> {
         wire.enable_image(&socket, &limits, None)?;
     }
     canvas::open(limits.grant.connection_epoch, source.label())?;
+    canvas::with_gpu(|gpu| {
+        gpu.set_dma_timing_enabled(capture_profile);
+        Ok(())
+    })?;
+    if capture_profile {
+        eprintln!(
+            "gpu_bar_profile schema=1 source={} enabled=true",
+            source.label()
+        );
+    }
     let ShellContentRecord::OutputFacts(facts) = wire.receive()? else {
         return Err("missing output facts".into());
     };
@@ -497,6 +526,8 @@ fn run() -> Result<()> {
             ring_canvas = Some(canvas::Canvas::new(usize::try_from(length)?));
         }
     }
+    let mut timing_start = None;
+    let mut timing_end = None;
     for generation in 1..=frames {
         let resource = resource_for_frame(generation);
         if let Some(canvas) = &mut ring_canvas {
@@ -543,11 +574,29 @@ fn run() -> Result<()> {
             facts.facts_generation,
             generation,
         )?;
+        if capture_profile && source == Source::DmaBuf && matches!(generation, 120 | 2120) {
+            let snapshot =
+                canvas::with_gpu(|gpu| gpu.dma_timing().ok_or("DMA timing absent".into()))?;
+            if generation == 120 {
+                timing_start = Some(snapshot);
+            } else {
+                timing_end = Some(snapshot);
+            }
+        }
     }
     emit(Event::End {
         offered: frames,
         completed: frames,
     })?;
+    if capture_profile && source == Source::DmaBuf {
+        eprintln!(
+            "{}",
+            profile::record(
+                timing_start.ok_or("missing timing start")?,
+                timing_end.ok_or("missing timing end")?
+            )?
+        );
+    }
     std::thread::sleep(Duration::from_millis(hold));
     Ok(())
 }

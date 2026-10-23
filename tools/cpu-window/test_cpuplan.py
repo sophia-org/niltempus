@@ -319,6 +319,10 @@ def setter(path, value):
 
 
 class Negative(Base):
+    def test_profile_cannot_become_a_comparison_arm(self):
+        self.refused("diagnostic attribution", edit=setter(
+            ["plan.json", "request", "instrumentation"], "capture-profile"))
+
     def test_old_completion_without_monotonic_capability(self):
         self.refused("drm_timestamp_monotonic", edit=setter(
             ["native.log", WARMUP - 1], completion_line(WARMUP, drm_timestamp_monotonic=None)))

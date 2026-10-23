@@ -36,7 +36,9 @@ pub fn prepared(generation: u64, resource_id: u64, start_usec: u64, end_usec: u6
     );
 }
 
-fn with_gpu<T>(work: impl FnOnce(&mut GpuPreview) -> Result<T, String>) -> Result<T, String> {
+pub(crate) fn with_gpu<T>(
+    work: impl FnOnce(&mut GpuPreview) -> Result<T, String>,
+) -> Result<T, String> {
     GPU.with(|cell| work(cell.borrow_mut().as_mut().ok_or("GPU was not opened")?))
 }
 

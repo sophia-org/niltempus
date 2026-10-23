@@ -155,6 +155,27 @@ fn changed_descriptor_never_creates_a_stage_or_reaches_launch() {
 }
 
 #[test]
+fn capture_profiles_are_only_gpu_small_panel_diagnostics() {
+    let (mut d, mut r) = fixture();
+    d.schema = 3;
+    d.bar_height = Some(24);
+    r.producer = xtask::shell_timing_native::ProducerKind::Gpu;
+    r.instrumentation = "capture-profile".into();
+    for source in [ImageSource::OwnedRing, ImageSource::DmaBuf] {
+        r.source = source;
+        assert!(policy(&d, &r, 0).is_ok());
+    }
+    r.source = ImageSource::Isb;
+    assert!(policy(&d, &r, 0).is_err());
+    r.source = ImageSource::DmaBuf;
+    d.bar_height = Some(512);
+    assert!(policy(&d, &r, 0).is_err());
+    d.bar_height = Some(24);
+    d.schema = 1;
+    assert!(policy(&d, &r, 0).is_err());
+}
+
+#[test]
 fn gpu_schema3_admits_only_explicit_gpu_producer_arms() {
     use xtask::shell_timing_native::ProducerKind;
     let (mut d, mut r) = fixture();
