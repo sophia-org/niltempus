@@ -253,8 +253,9 @@ pub fn for_mode(mode: &str, capture: &str, offers: &[Offer]) -> Result<Option<Re
             }
             Ok(Some(report))
         }
-        "none" if !capture.contains("sophia_comparator_counters ") => Ok(None),
+        "none" | "capture-profile" if !capture.contains("sophia_comparator_counters ") => Ok(None),
         "none" => Err("instrumented capture cannot supply an uninstrumented timing run".into()),
+        "capture-profile" => Err("capture profiling cannot supply comparator counters".into()),
         _ => Err("unknown instrumentation mode".into()),
     }
 }

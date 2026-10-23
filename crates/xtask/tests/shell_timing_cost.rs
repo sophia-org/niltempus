@@ -581,3 +581,17 @@ fn schema_three_profile_remains_diagnostic_only() {
         assert!(for_mode(mode, &capture, &offers()).is_err());
     }
 }
+
+#[test]
+fn capture_profile_joins_without_comparator_costs() {
+    use xtask::shell_timing_cost::for_mode;
+    let capture =
+        "sophia_live_render_work timing_enabled=1\ngpu_bar_profile schema=1 enabled=true\n";
+    assert!(
+        for_mode("capture-profile", capture, &offers())
+            .unwrap()
+            .is_none()
+    );
+    assert!(for_mode("capture-profile", &host(), &offers()).is_err());
+    assert!(for_mode("unknown", capture, &offers()).is_err());
+}
