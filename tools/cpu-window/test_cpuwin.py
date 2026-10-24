@@ -87,6 +87,53 @@ class Bounds(Case):
         self.assertLess(s["lower_ns"], 400 * MS)
         self.assertGreater(s["upper_ns"], 400 * MS)
 
+    def test_fixed_window_accepts_idle_without_inventing_frame_counts(self):
+        idle = lambda t, rec: [rec["procs"][n].update(ticks=0) for n in rec["procs"]]
+        run = dict(name="idle", arm="candidate", samples=self.write(samples(edit=idle)),
+                   window_mode="fixed", anchor_start_ns=105 * MS,
+                   anchor_end_ns=505 * MS, expect=EXPECT)
+        r = cpuwin.analyze_run(run)
+        self.assertIsNone(r["intervals"])
+        self.assertNotIn("per_frame_us", r)
+        self.assertEqual(r["cpu_ms_per_s"], (0, 100))
+        run["start_frame"] = 0
+        with self.assertRaisesRegex(cpuwin.Refused, "frame denominators"):
+            cpuwin.analyze_run(run)
+
+    def test_fixed_window_preserves_identity_and_coverage_refusals(self):
+        run = dict(name="idle", arm="candidate", samples=self.write(samples()),
+                   window_mode="fixed", anchor_start_ns=105 * MS,
+                   anchor_end_ns=505 * MS, expect=EXPECT)
+        r = cpuwin.analyze_run(run)
+        self.assertEqual(r["cpu_ms_per_s"], (1375, 1625))
+        run["anchor_end_ns"] = 705 * MS
+        with self.assertRaisesRegex(cpuwin.Refused, "after the end anchor"):
+            cpuwin.analyze_run(run)
+        run["anchor_end_ns"] = 505 * MS
+        run["expect"] = {**EXPECT, "peer": {"pid": 13}}
+        with self.assertRaisesRegex(cpuwin.Refused, "expected"):
+            cpuwin.analyze_run(run)
+
+    def test_fixed_window_cli_labels_units_and_refuses_mixed_modes(self):
+        run = dict(name="idle", arm="candidate", samples=self.write(samples()),
+                   window_mode="fixed", anchor_start_ns=105 * MS,
+                   anchor_end_ns=505 * MS, expect=EXPECT)
+        plan = os.path.join(self.dir.name, "fixed.json")
+        out = os.path.join(self.dir.name, "report.json")
+        with open(plan, "w") as f:
+            json.dump(dict(runs=[run]), f)
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(cpuwin.cmd_analyze(types.SimpleNamespace(plan=plan, json=out)), 0)
+        self.assertIn("ms/s", stdout.getvalue())
+        self.assertNotIn("us/frame", stdout.getvalue())
+        with open(out) as f:
+            self.assertEqual(json.load(f)["arms"]["candidate"], [1375, 1625])
+        with open(plan, "w") as f:
+            json.dump(dict(runs=[run, dict(run, window_mode="frames")]), f)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cpuwin.cmd_analyze(types.SimpleNamespace(plan=plan, json=None)), 1)
+
     def test_lower_bound_floors_at_zero(self):
         idle = lambda t, rec: [rec["procs"][n].update(ticks=0) for n in rec["procs"]]
         r = self.run_(self.write(samples(edit=idle)))

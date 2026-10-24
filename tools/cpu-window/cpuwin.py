@@ -40,6 +40,9 @@ Plan (JSON):
              "expect": {"session": {"pid": 11, "starttime": 999},
                         "peer": {"pid": 12}}}]}   # starttime optional
 
+For idle workloads, set window_mode to "fixed", omit frame fields, and use
+controller CLOCK_MONOTONIC anchors. Results are CPU ms/s, not CPU/frame.
+
 The intervals are attribution intervals, not confidence intervals. One run is a
 stage observation, never a bound on another run.
 """
@@ -277,9 +280,16 @@ def analyze_run(run, max_gap_ms=None):
     b = anchor(run["anchor_end_ns"], "anchor_end_ns")
     if not a < b:
         raise Refused("anchor_start_ns must precede anchor_end_ns")
-    intervals = run["end_frame"] - run["start_frame"]
-    if intervals <= 0:
-        raise Refused("end_frame must exceed start_frame")
+    mode = run.get("window_mode", "frames")
+    if mode not in ("frames", "fixed"):
+        raise Refused("window_mode must be frames or fixed")
+    intervals = None
+    if mode == "frames":
+        intervals = run["end_frame"] - run["start_frame"]
+        if intervals <= 0:
+            raise Refused("end_frame must exceed start_frame")
+    elif "start_frame" in run or "end_frame" in run:
+        raise Refused("fixed windows must not specify frame denominators")
 
     def last(pred):
         idx = [n for n, r in enumerate(s) if pred(r)]
@@ -336,15 +346,12 @@ def analyze_run(run, max_gap_ms=None):
     brackets = [r["t1"] - r["t0"] for r in span]
     window = b - a
     sampler_cpu = s[l]["self_cpu_ns"] - s[k]["self_cpu_ns"]
-    return dict(
+    result = dict(
         name=run["name"], arm=run["arm"], intervals=intervals,
         window_ns=window, tick_ns=tick, boot_id=header["boot_id"],
         procs={n: dict(pid=header["procs"][n]["pid"], starttime=header["procs"][n]["starttime"],
                        comm=header["procs"][n]["comm"], **per[n]) for n in names},
         lower_ns=lower, upper_ns=upper,
-        per_frame_us=(lower / intervals / 1000, upper / intervals / 1000),
-        per_proc_per_frame_us={n: (p["lower_ns"] / intervals / 1000, p["upper_ns"] / intervals / 1000)
-                               for n, p in per.items()},
         edges_ns=edges, samples_used=(k, i, j, l),
         cadence_ns=dict(nominal=header["interval_ns"], p50=statistics.median(steps), max=max(steps)),
         bracket_ns=dict(p50=statistics.median(brackets), max=max(brackets)),
@@ -353,16 +360,36 @@ def analyze_run(run, max_gap_ms=None):
         late_slots=footer["late_slots"] if footer else None,
         unclean_reads_outside_window=outside,
     )
+    if mode == "frames":
+        result["per_frame_us"] = (lower / intervals / 1000, upper / intervals / 1000)
+        result["per_proc_per_frame_us"] = {
+            n: (p["lower_ns"] / intervals / 1000, p["upper_ns"] / intervals / 1000)
+            for n, p in per.items()}
+    else:
+        # CPU milliseconds per elapsed second; 1000 ms/s is one whole core.
+        result["cpu_ms_per_s"] = (lower / window * 1000, upper / window * 1000)
+        result["per_proc_cpu_ms_per_s"] = {
+            n: (p["lower_ns"] / window * 1000, p["upper_ns"] / window * 1000)
+            for n, p in per.items()}
+    return result
 
 
-def mean_interval(rows):
-    return (statistics.mean(r["per_frame_us"][0] for r in rows),
-            statistics.mean(r["per_frame_us"][1] for r in rows))
+def mean_interval(rows, metric="per_frame_us"):
+    return (statistics.mean(r[metric][0] for r in rows),
+            statistics.mean(r[metric][1] for r in rows))
 
 
 def cmd_analyze(args):
     with open(args.plan) as f:
         plan = json.load(f)
+    modes = {run.get("window_mode", "frames") for run in plan["runs"]}
+    if len(modes) != 1 or not modes <= {"frames", "fixed"}:
+        print("REFUSED: compare only one window_mode per plan")
+        return 1
+    fixed = modes == {"fixed"}
+    metric = "cpu_ms_per_s" if fixed else "per_frame_us"
+    per_proc_metric = "per_proc_cpu_ms_per_s" if fixed else "per_proc_per_frame_us"
+    units = "ms/s" if fixed else "us/frame"
     results, refused = [], []
     for run in plan["runs"]:
         try:
@@ -372,7 +399,7 @@ def cmd_analyze(args):
     arms = {}
     for r in results:
         arms.setdefault(r["arm"], []).append(r)
-    summary = {arm: mean_interval(rows) for arm, rows in arms.items()}
+    summary = {arm: mean_interval(rows, metric) for arm, rows in arms.items()}
     diffs = {}
     base = plan.get("baseline")
     if base in summary:
@@ -381,20 +408,22 @@ def cmd_analyze(args):
             if arm != base:
                 diffs[f"{arm}-{base}"] = (lo - bu, hi - bl)
 
-    print("run      arm      order  CPU/frame us [lower, upper]  per process [lower, upper]")
+    heading = "CPU ms/s" if fixed else "CPU/frame us"
+    print(f"run      arm      order  {heading} [lower, upper]  per process [lower, upper]")
     for n, run in enumerate(plan["runs"]):
         r = next((x for x in results if x["name"] == run["name"]), None)
         if r is None:
             why = next(x["reason"] for x in refused if x["name"] == run["name"])
             print(f"{run['name']:<8} {run['arm']:<8} {n:<6} REFUSED: {why}")
             continue
-        lo, hi = r["per_frame_us"]
-        procs = "  ".join(f"{p}=[{a:.1f}, {b:.1f}]" for p, (a, b) in r["per_proc_per_frame_us"].items())
+        lo, hi = r[metric]
+        procs = "  ".join(f"{p}=[{a:.1f}, {b:.1f}]" for p, (a, b) in r[per_proc_metric].items())
         print(f"{r['name']:<8} {r['arm']:<8} {n:<6} [{lo:.1f}, {hi:.1f}]{'':<14} {procs}")
     print()
     for r in results:
         e = r["edges_ns"]
-        print(f"{r['name']}: {r['intervals']} intervals over {r['window_ns'] / 1e9:.3f} s; "
+        scope = "fixed window" if fixed else f"{r['intervals']} intervals"
+        print(f"{r['name']}: {scope} over {r['window_ns'] / 1e9:.3f} s; "
               f"cadence p50/max {r['cadence_ns']['p50'] / 1e6:.2f}/{r['cadence_ns']['max'] / 1e6:.2f} ms "
               f"(nominal {r['cadence_ns']['nominal'] / 1e6:.2f}); bracket p50/max "
               f"{r['bracket_ns']['p50'] / 1e3:.0f}/{r['bracket_ns']['max'] / 1e3:.0f} us; "
@@ -404,9 +433,9 @@ def cmd_analyze(args):
               f"footer {r['footer']}; late slots {r['late_slots']}; unclean reads outside window {r['unclean_reads_outside_window']}")
     print()
     for arm, (lo, hi) in summary.items():
-        print(f"arm {arm}: mean over {len(arms[arm])} runs [{lo:.1f}, {hi:.1f}] us/frame")
+        print(f"arm {arm}: mean over {len(arms[arm])} runs [{lo:.1f}, {hi:.1f}] {units}")
     for k, (lo, hi) in diffs.items():
-        print(f"{k}: [{lo:.1f}, {hi:.1f}] us/frame (interval of the difference of run means)")
+        print(f"{k}: [{lo:.1f}, {hi:.1f}] {units} (interval of the difference of run means)")
     tick_ms = results[0]["tick_ns"] / 1e6 if results else 0
     print(f"Ticks are {tick_ms:.0f} ms; each process adds 4 ticks of width to its interval. "
           "Attribution intervals, not confidence intervals; stage observations, not bounds on other runs.")

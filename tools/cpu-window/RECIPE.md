@@ -3,7 +3,7 @@
 Files (job tmp source only):
 
 - `cpuwin.py`: the sampler and analyzer, stdlib Python 3.
-- `test_cpuwin.py`: 41 synthetic tests. Run `python3 -I -W error test_cpuwin.py`.
+- `test_cpuwin.py`: 44 synthetic tests. Run `python3 -I -W error test_cpuwin.py`.
 
 ## Sampler CLI
 
@@ -226,3 +226,41 @@ sampling and kernel-completion joins, but are deliberately refused by
 timing, and may run under perf. Their CPU totals are diagnostic, not an
 uninstrumented comparison or promotion result. Preserve these runs separately
 from the frozen R/G packages.
+
+## Fixed-time idle and sparse-work windows
+
+For clients that may produce zero frames, add `"window_mode": "fixed"` to each
+run and omit `start_frame` and `end_frame`. Supply observed CLOCK_MONOTONIC
+`anchor_start_ns` / `anchor_end_ns` from the controller, not fabricated frame
+numbers. Sampling, identity checks, edge coverage and tick bounds are unchanged.
+The report contains `cpu_ms_per_s` and `per_proc_cpu_ms_per_s`; 1000 ms/s is one
+whole core. It contains no per-frame figures. One comparison plan must use a
+single window mode. Existing plans default to `frames`.
+
+For the shell-client wait experiment, use a 10 s warm-up followed by a fixed
+60 s window. Keep sampling past the end so the outer bounding sample exists.
+Record both client and Session PID/starttime identities before starting the
+sampler. Run baseline/candidate/candidate/baseline for each workload, with the
+same diagnostic settings and active output mode. The two workloads are a static
+panel without a clock and a panel whose clock visibly changes once per second.
+The dock remains present in both. Do not synthesize presentation work to keep an
+idle sampler alive.
+
+For an exact old-release comparison, keep `SOPHIA_SHELL_WORK_STATS` unset in both
+CPU arms. Collect candidate work counters in separate diagnostic runs with
+`SOPHIA_SHELL_WORK_STATS=1`; those CPU figures are not part of the comparison.
+This avoids changing a baseline SDK whose wait API discards the poll result.
+Retain periodic records plus the `final=1` exit record. Each record's counters are
+cumulative, not per-interval. Difference observed records only, using their own
+`monotonic_usec` boundaries; do not interpolate them onto the exact CPU window.
+Reject a counter regression, a missing final record, or a client/process mix-up.
+Record renders, uploads, uploaded bytes and raster reuses alongside service turns
+and wait expirations. Native composition/commit counters and cleanup receipts
+remain separate required evidence; a lower client wake count alone is not a
+whole-desktop CPU result. Diagnostic emission itself wakes once every five
+seconds.
+
+Pin source, binary, configuration, helper hashes and file modes before launch. No
+old frozen package is reusable after a binary or helper changes. A native run
+still needs its attended VT/PAM/cleanup wrapper; this offline analyzer does not
+launch a Session or prove safe teardown.
