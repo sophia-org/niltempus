@@ -432,6 +432,12 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
         if !metadata.is_file() || (executable && metadata.permissions().mode() & 0o111 == 0) {
             return Err(format!("invalid {key} artifact"));
         }
+        // Sophia refuses group/other-writable configuration at startup; refuse
+        // it here instead of after an attended launch. Owner is not checked:
+        // check-only also runs as root over the session user's files.
+        if !executable && metadata.mode() & 0o022 != 0 {
+            return Err(format!("{key} must not be group/other-writable"));
+        }
         if executable {
             if file_digest(&artifact.path, 1024 * MAX_INPUT)? != artifact.sha256 {
                 return Err(format!("{key} artifact changed"));

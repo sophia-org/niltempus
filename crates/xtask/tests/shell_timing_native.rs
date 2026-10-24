@@ -1215,3 +1215,15 @@ fn prepared_reference_arms_use_reference_decoder_through_reverification() {
         );
     }
 }
+
+#[test]
+fn configuration_artifacts_must_not_be_group_or_other_writable() {
+    let f = Fixture::new("config-mode", "files");
+    for key in ["core", "profile", "peer-config"] {
+        let path = &f.request.artifacts[key].path;
+        for (mode, accepted) in [(0o664, false), (0o646, false), (0o644, true), (0o600, true)] {
+            fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+            assert_eq!(validate(&f.request).is_ok(), accepted, "{key} {mode:o}");
+        }
+    }
+}
