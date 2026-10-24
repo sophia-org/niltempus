@@ -78,6 +78,12 @@ pub struct Request {
     /// it. Frozen into the plan like every other request field.
     #[serde(default, skip_serializing_if = "ProducerKind::is_cpu")]
     pub producer: ProducerKind,
+    /// Diagnostic only: Sophia reuses its managed capture destination.
+    /// Valid solely for a capture-profile DMA plan whose peer also
+    /// reuses its source (`dma_reuse`). Absent/false keeps every
+    /// historical request, plan and argv byte-identical.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub managed_destination_reuse: bool,
 }
 
 /// Who renders the peer's pixels.
@@ -418,6 +424,11 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
     {
         return Err("capture profiling requires a bounded observed GPU R/G plan".into());
     }
+    if request.managed_destination_reuse
+        && (request.instrumentation != "capture-profile" || request.source != ImageSource::DmaBuf)
+    {
+        return Err("managed destination reuse requires a capture-profile dma_buf plan".into());
+    }
     let mut texts = BTreeMap::new();
     for (key, artifact) in &request.artifacts {
         absolute(&artifact.path)?;
@@ -468,6 +479,9 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
             || (peer.capture_profile && peer.height != 24)
         {
             return Err("capture profiling requires matching explicit GPU R/G peer diagnostics at height 24".into());
+        }
+        if request.managed_destination_reuse && peer.dma_reuse != Some(true) {
+            return Err("managed destination reuse requires peer dma_reuse".into());
         }
         external::validate(request, &peer)?;
         if peer.wire != request.wire
@@ -586,6 +600,9 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
     ];
     if request.environment_readback {
         argv.push("--output-environment-readback".into());
+    }
+    if request.managed_destination_reuse {
+        argv.push("--experimental-shell-capture-destination-reuse".into());
     }
     Ok(argv)
 }

@@ -233,6 +233,7 @@ impl World {
             external_timing: None,
             reference_workload: None,
             producer: Default::default(),
+            managed_destination_reuse: false,
             frames: shape.frames,
             mode_millihz: 120_000,
             instrumentation: shape.instrumentation.into(),

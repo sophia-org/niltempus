@@ -54,6 +54,7 @@ fn fixture() -> (Descriptor, Request) {
             external_timing: None,
             reference_workload: None,
             producer: Default::default(),
+            managed_destination_reuse: false,
         },
     )
 }

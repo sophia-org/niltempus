@@ -37,6 +37,7 @@ impl Fixture {
                 external_timing: None,
                 reference_workload: None,
                 producer: xtask::shell_timing_native::ProducerKind::Cpu,
+                managed_destination_reuse: false,
             },
         };
         // These fixtures are hashed only. None may be executed by validation.
@@ -279,6 +280,86 @@ fn dma_reuse_is_an_explicit_dma_only_diagnostic() {
     );
     config.as_object_mut().unwrap().remove("dma_reuse");
     f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_ok());
+}
+
+#[test]
+fn managed_destination_reuse_is_an_explicit_capture_profile_dma_argument() {
+    use xtask::shell_timing::ImageSource;
+    use xtask::shell_timing_native::ProducerKind;
+    const FLAG: &str = "--experimental-shell-capture-destination-reuse";
+    let mut f = Fixture::new("destination-reuse", "files");
+    f.request.source = ImageSource::DmaBuf;
+    f.request.producer = ProducerKind::Gpu;
+    f.request.frames = 2120;
+    f.request.environment_readback = true;
+    f.request.instrumentation = "capture-profile".into();
+    let profile = fs::read_to_string(&f.request.artifacts["profile"].path).unwrap();
+    f.put(
+        "profile",
+        profile
+            .replace("gpu \"denied\"", "gpu \"direct\"")
+            .as_bytes(),
+        false,
+    );
+    let mut config = serde_json::json!({"wire":"files","source":"dma_buf","output":1,
+        "frames":2120,"height":24,"hold_msec":60000,"capture_profile":true,"dma_reuse":true});
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    let source_only = validate(&f.request).unwrap();
+    assert!(!source_only.iter().any(|arg| arg == FLAG));
+    let json = serde_json::to_value(&f.request).unwrap();
+    assert!(json.get("managed_destination_reuse").is_none());
+    f.request.managed_destination_reuse = true;
+    let both = validate(&f.request).unwrap();
+    assert_eq!(&both[..source_only.len()], source_only);
+    assert_eq!(both.last().unwrap(), FLAG);
+    let json = serde_json::to_value(&f.request).unwrap();
+    assert_eq!(json["managed_destination_reuse"], true);
+    let legacy: Request = serde_json::from_value(serde_json::json!({
+        "sophia_source": json["sophia_source"], "integration_source": json["integration_source"],
+        "artifacts": json["artifacts"], "tty": "/dev/tty4", "display": 94, "input_seat": "seat0",
+        "runtime_ms": 60000, "wire": "files", "output": 1, "frames": 3, "mode_millihz": 60000,
+        "instrumentation": "none"
+    }))
+    .unwrap();
+    assert!(!legacy.managed_destination_reuse);
+    for value in [false.into(), serde_json::Value::Null] {
+        config["dma_reuse"] = value;
+        f.put("peer-config", config.to_string().as_bytes(), false);
+        assert!(
+            validate(&f.request).is_err(),
+            "destination reuse without source reuse"
+        );
+    }
+    config.as_object_mut().unwrap().remove("dma_reuse");
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_err());
+    config["dma_reuse"] = true.into();
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_ok());
+    f.request.instrumentation = "none".into();
+    config["capture_profile"] = false.into();
+    config["dma_reuse"] = false.into();
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(
+        validate(&f.request).is_err(),
+        "reuse escaped diagnostic mode"
+    );
+    f.request.managed_destination_reuse = false;
+    assert!(validate(&f.request).is_ok());
+    f.request.managed_destination_reuse = true;
+    f.request.instrumentation = "capture-profile".into();
+    f.request.source = ImageSource::OwnedRing;
+    config["source"] = "owned_ring".into();
+    config["ring_slots"] = 2.into();
+    config["capture_profile"] = true.into();
+    config.as_object_mut().unwrap().remove("dma_reuse");
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(
+        validate(&f.request).is_err(),
+        "ring accepted destination reuse"
+    );
+    f.request.managed_destination_reuse = false;
     assert!(validate(&f.request).is_ok());
 }
 
