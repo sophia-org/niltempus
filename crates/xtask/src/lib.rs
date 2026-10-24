@@ -45,6 +45,7 @@ pub mod shell_timing_load_qualify;
 pub mod shell_timing_native;
 pub mod shell_timing_panel_diagnostic;
 pub mod shell_timing_process_binding;
+pub mod shell_timing_process_set;
 pub mod verify_archives;
 
 pub(crate) fn hex(value: &str, length: usize) -> bool {

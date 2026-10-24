@@ -23,6 +23,90 @@ const NS: u64 = INITIAL_TIME_NAMESPACE_INODE;
 const OFFSETS: &str = "monotonic 0 0\nboottime 0 0\n";
 const HOST_ARGS: [&str; 3] = ["session", "run", "--display=:94"];
 
+#[test]
+fn environment_collector_refuses_bad_bounds_before_binding() {
+    use xtask::shell_timing_process_set::receive_environment;
+    for args in [
+        vec![],
+        vec!["/does/not/exist/environment.sock", "0"],
+        vec!["/does/not/exist/environment.sock", "180001"],
+        vec!["/does/not/exist/environment.sock", "no"],
+    ] {
+        let error = receive_environment(&args.into_iter().map(str::to_owned).collect::<Vec<_>>())
+            .unwrap_err();
+        assert!(
+            error.contains("duration") || error.contains("usage"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn process_set_binds_both_peers_and_refuses_duplicate_or_replaced_identities() {
+    use xtask::shell_timing_process_set::{Request, resolve};
+    let fx = fixture();
+    let second = fx.root.join("bin/second-peer");
+    write(&second, "second executable\n");
+    let mut request = Request {
+        wrapper_pid: WRAPPER,
+        wrapper_start_time_ticks: 1000,
+        host: fx.host_file.clone(),
+        host_argv: fx.host_argv.clone(),
+        supervisor: fx.supervisor_file.clone(),
+        peers: [
+            ("first".into(), fx.peer_file.clone()),
+            ("second".into(), second.clone()),
+        ]
+        .into_iter()
+        .collect(),
+    };
+    assert!(resolve(&request, &fx.binder).unwrap().is_none());
+    fx.set_children(HOST, &[SUPERVISOR, 251]);
+    fx.process(251, HOST, 2510, Some(&fx.supervisor_file), &[301]);
+    fx.process(301, 251, 3010, Some(&second), &[]);
+    let set = resolve(&request, &fx.binder).unwrap().unwrap();
+    assert_eq!(set["first"].peer.pid, PEER);
+    assert_eq!(set["second"].peer.pid, 301);
+    assert_eq!(set["first"].host, set["second"].host);
+    assert_eq!(set["first"].time.reference.inode, NS);
+    request.peers.insert("second".into(), fx.peer_file.clone());
+    assert!(resolve(&request, &fx.binder).is_err());
+    request.peers.insert("second".into(), second);
+    request.wrapper_start_time_ticks += 1;
+    assert!(resolve(&request, &fx.binder).is_err());
+    request.wrapper_start_time_ticks -= 1;
+    fx.set_ns(301, NS + 1);
+    assert!(resolve(&request, &fx.binder).is_err());
+}
+
+#[test]
+fn process_set_requires_named_absolute_inputs() {
+    use xtask::shell_timing_process_set::{Request, resolve};
+    let fx = fixture();
+    let mut request = Request {
+        wrapper_pid: WRAPPER,
+        wrapper_start_time_ticks: 1000,
+        host: fx.host_file.clone(),
+        host_argv: fx.host_argv.clone(),
+        supervisor: fx.supervisor_file.clone(),
+        peers: Default::default(),
+    };
+    assert!(resolve(&request, &fx.binder).is_err());
+    request.peers.insert("session".into(), fx.peer_file.clone());
+    assert!(resolve(&request, &fx.binder).is_err());
+    request.peers.clear();
+    request.peers.insert("peer".into(), "relative".into());
+    assert!(resolve(&request, &fx.binder).is_err());
+    request.peers.insert("peer".into(), fx.peer_file.clone());
+    request.host_argv[0] = "/different/host".into();
+    assert!(resolve(&request, &fx.binder).is_err());
+    request.host_argv = fx.host_argv.clone();
+    assert!(resolve(&request, &fx.binder).unwrap().is_some());
+    fx.set_children(HOST, &[PEER]);
+    fx.process(PEER, HOST, 3000, Some(&fx.peer_file), &[]);
+    assert!(resolve(&request, &fx.binder).is_err());
+}
+
 static NEXT_ROOT: AtomicU64 = AtomicU64::new(0);
 
 struct Fixture {
