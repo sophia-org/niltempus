@@ -41,7 +41,7 @@ CLIENTS = REPO / 'tools/external-bar/build'
 SCHEMA = 1
 RIG_OTHER_OUTPUTS = ['HDMI-A-1', 'HDMI-A-2', 'DP-2', 'DP-3', 'DP-4', 'DP-5', 'DP-6',
                      'Writeback-1', 'Writeback-2']
-NATIVE_SOURCES = {'niri': {'wp_presentation'}, 'xlibre': {'xpresent'}}
+NATIVE_SOURCES = {'niri': {'wp_presentation'}, 'xlibre': {'xpresent', 'xpresent_late'}}
 CLIENT_ARM = {'niri': 'wl-panel', 'xlibre': 'x-panel'}
 # The one compared recipe, as both clients write it in their journal header.
 RECIPE = dict(width='1920', height='24', buffers='2', fill='shade_mod128_a255', frames='2001', warmup='119',
@@ -569,18 +569,21 @@ def cmd_import_sophia(args):
 
 
 def parse_journal(path):
-    header, rows = None, []
+    header, rows, check = None, [], {}
     for line in Path(path).read_text().splitlines():
         if line.startswith('# header '):
             fields, _, note = line[9:].partition(' presented_clock=')
             header = dict(kv.split('=', 1) for kv in fields.split())
             header['presented_clock'] = note
+        elif line.startswith('# presented_clock_check '):
+            check = dict(kv.split('=', 1) for kv in line[24:].split())
         elif line and not line.startswith('#'):
             frame, fill, submit, presented, pace, source = line.split('\t')
             rows.append(dict(frame=int(frame), fill=int(fill), submit=int(submit),
                              presented=int(presented), source=source))
     if header is None:
         raise Refused(f'{path}: no journal header')
+    header['clock_check'] = check
     return header, rows
 
 
@@ -623,10 +626,12 @@ def niri_output_problems(record, receipt):
     return problems
 
 
-def x_output_problems(record, receipt):
+def x_output_problems(record, receipt, late_max_ns=0):
     """xrandr --verbose readback: the requested output's current mode and
-    vertical clock, and no other active output."""
+    vertical clock, no other active output, and Present timestamps after
+    their receipt by no more than that mode's vblank."""
     problems, output, current, vclock, active = [], None, False, None, []
+    hclock = vblank_lines = None
     for line in receipt.read_text().splitlines():
         if line and not line[0].isspace():
             fields = line.split()
@@ -637,13 +642,19 @@ def x_output_problems(record, receipt):
         elif output == record['output'] and line.startswith('  ') and not line.startswith('    '):
             fields = line.split()
             current = '*current' in fields and fields[0] == record['mode_size']
+        elif output == record['output'] and current and line.strip().startswith('h:') and 'clock' in line:
+            hclock = float(line.split('clock')[1].strip().removesuffix('KHz')) * 1e3
         elif output == record['output'] and current and line.strip().startswith('v:') and 'clock' in line:
             vclock = float(line.split('clock')[1].strip().removesuffix('Hz'))
+            fields = line.split()
+            vblank_lines = int(fields[fields.index('total') + 1]) - int(fields[fields.index('height') + 1])
     if vclock is None:
         problems.append(f'{record["output"]} has no current {record["mode_size"]} mode')
     elif not close(vclock, float(record['rate']), 0.0005):
         problems.append(f'{record["output"]} vertical clock {vclock} Hz')
     problems += [f'{name} is active' for name in active if name != record['output']]
+    if late_max_ns and not (hclock and vblank_lines and late_max_ns <= vblank_lines / hclock * 1e9):
+        problems.append(f'Present ust up to {late_max_ns} ns after receipt, beyond the mode\'s vblank')
     return problems
 
 
@@ -693,7 +704,14 @@ def plan_run(name, run_dir):
             receipt = run_dir / ('outputs.json' if record['stack'] == 'niri' else 'xrandr.txt')
             if not receipt.exists():
                 raise Refused(f'{run_dir}: no output receipt {receipt.name}')
-            problems = (niri_output_problems if record['stack'] == 'niri' else x_output_problems)(record, receipt)
+            if record['stack'] == 'niri':
+                problems = niri_output_problems(record, receipt)
+            else:
+                check = header['clock_check']  # counts warmup frames too
+                late = sum(r['source'] == 'xpresent_late' for r in rows)
+                if late and not ('late_max_ns' in check and int(check.get('late', 0)) >= late):
+                    raise Refused(f'{run_dir}: {late} late Present rows but clock check {check}')
+                problems = x_output_problems(record, receipt, int(check.get('late_max_ns', 0)))
             if problems:
                 raise Refused(f'{run_dir}: output receipt: {"; ".join(problems)}')
             if record['unbound_start'] or record['unbound_end']:

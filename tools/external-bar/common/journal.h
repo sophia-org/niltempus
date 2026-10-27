@@ -36,8 +36,11 @@
  *   xpresent          Present COMPLETE_NOTIFY ust (server clock, usec) * 1000;
  *                     the X server reports CLOCK_MONOTONIC usec on DRM
  *                     backends; account.py checks submit <= ust <= receipt
+ *   xpresent_late     that ust when it is after the client's receipt (DRM
+ *                     stamps the end of vblank; the completion may arrive
+ *                     inside vblank); the footer gives the largest excess
  *   xpresent_recv     client receipt time of that COMPLETE_NOTIFY (fallback
- *                     when the ust check fails)
+ *                     when the ust precedes submit)
  *   shm_completion    client receipt time of ShmCompletion (server copy done,
  *                     not a scanout time)
  * No conversion between clocks happens anywhere; if a platform ever needs
@@ -51,7 +54,7 @@
  *   # rusage utime_ns=.. stime_ns=.. minflt=.. majflt=..
  *   # ctxsw voluntary=.. involuntary=..        (client getrusage)
  *   # pid <client pid>
- *   # presented_clock_check ok=N violations=M   (X only)
+ *   # presented_clock_check ok=N violations=M late=L late_max_ns=E   (X only)
  */
 #ifndef EXTERNAL_BAR_JOURNAL_H
 #define EXTERNAL_BAR_JOURNAL_H

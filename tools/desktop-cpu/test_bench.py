@@ -229,6 +229,25 @@ class Report(unittest.TestCase):
         path.write_text(XRANDR.replace('HDMI-A-1 disconnected', 'HDMI-A-1 connected 1920x1080+1920+0'))
         self.assertEqual(bench.x_output_problems(record, path), ['HDMI-A-1 is active'])
 
+    def test_late_present_ust_is_bounded_by_the_receipt_modes_vblank(self):
+        def late(name, footer):
+            d = run_dir(self.root, name, stack='xlibre', source='xpresent_late')
+            with (d / 'journal.tsv').open('a') as f:
+                f.write(footer)
+            return d
+        # The fixture's current mode blanks 1144 - 1080 lines at 137.26 kHz: 466 us.
+        _, stats = bench.plan_run('ok', late('ok', '# presented_clock_check ok=0 violations=0 late=2120 late_max_ns=466000\n'))
+        self.assertEqual(stats['evidence'], 'native')
+        cases = {
+            'beyond': '# presented_clock_check ok=0 violations=0 late=2120 late_max_ns=467000\n',
+            'nofooter': '',
+            'oldfooter': '# presented_clock_check ok=0 violations=2120\n',
+            'undercount': '# presented_clock_check ok=0 violations=0 late=7 late_max_ns=1000\n',
+        }
+        for name, footer in cases.items():
+            with self.assertRaises(bench.Refused, msg=name):
+                bench.plan_run(name, late(name, footer))
+
     def test_x_outputs_are_the_servers_own_names(self):
         rig = XRANDR.replace('HDMI-A-1 disconnected', 'HDMI-1 connected') + 'DP-2 disconnected (normal)\n'
         self.assertEqual(bench.x_outputs(rig), ['DP-1', 'HDMI-1', 'DP-2'])

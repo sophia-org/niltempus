@@ -90,7 +90,7 @@ struct ctx {
     struct sysv bulk_shm;
     struct back *backs;
     unsigned nbacks;
-    uint64_t clock_ok, clock_bad;
+    uint64_t clock_ok, clock_bad, clock_late, clock_late_max_ns;
 };
 
 static void die(const char *what) {
@@ -228,6 +228,16 @@ static int64_t present_and_wait(struct ctx *c, struct back *b, uint32_t serial,
     if (c->complete_ust_ns >= submit && c->complete_ust_ns <= c->complete_recv_ns) {
         c->clock_ok++;
         *source = "xpresent";
+        return (int64_t)c->complete_ust_ns;
+    }
+    /* A DRM vblank timestamp is the end of vblank, so a completion sent
+     * within vblank can be received before it; the excess is recorded and
+     * bounded by the consumer against the mode's vblank length. */
+    if (c->complete_ust_ns > c->complete_recv_ns) {
+        uint64_t late = c->complete_ust_ns - c->complete_recv_ns;
+        c->clock_late++;
+        if (late > c->clock_late_max_ns) c->clock_late_max_ns = late;
+        *source = "xpresent_late";
         return (int64_t)c->complete_ust_ns;
     }
     c->clock_bad++;
@@ -487,8 +497,9 @@ int main(int argc, char **argv) {
     }
 
     journal_footer_rusage(j);
-    fprintf(j, "# presented_clock_check ok=%llu violations=%llu\n",
-            (unsigned long long)c.clock_ok, (unsigned long long)c.clock_bad);
+    fprintf(j, "# presented_clock_check ok=%llu violations=%llu late=%llu late_max_ns=%llu\n",
+            (unsigned long long)c.clock_ok, (unsigned long long)c.clock_bad,
+            (unsigned long long)c.clock_late, (unsigned long long)c.clock_late_max_ns);
     fclose(j);
 
     for (unsigned i = 0; i < nbacks; i++) {

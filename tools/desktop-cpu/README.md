@@ -21,9 +21,14 @@ clients (`tools/external-bar`) and the Sophia shell-timing evidence as they are.
   - Sophia: kernel page-flip completion (`native-samples.json`).
   - niri: `wp_presentation` feedback.
   - XLibre: Present COMPLETE_NOTIFY UST, only when the client checked
-    `submit <= ust <= receipt`. The panel is an override-redirect strip, so
-    Present completes in COPY mode at vblank; that is not a kernel scanout
-    completion like Sophia's flip and is reported as such.
+    `submit <= ust`. The UST is the DRM vblank timestamp, which marks the end
+    of vblank, so a completion sent within vblank can reach the client before
+    it (`xpresent_late`). A native row accepts that only when the largest
+    excess, from the journal footer and counting warmup, is within the
+    receipt mode's vblank (`(v total - v height) / h clock`; 334 us for DP-1
+    here). The panel is an override-redirect strip, so Present completes in
+    COPY mode at vblank; that is not a kernel scanout completion like
+    Sophia's flip and is reported as such.
 
 ## CPU set
 
@@ -121,7 +126,8 @@ Native defaults:
   sampler stopped with 0, no teardown errors. A full journal alone is not
   enough.
 - Every counted frame presented. Native rows require scanout-time sources:
-  `wp_presentation`, or a validated `xpresent` UST.
+  `wp_presentation`, or a validated `xpresent` / `xpresent_late` UST, never
+  the client's receipt time (`xpresent_recv`).
 - Presentation times strictly increase. In a native row every counted
   interval is one refresh of the observed mode: no gap over 1.5 nominal
   periods, and the median rate within 0.5% of it. A half-rate run is refused,
