@@ -4,9 +4,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unittest
 
@@ -19,11 +21,10 @@ PERIOD = 8_341_666                    # 119.88 Hz
 WARMUP, FRAMES = 119, 2001
 
 
-def journal(path, frames=FRAMES, source='wp_presentation', missing=None):
-    lines = [f'# header arm=wl-panel width=1920 height=24 buffers=2 fill=shade_mod128_a255 frames={frames} '
-             f'warmup={WARMUP} bulk=0 bulk_width=0 bulk_height=0 lifecycle=reuse workload=fresh tiles=0 '
-             'interval_ms=0 damage=full idle_sec=0 clock=CLOCK_MONOTONIC_ns presented_clock=as_is']
-    for k in range(1, frames + 1):
+def journal(path, arm='wl-panel', source='wp_presentation', missing=None, header=None):
+    fields = dict(bench.RECIPE, **(header or {}))
+    lines = [f'# header arm={arm} ' + ' '.join(f'{k}={v}' for k, v in fields.items()) + ' presented_clock=as_is']
+    for k in range(1, FRAMES + 1):
         presented = START + (k - 1) * PERIOD
         submit = presented - 7 * MS
         lines.append(f'{k}\t{submit - 100}\t{submit}\t{-1 if k == missing else presented}\t-1\t{source}')
@@ -50,11 +51,14 @@ def run_dir(root, name, stack='niri', mode='native', **over):
     d.mkdir()
     procs = {'server': 101, 'client': 102}
     end = START + (FRAMES - 1) * PERIOD
-    journal(d / 'journal.tsv', source=over.pop('source', 'wp_presentation' if stack == 'niri' else 'xpresent'),
-            missing=over.pop('missing', None))
+    journal(d / 'journal.tsv', arm=bench.CLIENT_ARM[stack],
+            source=over.pop('source', 'wp_presentation' if stack == 'niri' else 'xpresent'),
+            missing=over.pop('missing', None), header=over.pop('header', None))
     samples(d / 'cpu-window.jsonl', procs, end)
     record = dict(schema=1, stack=stack, mode=mode, evidence='native' if mode == 'native' else 'diagnostic',
-                  output='DP-1', mode_size='1920x1080', rate='119.880', unbound_start={}, unbound_end={},
+                  recipe=bench.RECIPE, output='DP-1', mode_size='1920x1080', rate='119.880',
+                  unbound_start={}, unbound_end={}, finished=True, client_status=0, sampler_status=0,
+                  client_exit_stop_ns=START + 2001 * PERIOD, teardown_errors=[],
                   expect={n: dict(pid=p, starttime=p * 10) for n, p in procs.items()})
     record.update(over)
     (d / 'run.json').write_text(json.dumps(record))
@@ -71,6 +75,41 @@ NIRI_OUTPUTS = {
                         dict(width=1920, height=1080, refresh_rate=119880)]),
     'HDMI-A-1': dict(current_mode=None, vrr_enabled=False, modes=[]),
 }
+
+
+def sophia_run(root, instrumentation='capture-profile'):
+    """A shell-timing run directory as sophia_window reads it (shapes from
+    continuous-thin-lto-01 r120b1)."""
+    src = root / 'sophia'
+    src.mkdir()
+    samples(src / 'cpu-window.jsonl', {'session': 201, 'peer': 202}, START + 2000 * PERIOD)
+    gens = []
+    for g in range(1, 2121):
+        done = (START + (g - 120) * PERIOD) // 1000
+        gens.append(dict(candidate_generation=g, completed_monotonic_usec=done, submitted_monotonic_usec=done - 7500,
+                         latency_usec=7500, output=1, heads=1))
+    files = {
+        'cpu-binding.json': dict(host=dict(pid=201, start_time_ticks=2010), peer=dict(pid=202, start_time_ticks=2020)),
+        'native-samples.json': dict(schema=2, verdict='joined_only', offered=2120, samples=gens,
+                                    instrumentation=instrumentation,
+                                    journal=dict(offers=[dict(outcome='presented')] * 2120)),
+        'postflight.json': dict(schema=1, status='passed', failures=[],
+                                observed=dict(connector='DP-1', actual_refresh_millihz=119880)),
+        'result.json': dict(schema=1, status='captured_only', error=None),
+        'plan.json': dict(request=dict(source='owned_ring', frames=2120, instrumentation=instrumentation,
+                                       artifacts={})),
+        'panel-diagnostic.json': dict(bar_height=24, warmup=120, counted=2000,
+                                      target=dict(connector='DP-1', width=1920, height=1080, vrr=False)),
+    }
+    for name, value in files.items():
+        (src / name).write_text(json.dumps(value))
+    return src
+
+
+def edit_json(path, change):
+    value = json.loads(path.read_text())
+    change(value)
+    path.write_text(json.dumps(value))
 XRANDR = '''Screen 0: minimum 320 x 200, current 1920 x 1080, maximum 16384 x 16384
 DP-1 connected primary 1920x1080+0+0 (0x4c) normal (normal left inverted right x axis y axis) 600mm x 340mm
   1920x1080 (0x4b) 148.500MHz +HSync +VSync
@@ -111,6 +150,59 @@ class Report(unittest.TestCase):
         with self.assertRaises(bench.Refused):
             bench.plan_run('noreceipt', d)
 
+    def test_a_full_journal_needs_a_cleanly_finished_run(self):
+        cases = {
+            'failedclient': dict(client_status=1),
+            'timeout': dict(client_status=None),
+            'sampler': dict(sampler_status=1),
+            'noexitstop': dict(client_exit_stop_ns=None),
+            'unfinished': dict(finished=None, error="Refused('x')"),
+            'teardown': dict(teardown_errors=['client: Refused()']),
+        }
+        for name, over in cases.items():
+            for mode in ('native', 'smoke'):
+                with self.assertRaises(bench.Refused, msg=(name, mode)):
+                    bench.plan_run(name, run_dir(self.root, f'{name}-{mode}', mode=mode, **over))
+
+    def test_only_the_pinned_recipe_is_accepted(self):
+        cases = {
+            'lifecycle': dict(header=dict(lifecycle='fresh')),
+            'warmup': dict(header=dict(warmup='20')),
+            'buffers': dict(header=dict(buffers='3')),
+            'fill': dict(header=dict(fill='solid')),
+            'damage': dict(header=dict(damage='tile')),
+            'bulk': dict(header=dict(bulk='1')),
+            'record': dict(recipe=dict(bench.RECIPE, lifecycle='fresh')),
+        }
+        for name, over in cases.items():
+            for mode in ('native', 'smoke'):
+                with self.assertRaises(bench.Refused, msg=(name, mode)):
+                    bench.plan_run(name, run_dir(self.root, f'{name}-{mode}', mode=mode, **over))
+        d = run_dir(self.root, 'arm', stack='xlibre')
+        (d / 'journal.tsv').write_text((d / 'journal.tsv').read_text().replace('arm=x-panel', 'arm=wl-panel'))
+        with self.assertRaises(bench.Refused):
+            bench.plan_run('arm', d)
+
+    def test_native_cadence_is_one_refresh_of_the_observed_mode_per_interval(self):
+        def retime(d, at):
+            rows = (d / 'journal.tsv').read_text().splitlines()
+            for i, row in enumerate(rows):
+                if not row.startswith('#'):
+                    f = row.split('\t')
+                    f[3] = str(at(int(f[0])))
+                    rows[i] = '\t'.join(f)
+            (d / 'journal.tsv').write_text('\n'.join(rows) + '\n')
+        half = run_dir(self.root, 'half')  # the receipt says 119.88; every frame took two refreshes
+        retime(half, lambda k: START + (k - 1) * 2 * PERIOD)
+        one = run_dir(self.root, 'one')  # one doubled interval at the right median rate
+        retime(one, lambda k: START + (k - 1) * PERIOD + (PERIOD if k > 1000 else 0))
+        same = run_dir(self.root, 'same', mode='smoke')  # duplicate time, even in a smoke row
+        retime(same, lambda k: START + (k - 1 if k != 7 else k - 2) * PERIOD)
+        for name, d in (('half', half), ('one', one), ('same', same)):
+            with self.assertRaises(bench.Refused, msg=name):
+                bench.plan_run(name, d)
+        _, stats = bench.plan_run('s', run_dir(self.root, 'slow', mode='smoke', rate='60'))
+        self.assertIsNone(stats['nominal_hz'])
     def test_smoke_rows_accept_any_source_but_say_so(self):
         _, stats = bench.plan_run('s', run_dir(self.root, 's', stack='xlibre', mode='smoke', source='xpresent_recv'))
         self.assertEqual(stats['evidence'], 'diagnostic')
@@ -156,6 +248,12 @@ class Report(unittest.TestCase):
         self.assertEqual(report['evidence'], 'diagnostic')
         self.assertEqual(report['differences'], {})
 
+    def test_any_refused_row_withholds_differences(self):
+        status, report = self.report(run_dir(self.root, 'n'), run_dir(self.root, 'x', stack='xlibre'),
+                                     run_dir(self.root, 'bad', mode='smoke', client_status=1))
+        self.assertEqual(status, 1)
+        self.assertEqual((report['evidence'], report['differences']), ('diagnostic', {}))
+
     def test_refresh_mismatch_between_native_rows_is_refused(self):
         a = run_dir(self.root, 'a')
         b = run_dir(self.root, 'b')
@@ -174,29 +272,55 @@ class Report(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn('refresh', report['refused'][0]['reason'])
 
+    def import_(self, src, out, allow=False):
+        return bench.cmd_import_sophia(types.SimpleNamespace(out=self.root / out, run=src, allow_instrumented=allow))
+
     def test_sophia_import_uses_kernel_completions_120_to_2120(self):
-        src = self.root / 'sophia'
-        src.mkdir()
-        samples(src / 'cpu-window.jsonl', {'session': 201, 'peer': 202}, START + 2000 * PERIOD)
-        (src / 'cpu-binding.json').write_text(json.dumps(dict(host=dict(pid=201, start_time_ticks=2010),
-                                                               peer=dict(pid=202, start_time_ticks=2020))))
-        gens = [dict(candidate_generation=g, completed_monotonic_usec=(START + (g - 120) * PERIOD) // 1000,
-                     latency_usec=7500) for g in range(1, 2121)]
-        (src / 'native-samples.json').write_text(json.dumps(dict(offered=2120, samples=gens,
-                                                                  instrumentation='capture-profile')))
-        refused = self.root / 'refused'
-        self.assertEqual(bench.cmd_import_sophia(types.SimpleNamespace(out=refused, run=src,
-                                                                       allow_instrumented=False)), 2)
-        self.assertFalse(refused.exists())
-        out = self.root / 'imported'
-        bench.cmd_import_sophia(types.SimpleNamespace(out=out, run=src, allow_instrumented=True))
-        entry, stats = bench.plan_run('s', out)
+        src = sophia_run(self.root)
+        self.assertEqual(self.import_(src, 'refused'), 2)
+        self.assertFalse((self.root / 'refused').exists())
+        self.assertEqual(self.import_(src, 'imported', allow=True), 0)
+        entry, stats = bench.plan_run('s', self.root / 'imported')
         self.assertEqual(stats['evidence'], 'diagnostic')  # instrumented Sophia is never native evidence
         self.assertEqual((entry['start_frame'], entry['end_frame']), (120, 2120))
+        self.assertEqual((entry['anchor_start_ns'], entry['anchor_end_ns']), (START, START + 2000 * PERIOD))
         self.assertEqual(sorted(entry['expect']), ['peer', 'session'])
-        (src / 'native-samples.json').write_text('{}')
-        with self.assertRaises(bench.Refused):
-            bench.plan_run('s', out)
+        (src / 'native-samples.json').write_text((src / 'native-samples.json').read_text() + ' ')
+        with self.assertRaises(bench.Refused):  # rewritten since import
+            bench.plan_run('s', self.root / 'imported')
+
+    def test_uninstrumented_sophia_is_native(self):
+        self.assertEqual(self.import_(sophia_run(self.root, 'none'), 'imported'), 0)
+        _, stats = bench.plan_run('s', self.root / 'imported')
+        self.assertEqual((stats['evidence'], stats['missed_vblank_gaps'], stats['nominal_hz']), ('native', 0, 119.88))
+
+    def test_sophia_import_refuses_a_failed_or_malformed_run(self):
+        def dup(v):
+            v['samples'][1] = dict(v['samples'][0])
+        def late(v):
+            v['samples'][500]['completed_monotonic_usec'] = v['samples'][499]['completed_monotonic_usec']
+        def join(v):
+            v['samples'][700]['latency_usec'] += 1
+        mutations = {
+            'duplicate generation': ('native-samples.json', dup),
+            'flat completion': ('native-samples.json', late),
+            'latency not a join': ('native-samples.json', join),
+            'second head': ('native-samples.json', lambda v: v['samples'][9].update(heads=2)),
+            'unpresented offer': ('native-samples.json', lambda v: v['journal']['offers'].__setitem__(5, {})),
+            'postflight failed': ('postflight.json', lambda v: v.update(status='failed')),
+            'wrong refresh': ('postflight.json', lambda v: v['observed'].update(actual_refresh_millihz=59940)),
+            'capture failed': ('result.json', lambda v: v.update(status='failed', error='x')),
+            'dma_buf source': ('plan.json', lambda v: v['request'].update(source='dma_buf')),
+            'other strip': ('panel-diagnostic.json', lambda v: v.update(bar_height=48)),
+            'VRR on': ('panel-diagnostic.json', lambda v: v['target'].update(vrr=True)),
+            'other peer': ('cpu-binding.json', lambda v: v['peer'].update(start_time_ticks=1)),
+        }
+        for index, (name, (file, change)) in enumerate(mutations.items()):
+            (self.root / str(index)).mkdir()
+            src = sophia_run(self.root / str(index), 'none')
+            edit_json(src / file, change)
+            self.assertEqual(self.import_(src, f'out{index}'), 2, name)
+            self.assertFalse((self.root / f'out{index}').exists(), name)
 
 
 class Hold(unittest.TestCase):
@@ -212,6 +336,44 @@ class Hold(unittest.TestCase):
             status, exit_stop = bench.run_held(client, timeout=10, hold=0.1)
             self.assertEqual(status, 0)
             self.assertIsNotNone(exit_stop)
+            self.assertEqual(stack.teardown(), [])
+        finally:
+            shutil.rmtree(root)
+
+    def assertGone(self, process):
+        self.assertFalse(Path(f'/proc/{process.pid}').exists())  # reaped: not even a zombie
+
+    def test_teardown_reaps_a_traced_client_on_timeout_error_or_signal(self):
+        root = Path(tempfile.mkdtemp())
+        try:
+            stack = bench.Stack(root, dict(os.environ))
+            never_resumed = stack.spawn('a', ['/bin/sleep', '30'], hold=True)  # error before run_held
+            timed_out = stack.spawn('b', ['/bin/sleep', '30'], hold=True)
+            self.assertEqual(bench.run_held(timed_out, timeout=0.2, hold=0)[0], None)
+            exiting = stack.spawn('c', ['/bin/sleep', '30'], hold=True)
+            bench.ptrace(bench.PTRACE_CONT, exiting.pid)
+            os.kill(exiting.pid, signal.SIGTERM)  # a signal-delivery stop, which Popen.poll would take as exit
+            time.sleep(0.1)
+            sampler = stack.spawn('sampler', ['/bin/sleep', '30'], bind=False)
+            self.assertEqual(stack.teardown(), [])
+            for process in (never_resumed, timed_out, exiting, sampler):
+                self.assertGone(process)
+            self.assertEqual([p.returncode for p in (never_resumed, timed_out, exiting)], [-9, -9, -9])
+        finally:
+            shutil.rmtree(root)
+
+    def test_signals_reach_the_client_through_run_held(self):
+        root = Path(tempfile.mkdtemp())
+        try:
+            stack = bench.Stack(root, dict(os.environ))
+            client = stack.spawn('client', ['/bin/sleep', '30'], hold=True)
+            killer = subprocess.Popen(['/bin/sh', '-c', f'sleep 0.2; kill -TERM {client.pid}'])
+            status, exit_stop = bench.run_held(client, timeout=10, hold=0)
+            killer.wait()
+            self.assertEqual(status, -signal.SIGTERM)
+            self.assertIsNotNone(exit_stop)
+            self.assertEqual(stack.teardown(), [])
+            self.assertGone(client)
         finally:
             shutil.rmtree(root)
 

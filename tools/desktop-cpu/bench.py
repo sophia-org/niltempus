@@ -9,7 +9,8 @@ the 120..2120 window (2000 intervals) Sophia's shell-timing runs use.
 
   run --stack niri|xlibre --mode native|smoke --out DIR
       native: run on a free text VT as the seat user; real KMS output.
-      smoke: GPU- and device-free inside bwrap (dummy X; niri nested in it);
+      smoke: GPU- and device-free inside bwrap (dummy X; a wlroots headless
+             stand-in for niri, whose config niri still validates);
              protocol and harness check only, never CPU evidence.
   import-sophia --out DIR SOPHIA_RUN   an existing shell-timing run directory
   report --out DIR RUN...              one cpuwin plan over all runs
@@ -41,6 +42,13 @@ SCHEMA = 1
 RIG_OTHER_OUTPUTS = ['HDMI-A-1', 'HDMI-A-2', 'DP-2', 'DP-3', 'DP-4', 'DP-5', 'DP-6',
                      'Writeback-1', 'Writeback-2']
 NATIVE_SOURCES = {'niri': {'wp_presentation'}, 'xlibre': {'xpresent'}}
+CLIENT_ARM = {'niri': 'wl-panel', 'xlibre': 'x-panel'}
+# The one compared recipe, as both clients write it in their journal header.
+RECIPE = dict(width='1920', height='24', buffers='2', fill='shade_mod128_a255', frames='2001', warmup='119',
+              bulk='0', bulk_width='0', bulk_height='0', lifecycle='reuse', workload='fresh', tiles='0',
+              interval_ms='0', damage='full', idle_sec='0', clock='CLOCK_MONOTONIC_ns')
+SOPHIA_FILES = ('cpu-window.jsonl', 'cpu-binding.json', 'native-samples.json', 'postflight.json', 'result.json',
+                'plan.json', 'panel-diagnostic.json')
 DUMMY_XORG = '''Section "ServerFlags"
  Option "AutoAddDevices" "false"
  Option "AutoAddGPU" "false"
@@ -125,6 +133,32 @@ def stop(process, grace=3):
         pass
 
 
+def stop_traced(process, grace=3):
+    """A traced child is never waited through Popen: a signal to it is a trace
+    stop, which Popen would record as its exit. Kill it and drain its stops
+    until the kernel reports its death."""
+    if process.returncode is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline:
+        try:
+            pid, status = os.waitpid(process.pid, os.WNOHANG)
+        except ChildProcessError:
+            return
+        if pid == 0:
+            time.sleep(0.005)
+        elif os.WIFEXITED(status) or os.WIFSIGNALED(status):
+            process.returncode = os.waitstatus_to_exitcode(status)
+            return
+        else:  # the exit-event stop; death follows the continue
+            LIBC.ptrace(PTRACE_CONT, process.pid, None, None)
+    raise Refused(f'traced client {process.pid} not reaped {grace} s after SIGKILL')
+
+
 def wait_for(predicate, process, what, seconds=10):
     deadline = time.monotonic() + seconds
     while not predicate():
@@ -175,6 +209,8 @@ def held_at_exec(process):
     """The client is stopped after execve. It will also stop at its exit, still
     the same readable process with final CPU counters, until released."""
     _, status = os.waitpid(process.pid, 0)
+    if os.WIFEXITED(status) or os.WIFSIGNALED(status):
+        process.returncode = os.waitstatus_to_exitcode(status)
     if not (os.WIFSTOPPED(status) and os.WSTOPSIG(status) == signal.SIGTRAP):
         raise Refused(f'client was not held at exec (status {status:#x})')
     ptrace(PTRACE_SETOPTIONS, process.pid, PTRACE_O_TRACEEXIT | PTRACE_O_EXITKILL)
@@ -206,23 +242,30 @@ class Stack:
     """Started processes of one run, each in its own session."""
 
     def __init__(self, out, env):
-        self.out, self.env, self.started, self.labels = out, env, [], {}
+        self.out, self.env, self.started, self.labels, self.traced = out, env, [], {}, set()
 
     def spawn(self, label, argv, env=None, bind=True, hold=False):
-        log = (self.out / f'{label}.log').open('w')
-        process = subprocess.Popen(argv, env=env or self.env, stdout=log, stderr=subprocess.STDOUT,
-                                   stdin=subprocess.DEVNULL, start_new_session=True,
-                                   preexec_fn=trace_me if hold else None)
+        with (self.out / f'{label}.log').open('w') as log:  # the child keeps its own copy
+            process = subprocess.Popen(argv, env=env or self.env, stdout=log, stderr=subprocess.STDOUT,
+                                       stdin=subprocess.DEVNULL, start_new_session=True,
+                                       preexec_fn=trace_me if hold else None)
+        self.started.append((label, process, argv))  # before anything can raise
         if hold:
+            self.traced.add(process.pid)
             held_at_exec(process)
-        self.started.append((label, process, argv))
         if bind:
             self.labels[label] = process
         return process
 
     def teardown(self):
-        for _, process, _ in reversed(self.started):
-            stop(process)
+        """Stop everything, newest first; returns what could not be stopped."""
+        errors = []
+        for label, process, _ in reversed(self.started):
+            try:
+                (stop_traced if process.pid in self.traced else stop)(process)
+            except Exception as e:
+                errors.append(f'{label}: {e!r}')
+        return errors
 
 
 def x_server(stack, args, env, native, label='server'):
@@ -266,13 +309,12 @@ def run_stack(args, out):
                 'DBUS_SESSION_BUS_ADDRESS'):
         env.pop(key, None)
     journal = out / 'journal.tsv'
-    workload = ['--frames', str(args.frames), '--warmup', str(args.warmup), '--buffers',
-                str(args.buffers), '--lifecycle', args.lifecycle, '--workload', 'fresh']
+    workload = [arg for k in ('frames', 'warmup', 'buffers', 'lifecycle', 'workload')
+                for arg in (f'--{k}', RECIPE[k])]
     stack, binaries = Stack(out, env), {}
-    record = dict(schema=SCHEMA, stack=args.stack, mode=args.mode, frames=args.frames,
+    record = dict(schema=SCHEMA, stack=args.stack, mode=args.mode, recipe=RECIPE,
                   output=args.output, mode_size=args.mode_size, rate=args.rate,
                   disabled_outputs=args.disable_output,
-                  warmup=args.warmup, buffers=args.buffers, lifecycle=args.lifecycle,
                   evidence='native' if native else 'diagnostic')
     try:
         if args.stack == 'xlibre':
@@ -345,15 +387,14 @@ def run_stack(args, out):
             if fields is None:
                 raise Refused(f'{label} exited before binding')
             expect[label] = dict(pid=process.pid, starttime=fields[0])
+        sessions = {p.pid for _, p, _ in stack.started}
+        bound = {v['pid'] for v in expect.values()}
+        scaffolding = {p.pid for label, p, _ in stack.started if label not in stack.labels}
         sampler_argv = [sys.executable, '-I', '-B', str(CPUWIN), 'sample', '--out',
                         str(out / 'cpu-window.jsonl'), '--seconds', str(args.timeout),
                         '--interval-ms', '5'] + [f'--pid={k}={v["pid"]}:{v["starttime"]}'
                                                  for k, v in expect.items()]
-        sampler = subprocess.Popen(sampler_argv, stdout=(out / 'sampler.log').open('w'),
-                                   stderr=subprocess.STDOUT, start_new_session=True)
-        sessions = {p.pid for _, p, _ in stack.started}
-        bound = {v['pid'] for v in expect.values()}
-        scaffolding = {p.pid for label, p, _ in stack.started if label not in stack.labels}
+        sampler = stack.spawn('sampler', sampler_argv, bind=False)  # teardown stops it on any error
 
         def unbound():
             return {str(pid): v for pid, v in stack_processes(sessions).items()
@@ -376,9 +417,12 @@ def run_stack(args, out):
                                 for k, v in binaries.items()})
         if client_status != 0:
             raise Refused(f'client exited with {client_status}; see client.log')
-    finally:
-        stack.teardown()
         record['finished'] = True
+    except BaseException as e:
+        record['error'] = repr(e)
+        raise
+    finally:
+        record['teardown_errors'] = stack.teardown()
         write_json(out / 'run.json', record)
 
 
@@ -425,11 +469,64 @@ def relocate(out):
     return 0
 
 
+def sophia_window(src):
+    """A shell-timing run's counted window, validated: run outcome, output and
+    shape, exact kernel-completion joins and sampled identity. Returns
+    (instrumentation, expect, presented ns 120..2120, latency ns 121..2120)."""
+    load = lambda name: json.loads((src / name).read_text())
+    native, binding, request = load('native-samples.json'), load('cpu-binding.json'), load('plan.json')['request']
+    result, postflight, panel = load('result.json'), load('postflight.json'), load('panel-diagnostic.json')
+    sampled = json.loads((src / 'cpu-window.jsonl').read_text().split('\n', 1)[0])['procs']
+    problems = []
+    if (result.get('status'), result.get('error')) != ('captured_only', None):
+        problems.append(f'result {result.get("status")}: {result.get("error")}')
+    if postflight.get('status') != 'passed' or postflight.get('failures'):
+        problems.append(f'postflight {postflight.get("status")}')
+    observed, target = postflight.get('observed', {}), panel.get('target', {})
+    if (observed.get('connector'), observed.get('actual_refresh_millihz')) != ('DP-1', 119880):
+        problems.append(f'postflight saw {observed.get("connector")} at {observed.get("actual_refresh_millihz")} mHz')
+    if ((target.get('connector'), target.get('width'), target.get('height'), target.get('vrr'))
+            != ('DP-1', 1920, 1080, False)
+            or (panel.get('bar_height'), panel.get('warmup'), panel.get('counted')) != (24, 120, 2000)):
+        problems.append('panel is not the 1920x24 strip on DP-1 1920x1080, VRR off, 120+2000 frames')
+    if (request.get('source'), request.get('frames')) != ('owned_ring', 2120) \
+            or request.get('instrumentation') != native.get('instrumentation'):
+        problems.append('request is not owned_ring, 2120 frames, at the samples\' instrumentation')
+    samples = native.get('samples', [])
+    if native.get('verdict') != 'joined_only' or native.get('offered') != 2120 \
+            or [s['candidate_generation'] for s in samples] != list(range(1, 2121)):
+        problems.append('samples are not generations 1..2120, each once, in order')
+    else:
+        done = [s['completed_monotonic_usec'] for s in samples]
+        if any(b <= a for a, b in zip(done, done[1:])):
+            problems.append('kernel completions are not strictly increasing')
+        if any(not s['submitted_monotonic_usec'] <= s['completed_monotonic_usec']
+               or s['latency_usec'] != s['completed_monotonic_usec'] - s['submitted_monotonic_usec']
+               or (s['output'], s['heads']) != (1, 1) for s in samples):
+            problems.append('a sample does not join one submission to one completion on output 1')
+    offers = native.get('journal', {}).get('offers', [])
+    if len(offers) != 2120 or any(o.get('outcome') != 'presented' for o in offers):
+        problems.append('not every offer was presented')
+    expect = {label: dict(pid=binding[key]['pid'], starttime=binding[key]['start_time_ticks'])
+              for label, key in (('session', 'host'), ('peer', 'peer'))}
+    for label, want in expect.items():
+        got = sampled.get(label, {})
+        if (got.get('pid'), got.get('starttime')) != (want['pid'], want['starttime']):
+            problems.append(f'sampled {label} is not the bound {label}')
+    if problems:
+        raise Refused(f'{src}: ' + '; '.join(problems))
+    presented = [s['completed_monotonic_usec'] * 1000 for s in samples[119:]]
+    latency = [s['latency_usec'] * 1000 for s in samples[120:]]
+    return native['instrumentation'], expect, presented, latency
+
+
 def cmd_import_sophia(args):
     src = args.run.resolve()
-    binding = json.loads((src / 'cpu-binding.json').read_text())
-    native = json.loads((src / 'native-samples.json').read_text())
-    instrumentation = native.get('instrumentation')
+    try:
+        instrumentation, expect, _, _ = sophia_window(src)
+    except (Refused, KeyError, TypeError, ValueError, OSError) as e:
+        print(f'REFUSED: {e!r}', file=sys.stderr)
+        return 2
     # cpuplan.py refuses capture-profile runs for comparisons; so does this,
     # unless asked, and then the row is diagnostic.
     if instrumentation != 'none' and not args.allow_instrumented:
@@ -438,14 +535,12 @@ def cmd_import_sophia(args):
         return 2
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=False, mode=0o700)
-    files = {name: dict(path=str(src / name), sha256=sha256(src / name))
-             for name in ('cpu-window.jsonl', 'cpu-binding.json', 'native-samples.json')}
+    files = {name: dict(path=str(src / name), sha256=sha256(src / name)) for name in SOPHIA_FILES}
     write_json(out / 'run.json', dict(
         schema=SCHEMA, stack='sophia', mode='imported', instrumentation=instrumentation,
         evidence='native' if instrumentation == 'none' else 'diagnostic',
-        source=str(src), files=files, offered=native['offered'],
-        expect={'session': dict(pid=binding['host']['pid'], starttime=binding['host']['start_time_ticks']),
-                'peer': dict(pid=binding['peer']['pid'], starttime=binding['peer']['start_time_ticks'])}))
+        source=str(src), files=files, expect=expect,
+        artifacts=json.loads((src / 'plan.json').read_text())['request'].get('artifacts')))
     return 0
 
 
@@ -472,12 +567,14 @@ def quantiles(values):
                 count=len(values))
 
 
-def frame_stats(presented_ns, latency_ns):
+def frame_stats(presented_ns, latency_ns, nominal_hz=None):
+    """Missed refreshes are gaps over 1.5 periods of the observed mode when
+    known (else of the median gap, descriptive only)."""
     gaps = [b - a for a, b in zip(presented_ns, presented_ns[1:])]
-    period = statistics.median(gaps)
+    period = 1e9 / nominal_hz if nominal_hz else statistics.median(gaps)
     return dict(gap_us=quantiles([g / 1e3 for g in gaps]),
                 missed_vblank_gaps=sum(g > 1.5 * period for g in gaps),
-                refresh_hz=1e9 / period,
+                refresh_hz=1e9 / statistics.median(gaps), nominal_hz=nominal_hz,
                 latency_us=quantiles([l / 1e3 for l in latency_ns]))
 
 
@@ -531,30 +628,42 @@ def plan_run(name, run_dir):
     record = json.loads((run_dir / 'run.json').read_text())
     if record.get('schema') != SCHEMA:
         raise Refused(f'{run_dir}: run.json schema {record.get("schema")}')
-    notes = []
+    notes, evidence = [], record['evidence']
     if record['stack'] == 'sophia':
+        src = Path(record['source'])
+        if sorted(record['files']) != sorted(SOPHIA_FILES):
+            raise Refused(f'{run_dir}: import does not pin {SOPHIA_FILES}')
         for label, f in record['files'].items():
-            if sha256(f['path']) != f['sha256']:
+            if f['path'] != str(src / label) or sha256(f['path']) != f['sha256']:
                 raise Refused(f'{run_dir}: {label} changed since import')
-        samples = {s['candidate_generation']: s for s in
-                   json.loads(Path(record['files']['native-samples.json']['path']).read_text())['samples']}
+        instrumentation, expect, presented, latency = sophia_window(src)
+        if expect != record['expect']:
+            raise Refused(f'{run_dir}: bound processes differ from the import')
+        evidence = 'native' if instrumentation == 'none' else 'diagnostic'
+        nominal = 119.880  # postflight's observed actual_refresh_millihz, pinned in sophia_window
         start, end = 120, 2120
-        if any(g not in samples for g in range(start, end + 1)):
-            raise Refused(f'{run_dir}: missing Sophia generations in {start}..{end}')
-        presented = [samples[g]['completed_monotonic_usec'] * 1000 for g in range(start, end + 1)]
-        latency = [samples[g]['latency_usec'] * 1000 for g in range(start + 1, end + 1)]
         jsonl = record['files']['cpu-window.jsonl']['path']
     else:
+        if not (record.get('finished') is True and record.get('client_status') == 0
+                and record.get('sampler_status') == 0 and record.get('client_exit_stop_ns')
+                and not record.get('teardown_errors')):
+            raise Refused(f'{run_dir}: run did not complete cleanly: finished={record.get("finished")} '
+                          f'client={record.get("client_status")} sampler={record.get("sampler_status")} '
+                          f'exit_stop={record.get("client_exit_stop_ns")} '
+                          f'teardown={record.get("teardown_errors")} error={record.get("error")}')
         header, rows = parse_journal(run_dir / 'journal.tsv')
-        warmup, frames = int(header['warmup']), int(header['frames'])
+        want = dict(RECIPE, arm=CLIENT_ARM[record['stack']])
+        drift = [f'{k}={header.get(k)} (want {v})' for k, v in want.items() if header.get(k) != v]
+        if drift or record.get('recipe') != RECIPE:
+            raise Refused(f'{run_dir}: not the pinned recipe: {", ".join(drift) or "run.json recipe differs"}')
+        warmup, frames = int(RECIPE['warmup']), int(RECIPE['frames'])
         if [r['frame'] for r in rows] != list(range(1, frames + 1)):
             raise Refused(f'{run_dir}: journal rows are not 1..{frames}')
-        if header['workload'] != 'fresh' or (header['width'], header['height']) != ('1920', '24'):
-            raise Refused(f'{run_dir}: not the 1920x24 fresh workload')
         if any(r['presented'] < 0 for r in rows):
             raise Refused(f'{run_dir}: {sum(r["presented"] < 0 for r in rows)} frames never presented')
         sources = {r['source'] for r in rows}
-        if record['evidence'] == 'native':
+        nominal = float(record['rate']) if evidence == 'native' else None  # the receipt checks the actual mode
+        if evidence == 'native':
             if not sources <= NATIVE_SOURCES[record['stack']]:
                 raise Refused(f'{run_dir}: presentation sources {sorted(sources)} are not scanout times')
             receipt = run_dir / ('outputs.json' if record['stack'] == 'niri' else 'xrandr.txt')
@@ -571,11 +680,18 @@ def plan_run(name, run_dir):
         presented = [r['presented'] for r in rows]
         latency = [r['presented'] - r['submit'] for r in rows[1:]]
         jsonl = str(run_dir / 'cpu-window.jsonl')
+    if any(b <= a for a, b in zip(presented, presented[1:])):
+        raise Refused(f'{run_dir}: presentation times are not strictly increasing')
+    stats = frame_stats(presented, latency, nominal)
+    # Native acceptance: every counted interval is one refresh of the observed mode.
+    if evidence == 'native' and (stats['missed_vblank_gaps'] or not close(stats['refresh_hz'], nominal, 0.005)):
+        raise Refused(f'{run_dir}: refresh {stats["refresh_hz"]:.3f} Hz with {stats["missed_vblank_gaps"]} missed '
+                      f'refreshes against the observed {nominal} Hz mode')
     entry = dict(name=name, arm=record['stack'], samples=jsonl, start_frame=start, end_frame=end,
                  anchor_start_ns=presented[0], anchor_end_ns=presented[-1],
                  expect={k: dict(pid=v['pid'], starttime=v['starttime']) for k, v in record['expect'].items()})
-    return entry, dict(name=name, stack=record['stack'], mode=record['mode'], evidence=record['evidence'],
-                       run=str(run_dir), notes=notes, **frame_stats(presented, latency))
+    return entry, dict(name=name, stack=record['stack'], mode=record['mode'], evidence=evidence,
+                       run=str(run_dir), notes=notes, **stats)
 
 
 def cmd_report(args):
@@ -613,11 +729,12 @@ def cmd_report(args):
         r = by_name.get(f['name'])
         rows.append(dict(f, cpu_us_per_frame=r and r['per_frame_us'],
                          per_process_us_per_frame=r and r['per_proc_per_frame_us']))
-    native = evidence == {'native'}
-    # A difference is only reported between native rows; a smoke row is never evidence.
+    refused += cpu.get('refused', [])
+    # A difference is only reported when every requested row is native and accepted.
+    native = evidence == {'native'} and not refused
     report = dict(schema=SCHEMA, evidence='native' if native else 'diagnostic',
                   rows=rows, stacks=cpu.get('arms', {}), differences=cpu.get('differences', {}) if native else {},
-                  refused=refused + cpu.get('refused', []), cpuwin_status=status)
+                  refused=refused, cpuwin_status=status)
     write_json(out / 'report.json', report)
     (out / 'report.md').write_text(render(report))
     if not getattr(args, 'quiet', False):
@@ -642,7 +759,10 @@ def render(report):
     for r in report['refused']:
         lines.append(f'- REFUSED {r["name"]}: {r["reason"]}')
     if report['evidence'] != 'native':
-        lines.append('- Diagnostic only: smoke rows are not CPU evidence, and no stack difference is reported.')
+        lines.append('- Diagnostic only: a row is a smoke, instrumented or refused, so no stack difference is reported.')
+    lines.append('- CPU is the bound processes only (each thread group, not its children). The start and end '
+                 'process snapshots are a boundary inventory, not exhaustive: transient children and setsid '
+                 'helpers between them are missed. This is not whole-desktop CPU.')
     lines.append('- Pixel producers differ: the external clients fill shared memory on the CPU, while the '
                  'Sophia peer renders on the GPU and copies a readback into its owned ring. Server and client '
                  'rows are reported separately; a combined figure describes these concrete paths, not '
@@ -659,10 +779,6 @@ def main():
     r.add_argument('--stack', choices=('niri', 'xlibre'), required=True)
     r.add_argument('--mode', choices=('native', 'smoke'), required=True)
     r.add_argument('--out', type=Path, required=True)
-    r.add_argument('--frames', type=int, default=2001)
-    r.add_argument('--warmup', type=int, default=119)
-    r.add_argument('--buffers', type=int, default=2)
-    r.add_argument('--lifecycle', choices=('fresh', 'reuse'), default='reuse')
     r.add_argument('--output', help='connector, e.g. DP-1 (native)')
     r.add_argument('--mode-size', default='1920x1080')
     r.add_argument('--rate', default='119.880')
@@ -694,8 +810,6 @@ def main():
     p.set_defaults(fn=cmd_report)
     args = ap.parse_args()
     if args.cmd == 'run':
-        if args.frames < 2:
-            ap.error('--frames must be at least 2')
         if args.disable_output is None:
             args.disable_output = RIG_OTHER_OUTPUTS if args.mode == 'native' else []
         if args.mode == 'native' and not args.output:
