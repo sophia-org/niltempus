@@ -569,21 +569,24 @@ def cmd_import_sophia(args):
 
 
 def parse_journal(path):
-    header, rows, check = None, [], {}
+    header, rows, check = None, [], None
     for line in Path(path).read_text().splitlines():
         if line.startswith('# header '):
             fields, _, note = line[9:].partition(' presented_clock=')
             header = dict(kv.split('=', 1) for kv in fields.split())
             header['presented_clock'] = note
-        elif line.startswith('# presented_clock_check '):
-            check = dict(kv.split('=', 1) for kv in line[24:].split())
+        elif line.startswith('# presented_clock_check'):
+            pairs = [kv.split('=', 1) for kv in line[24:].split()]
+            if check is not None or len({k for k, _ in pairs}) != len(pairs):
+                raise Refused(f'{path}: repeated presented_clock_check footer or key')
+            check = dict(pairs)
         elif line and not line.startswith('#'):
             frame, fill, submit, presented, pace, source = line.split('\t')
             rows.append(dict(frame=int(frame), fill=int(fill), submit=int(submit),
                              presented=int(presented), source=source))
     if header is None:
         raise Refused(f'{path}: no journal header')
-    header['clock_check'] = check
+    header['clock_check'] = check or {}
     return header, rows
 
 
@@ -708,10 +711,15 @@ def plan_run(name, run_dir):
                 problems = niri_output_problems(record, receipt)
             else:
                 check = header['clock_check']  # counts warmup frames too
+                try:
+                    counts = {k: int(v) for k, v in check.items()}
+                except ValueError:
+                    counts = dict(unparsed=-1)
                 late = sum(r['source'] == 'xpresent_late' for r in rows)
-                if late and not ('late_max_ns' in check and int(check.get('late', 0)) >= late):
+                if any(v < 0 for v in counts.values()) or late and not (
+                        counts.get('late', 0) >= late and counts.get('late_max_ns', 0) > 0):
                     raise Refused(f'{run_dir}: {late} late Present rows but clock check {check}')
-                problems = x_output_problems(record, receipt, int(check.get('late_max_ns', 0)))
+                problems = x_output_problems(record, receipt, counts.get('late_max_ns', 0))
             if problems:
                 raise Refused(f'{run_dir}: output receipt: {"; ".join(problems)}')
             if record['unbound_start'] or record['unbound_end']:

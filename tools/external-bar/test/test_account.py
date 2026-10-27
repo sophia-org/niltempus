@@ -55,6 +55,24 @@ class Accounting(unittest.TestCase):
                         self.assertEqual(report['cross_arm_latency_us']['p50'],
                                          45 if workload == 'retained' else 40)
 
+    def test_receipt_bounded_sources_supply_no_latency(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name, value in [('before', snapshot()), ('after', snapshot(True))]:
+                (root/name).write_text(json.dumps(value))
+            header = ('# header arm=x-panel width=1920 height=24 buffers=2 fill=test frames=1 warmup=0 '
+                      'bulk=0 lifecycle=reuse workload=fresh tiles=0 interval_ms=0 damage=full idle_sec=0 '
+                      'presented_clock=monotonic\n')
+            for source in ('xpresent_late', 'xpresent_recv', 'shm_completion'):
+                with self.subTest(source=source):
+                    (root/'journal').write_text(header+f'1\t10000\t20000\t50000\t5000\t{source}\n')
+                    result = subprocess.run([
+                        sys.executable, str(ROOT/'common/account.py'), 'report', '--arm',
+                        f'test={root}/journal:{root}/before:{root}/after', '--json', str(root/'report')
+                    ], capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIsNone(json.loads((root/'report').read_text())['arms'][0]['cross_arm_latency_us'])
+
     def test_thread_endpoints_do_not_claim_complete_lifetimes_or_invent_counts(self):
         from thread_stats import endpoint_delta
         before = {'7': dict(starttime=4, voluntary=2, involuntary=3)}

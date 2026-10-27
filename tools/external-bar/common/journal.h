@@ -35,7 +35,7 @@
  *                     because the compositor presents in CLOCK_MONOTONIC
  *   xpresent          Present COMPLETE_NOTIFY ust (server clock, usec) * 1000;
  *                     the X server reports CLOCK_MONOTONIC usec on DRM
- *                     backends; account.py checks submit <= ust <= receipt
+ *                     backends; the client checks submit <= ust <= receipt
  *   xpresent_late     that ust when it is after the client's receipt (DRM
  *                     stamps the end of vblank; the completion may arrive
  *                     inside vblank); the footer gives the largest excess

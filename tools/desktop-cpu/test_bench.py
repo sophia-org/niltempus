@@ -243,6 +243,15 @@ class Report(unittest.TestCase):
             'nofooter': '',
             'oldfooter': '# presented_clock_check ok=0 violations=2120\n',
             'undercount': '# presented_clock_check ok=0 violations=0 late=7 late_max_ns=1000\n',
+            'zeromax': '# presented_clock_check ok=0 violations=0 late=2120 late_max_ns=0\n',
+            'negativemax': '# presented_clock_check ok=0 violations=0 late=2120 late_max_ns=-1\n',
+            'negativeok': '# presented_clock_check ok=-1 violations=0 late=2120 late_max_ns=1000\n',
+            'unparsed': '# presented_clock_check ok=0 violations=0 late=2120 late_max_ns=1e3\n',
+            'twofooters': '# presented_clock_check ok=0 violations=0 late=2120 late_max_ns=999999999\n'
+                          '# presented_clock_check ok=0 violations=0 late=2120 late_max_ns=466000\n',
+            'twokeys': '# presented_clock_check ok=0 violations=0 late=2120 late_max_ns=999999999 late_max_ns=466000\n',
+            'emptyfirst': '# presented_clock_check\n'
+                          '# presented_clock_check ok=0 violations=0 late=2120 late_max_ns=466000\n',
         }
         for name, footer in cases.items():
             with self.assertRaises(bench.Refused, msg=name):

@@ -174,6 +174,10 @@ Native defaults:
 - The X receipt shows the mode, not the observed TearFree, VRR or renderer
   state; the requested config is not proof of them. The niri GPU and renderer
   are not pinned or proved. Packaging qualifies both.
+- The late-UST bound rests on the client's aggregate footer (count and
+  largest excess, warmup included); the journal keeps no raw UST, so the
+  report cannot recompute the per-frame excess. A vblank-bounded UST is a
+  CPU-window anchor at vblank, not per-buffer scanout or flip proof.
 - No native run has been made. Rootless start of XLibre and niri inside the
   VT session, and GPU selection, are unproven on this rig.
 - The Wayland smoke stands in a headless wlroots compositor (River 0.3.7

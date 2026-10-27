@@ -242,7 +242,7 @@ def cmd_report(args):
         server = arm["cpu"]
         workload = arm['header']['workload']
         selected = pace_lat if workload == 'retained' else fill_lat
-        if workload == 'idle' or any(s in {'xpresent_recv', 'shm_completion'} for s in sources):
+        if workload == 'idle' or any(s in {'xpresent_recv', 'xpresent_late', 'shm_completion'} for s in sources):
             selected = None
         per_second = 1e9 / server['window_ns']
         results.append(
