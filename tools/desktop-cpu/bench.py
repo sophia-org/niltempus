@@ -99,23 +99,25 @@ def write_json(path, value):
 
 
 def stat_fields(pid):
-    """(starttime, session id, comm) from /proc/PID/stat, or None if gone."""
+    """(starttime, session id, comm, process group) from /proc/PID/stat, or None if gone."""
     try:
         raw = Path(f'/proc/{pid}/stat').read_text()
     except (FileNotFoundError, ProcessLookupError):
         return None
     comm = raw[raw.index('(') + 1:raw.rindex(')')]
     rest = raw[raw.rindex(')') + 2:].split()
-    return int(rest[19]), int(rest[3]), comm  # fields 22, 6, 2
+    return int(rest[19]), int(rest[3]), comm, int(rest[2])  # fields 22, 6, 2, 5
 
 
 def stack_processes(sessions):
-    """Every live process in the given session ids (each child gets its own)."""
+    """Every live process whose session or process group is one of these ids:
+    each child leads its own session, except the native X server, which leads
+    only its own group."""
     found = {}
     for entry in Path('/proc').iterdir():
         if entry.name.isdigit():
             fields = stat_fields(int(entry.name))
-            if fields and fields[1] in sessions:
+            if fields and (fields[1] in sessions or fields[3] in sessions):
                 found[int(entry.name)] = dict(starttime=fields[0], comm=fields[2])
     return found
 
@@ -205,6 +207,10 @@ def trace_me():
         os._exit(127)
 
 
+def ignore_ttou():
+    signal.signal(signal.SIGTTOU, signal.SIG_IGN)  # survives exec
+
+
 def held_at_exec(process):
     """The client is stopped after execve. It will also stop at its exit, still
     the same readable process with final CPU counters, until released."""
@@ -239,16 +245,19 @@ def run_held(process, timeout, hold):
 
 
 class Stack:
-    """Started processes of one run, each in its own session."""
+    """Started processes of one run, each leading its own session (or group)."""
 
     def __init__(self, out, env):
         self.out, self.env, self.started, self.labels, self.traced = out, env, [], {}, set()
 
-    def spawn(self, label, argv, env=None, bind=True, hold=False):
+    def spawn(self, label, argv, env=None, bind=True, hold=False, keep_session=False):
+        # keep_session: stay in the caller's session, so keep its controlling
+        # VT, in a background group of its own (SIGTTOU ignored for termios).
         with (self.out / f'{label}.log').open('w') as log:  # the child keeps its own copy
             process = subprocess.Popen(argv, env=env or self.env, stdout=log, stderr=subprocess.STDOUT,
-                                       stdin=subprocess.DEVNULL, start_new_session=True,
-                                       preexec_fn=trace_me if hold else None)
+                                       stdin=subprocess.DEVNULL, start_new_session=not keep_session,
+                                       process_group=0 if keep_session else None,
+                                       preexec_fn=trace_me if hold else ignore_ttou if keep_session else None)
         self.started.append((label, process, argv))  # before anything can raise
         if hold:
             self.traced.add(process.pid)
@@ -295,7 +304,9 @@ def x_server(stack, args, env, native, label='server'):
         argv = [args.smoke_xserver, f':{display}', '-config', str(stack.out / 'xorg.conf'),
                 '-logfile', str(stack.out / 'Xorg.log'), '-nolisten', 'tcp', '-noreset',
                 '-novtswitch', '-ac']
-    server = stack.spawn(label, argv, bind=label == 'server')
+    # VT_ACTIVATE and KDSETMODE need the VT to be the caller's controlling
+    # tty, and -keeptty means Xorg won't take it, so it stays in this session.
+    server = stack.spawn(label, argv, bind=label == 'server', keep_session=native)
     wait_for(socket.is_socket, server, 'X server')
     return dict(env, DISPLAY=f':{display}'), argv[0]
 

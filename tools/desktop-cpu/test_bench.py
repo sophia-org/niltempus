@@ -333,7 +333,7 @@ class Hold(unittest.TestCase):
         try:
             stack = bench.Stack(root, dict(os.environ))
             client = stack.spawn('client', ['/bin/sleep', '0.05'], hold=True)
-            starttime, _, comm = bench.stat_fields(client.pid)
+            starttime, _, comm, _ = bench.stat_fields(client.pid)
             self.assertEqual(comm, 'sleep')  # bound after exec, never as python
             state = Path(f'/proc/{client.pid}/stat').read_text().rsplit(')', 1)[1].split()[0]
             self.assertEqual(state, 't')  # traced stop: nothing has run yet
@@ -363,6 +363,23 @@ class Hold(unittest.TestCase):
             for process in (never_resumed, timed_out, exiting, sampler):
                 self.assertGone(process)
             self.assertEqual([p.returncode for p in (never_resumed, timed_out, exiting)], [-9, -9, -9])
+        finally:
+            shutil.rmtree(root)
+
+    def test_native_x_server_keeps_the_vt_session_in_its_own_group(self):
+        root = Path(tempfile.mkdtemp())
+        try:
+            stack = bench.Stack(root, dict(os.environ))
+            server = stack.spawn('server', ['/bin/sleep', '30'], keep_session=True)
+            time.sleep(0.1)
+            self.assertEqual(os.getsid(server.pid), os.getsid(0))  # same controlling tty
+            self.assertEqual(os.getpgid(server.pid), server.pid)  # teardown's killpg reaches only it
+            ignored = int(Path(f'/proc/{server.pid}/status').read_text().split('SigIgn:')[1].split()[0], 16)
+            self.assertTrue(ignored & 1 << signal.SIGTTOU - 1)
+            self.assertIn(server.pid, bench.stack_processes({server.pid}))  # found by its group
+            self.assertNotIn(os.getpid(), bench.stack_processes({server.pid}))
+            self.assertEqual(stack.teardown(), [])
+            self.assertEqual(server.returncode, -signal.SIGTERM)
         finally:
             shutil.rmtree(root)
 

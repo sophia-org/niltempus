@@ -106,6 +106,10 @@ Native defaults:
     setuid `/usr/bin/Xorg` wrapper;
   - run with `-keeptty -seat seat0`, a private cookie, and absolute private
     `-config` and `-configdir`;
+  - kept in the VT session (its own process group, SIGTTOU ignored): with
+    `-keeptty` Xorg never takes the VT as its controlling tty, and Linux
+    refuses `VT_ACTIVATE` and `KDSETMODE` from any other session (EPERM).
+    The boundary inventory finds it and its children by process group;
   - modesetting with glamor, `BusID PCI:3:0:0` and `kmsdev /dev/dri/card0`;
   - `TearFree` off explicitly, VRR off and page flips on;
   - the mode is chosen with xrandr from the server's own modes, with no
