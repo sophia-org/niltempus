@@ -244,6 +244,11 @@ Use a short private run-directory path: `run/environment.sock` must fit the
 Unix socket pathname limit. Binding or socket failures invalidate a run even
 when the compositor completed its workload and restored the console.
 
+The [ACK-coalescing ABBA investigation](notes/investigations/q7m4ap2c-ack-coalescing-screen-shows-no-established-cpu-gain.md)
+records a retained observer-failed attempt and a separate complete replacement
+capture. Its small favorable CPU midpoint remains inconclusive; capture success
+does not establish an optimization gain.
+
 ### Frozen shell timing campaigns
 
 The campaign commands run one explicitly selected arm at a time. They do not
