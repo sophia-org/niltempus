@@ -67,8 +67,11 @@ python3 -I -B tools/desktop-cpu/bench.py run --stack niri --mode smoke --out RUN
 python3 -I -B tools/desktop-cpu/bench.py run --stack niri --mode native --output DP-1 --out RUN_N
 python3 -I -B tools/desktop-cpu/bench.py run --stack xlibre --mode native --output DP-1 --out RUN_L
 
-# An existing Sophia shell-timing run, read only.
+# An existing Sophia shell-timing run, read only. It must be uninstrumented
+# (native-samples instrumentation "none"); every continuous package so far
+# used capture-profile, which only imports as a diagnostic row:
 python3 -I -B tools/desktop-cpu/bench.py import-sophia --out RUN_S SOPHIA_RUN_DIR
+python3 -I -B tools/desktop-cpu/bench.py import-sophia --allow-instrumented --out RUN_S SOPHIA_RUN_DIR
 
 python3 -I -B tools/desktop-cpu/bench.py report --out REPORT RUN_S RUN_N RUN_L
 ```
@@ -106,6 +109,8 @@ Native defaults:
 
 ## Not verified
 
+- No uninstrumented Sophia continuous run exists yet, so a native
+  three-stack report needs a new Sophia run with instrumentation `none`.
 - No native run has been made. Rootless start of XLibre and niri inside the
   VT session, and GPU selection, are unproven on this rig.
 - The Wayland smoke stands in a headless wlroots compositor (River 0.3.7

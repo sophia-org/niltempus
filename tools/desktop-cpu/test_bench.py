@@ -182,10 +182,16 @@ class Report(unittest.TestCase):
                                                                peer=dict(pid=202, start_time_ticks=2020))))
         gens = [dict(candidate_generation=g, completed_monotonic_usec=(START + (g - 120) * PERIOD) // 1000,
                      latency_usec=7500) for g in range(1, 2121)]
-        (src / 'native-samples.json').write_text(json.dumps(dict(offered=2120, samples=gens)))
+        (src / 'native-samples.json').write_text(json.dumps(dict(offered=2120, samples=gens,
+                                                                  instrumentation='capture-profile')))
+        refused = self.root / 'refused'
+        self.assertEqual(bench.cmd_import_sophia(types.SimpleNamespace(out=refused, run=src,
+                                                                       allow_instrumented=False)), 2)
+        self.assertFalse(refused.exists())
         out = self.root / 'imported'
-        bench.cmd_import_sophia(types.SimpleNamespace(out=out, run=src))
+        bench.cmd_import_sophia(types.SimpleNamespace(out=out, run=src, allow_instrumented=True))
         entry, stats = bench.plan_run('s', out)
+        self.assertEqual(stats['evidence'], 'diagnostic')  # instrumented Sophia is never native evidence
         self.assertEqual((entry['start_frame'], entry['end_frame']), (120, 2120))
         self.assertEqual(sorted(entry['expect']), ['peer', 'session'])
         (src / 'native-samples.json').write_text('{}')

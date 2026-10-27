@@ -429,12 +429,20 @@ def cmd_import_sophia(args):
     src = args.run.resolve()
     binding = json.loads((src / 'cpu-binding.json').read_text())
     native = json.loads((src / 'native-samples.json').read_text())
+    instrumentation = native.get('instrumentation')
+    # cpuplan.py refuses capture-profile runs for comparisons; so does this,
+    # unless asked, and then the row is diagnostic.
+    if instrumentation != 'none' and not args.allow_instrumented:
+        print(f'REFUSED: Sophia run instrumentation is {instrumentation!r}; pass --allow-instrumented '
+              'for a diagnostic row', file=sys.stderr)
+        return 2
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=False, mode=0o700)
     files = {name: dict(path=str(src / name), sha256=sha256(src / name))
              for name in ('cpu-window.jsonl', 'cpu-binding.json', 'native-samples.json')}
     write_json(out / 'run.json', dict(
-        schema=SCHEMA, stack='sophia', mode='imported', evidence='native',
+        schema=SCHEMA, stack='sophia', mode='imported', instrumentation=instrumentation,
+        evidence='native' if instrumentation == 'none' else 'diagnostic',
         source=str(src), files=files, offered=native['offered'],
         expect={'session': dict(pid=binding['host']['pid'], starttime=binding['host']['start_time_ticks']),
                 'peer': dict(pid=binding['peer']['pid'], starttime=binding['peer']['start_time_ticks'])}))
@@ -676,6 +684,8 @@ def main():
     r.set_defaults(fn=cmd_run)
     s = sub.add_parser('import-sophia')
     s.add_argument('--out', type=Path, required=True)
+    s.add_argument('--allow-instrumented', action='store_true',
+                   help='import a capture-profile run as a diagnostic row')
     s.add_argument('run', type=Path)
     s.set_defaults(fn=cmd_import_sophia)
     p = sub.add_parser('report')
