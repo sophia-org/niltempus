@@ -116,7 +116,13 @@ Native defaults:
     refuses `VT_ACTIVATE` and `KDSETMODE` from any other session (EPERM).
     The boundary inventory finds it and its children by process group;
   - modesetting with glamor, `BusID PCI:3:0:0` and `kmsdev /dev/dri/card0`;
-  - `TearFree` off explicitly, VRR off and page flips on;
+  - `TearFree` off explicitly, VRR off and page flips off. XLibre 56be's
+    flip check exports the panel's SHM pixmap through
+    `glamor_make_pixmap_exportable`, which sets its stride to the GBM bo's
+    (8192) while its pixels stay in 7680-byte SHM rows; later uploads then
+    read the last rows past the segment (garbage, or the desktop-cpu-03
+    SIGSEGV; traced in xlibre-upload-trace-01). The strip is never
+    fullscreen, so Present completes in COPY mode at vblank either way;
   - the mode is chosen with xrandr from the server's own modes, with no
     invented modeline.
 

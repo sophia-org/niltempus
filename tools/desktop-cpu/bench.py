@@ -173,13 +173,18 @@ def wait_for(predicate, process, what, seconds=10):
 
 def native_xorg(args):
     # Codex recipe: one GPU and its card node, modesetting/glamor, explicit
-    # TearFree off (installed default on), VRR off, page flips on. Outputs
-    # are chosen at runtime with xrandr among the server's own modes.
+    # TearFree off (installed default on), VRR off. Outputs are chosen at
+    # runtime with xrandr among the server's own modes.
+    # Page flips off: 56be's flip check exports the panel's SHM pixmap
+    # (glamor_make_pixmap_exportable), which leaves its devKind at the GBM
+    # stride over the 7680-byte SHM rows, so later uploads read past the
+    # segment (the desktop-cpu-03 SIGSEGV). The 1920x24 strip is never
+    # fullscreen, so Present copies at vblank either way.
     return ('Section "ServerFlags"\n Option "AutoAddGPU" "false"\nEndSection\n'
             f'Section "Device"\n Identifier "gpu"\n Driver "modesetting"\n BusID "{args.bus_id}"\n'
             f' Option "kmsdev" "{args.kmsdev}"\n Option "AccelMethod" "glamor"\n'
             ' Option "TearFree" "false"\n Option "VariableRefresh" "false"\n'
-            ' Option "PageFlip" "true"\nEndSection\n'
+            ' Option "PageFlip" "false"\nEndSection\n'
             'Section "Screen"\n Identifier "screen"\n Device "gpu"\n DefaultDepth 24\nEndSection\n')
 
 

@@ -229,6 +229,12 @@ class Report(unittest.TestCase):
         path.write_text(XRANDR.replace('HDMI-A-1 disconnected', 'HDMI-A-1 connected 1920x1080+1920+0'))
         self.assertEqual(bench.x_output_problems(record, path), ['HDMI-A-1 is active'])
 
+    def test_native_x_config_keeps_page_flips_off(self):
+        args = types.SimpleNamespace(bus_id='PCI:3:0:0', kmsdev='/dev/dri/card0')
+        config = bench.native_xorg(args)
+        self.assertIn(' Option "PageFlip" "false"\n', config)
+        self.assertNotIn('"PageFlip" "true"', config)
+
     def test_late_present_ust_is_bounded_by_the_receipt_modes_vblank(self):
         def late(name, footer):
             d = run_dir(self.root, name, stack='xlibre', source='xpresent_late')
