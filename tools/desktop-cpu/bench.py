@@ -321,7 +321,14 @@ def run_stack(args, out):
             xenv, server_bin = x_server(stack, args, env, native)
             binaries['server'] = server_bin
             if native and args.output:
-                off = [arg for name in args.disable_output for arg in ('--output', name, '--off')]
+                # X names connectors itself (modesetting: HDMI-1 for kernel HDMI-A-1),
+                # so every output the server lists, other than ours, is turned off.
+                listed = x_outputs(subprocess.run(['xrandr', '--query'], env=xenv, capture_output=True,
+                                                  text=True, check=True, timeout=10).stdout)
+                if args.output not in listed:
+                    raise Refused(f'X lists no output {args.output}: {listed}')
+                record['disabled_outputs'] = [name for name in listed if name != args.output]
+                off = [arg for name in record['disabled_outputs'] for arg in ('--output', name, '--off')]
                 subprocess.run(['xrandr', '--output', args.output, '--mode', args.mode_size, '--rate',
                                 args.rate, '--primary', *off], env=xenv, check=True, timeout=10)
                 # Readback of the chosen mode timings; the report checks frame gaps.
@@ -424,6 +431,12 @@ def run_stack(args, out):
     finally:
         record['teardown_errors'] = stack.teardown()
         write_json(out / 'run.json', record)
+
+
+def x_outputs(query):
+    """Output names in xrandr --query order."""
+    return [line.split()[0] for line in query.splitlines()
+            if line and not line[0].isspace() and line.split()[1:2] in (['connected'], ['disconnected'])]
 
 
 def niri_config(args, native):
@@ -783,7 +796,8 @@ def main():
     r.add_argument('--mode-size', default='1920x1080')
     r.add_argument('--rate', default='119.880')
     r.add_argument('--disable-output', action='append', default=None,
-                   help=f'repeatable; native default: the rig\'s other connectors {RIG_OTHER_OUTPUTS}')
+                   help=f'repeatable, niri only; native default: the rig\'s other connectors '
+                        f'{RIG_OTHER_OUTPUTS}. Native X turns off every other output the server lists.')
     r.add_argument('--niri-log', default='warn', help='RUST_LOG for niri (its source default is debug)')
     r.add_argument('--niri', default='/usr/bin/niri')
     r.add_argument('--xlibre-prefix', default=str(Path.home() / '.local/opt/xlibre-56be9f4320ef'))

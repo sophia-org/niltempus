@@ -93,8 +93,11 @@ python3 -I -B tools/desktop-cpu/bench.py report --out REPORT RUN_S RUN_N RUN_L
 
 Native defaults:
 
-- DP-1 at 1920x1080@119.880. Every other connector on the rig is off; see
-  `RIG_OTHER_OUTPUTS`.
+- DP-1 at 1920x1080@119.880, every other output off. niri gets the rig's
+  kernel connector names (`RIG_OTHER_OUTPUTS`). X names connectors itself
+  (modesetting calls kernel HDMI-A-1 `HDMI-1`), and xrandr ignores an unknown
+  name with exit 0, so native X turns off every output the server lists
+  other than `--output`.
 - niri: `/usr/bin/niri --config PRIVATE`, with no `--session` and no startup
   commands. It runs with `xwayland-satellite { off; }`, animations and the
   hotkey overlay off, and `RUST_LOG=warn` (niri's source default is debug).

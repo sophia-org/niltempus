@@ -229,6 +229,10 @@ class Report(unittest.TestCase):
         path.write_text(XRANDR.replace('HDMI-A-1 disconnected', 'HDMI-A-1 connected 1920x1080+1920+0'))
         self.assertEqual(bench.x_output_problems(record, path), ['HDMI-A-1 is active'])
 
+    def test_x_outputs_are_the_servers_own_names(self):
+        rig = XRANDR.replace('HDMI-A-1 disconnected', 'HDMI-1 connected') + 'DP-2 disconnected (normal)\n'
+        self.assertEqual(bench.x_outputs(rig), ['DP-1', 'HDMI-1', 'DP-2'])
+
     def report(self, *runs):
         out = self.root / 'report'
         args = types.SimpleNamespace(out=out, runs=list(runs), quiet=True)
