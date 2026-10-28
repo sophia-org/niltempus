@@ -8,8 +8,12 @@
 use sophia_image_producer::ResourceStatusKind;
 use sophia_shell_client::{
     IMAGE_CAPABILITY_DMA_BUF, IMAGE_CAPABILITY_OWNED_RING, ImageChannelState, OfferState,
-    ProducerRoleBounds, RingOfferState, RingUpload, ShellClientError, ShellClientOptions,
-    ShellConnection, ShellImageConfig,
+    ProducerRoleBounds, RetireOnPresent, RetireProgress, RingOfferState, RingUpload,
+    ShellClientError, ShellClientOptions, ShellConnection, ShellImageConfig,
+};
+use sophia_shell_protocol::shell::content::{
+    ContentCandidateRetire, SOPHIA_SHELL_CAPABILITY_CONTENT_RETIRE_ON_PRESENT,
+    SOPHIA_SHELL_RETIRE_ON_PRESENT_REVISION,
 };
 use sophia_shell_protocol::*;
 use std::{
@@ -66,6 +70,10 @@ struct Config {
     frames: u64,
     height: u64,
     hold_msec: u64,
+    /// W2 prototype: name each predecessor in its successor's candidate
+    /// instead of retiring it explicitly. Needs a session that negotiates
+    /// r12 with capability bit 17; production policy does not.
+    retire_on_present: bool,
 }
 
 /// Diagnostics are explicit; ordinary runs retain the original exact keys.
@@ -78,14 +86,20 @@ fn parse_config(text: &str) -> Result<Config> {
     let ring = config["source"].as_str() == Some("owned_ring");
     let profiling = object.contains_key("capture_profile");
     let reusing = object.contains_key("dma_reuse");
+    let retiring = object.contains_key("retire_on_present");
     let allowed = |k: &str| {
         KEYS.contains(&k)
             || (ring && k == "ring_slots")
             || k == "capture_profile"
             || k == "dma_reuse"
+            || k == "retire_on_present"
     };
     if object.len()
-        != KEYS.len() + usize::from(ring) + usize::from(profiling) + usize::from(reusing)
+        != KEYS.len()
+            + usize::from(ring)
+            + usize::from(profiling)
+            + usize::from(reusing)
+            + usize::from(retiring)
         || object.keys().any(|k| !allowed(k))
     {
         return Err(
@@ -127,6 +141,13 @@ fn parse_config(text: &str) -> Result<Config> {
             config["dma_reuse"]
                 .as_bool()
                 .ok_or("dma_reuse must be boolean")?
+        } else {
+            false
+        },
+        retire_on_present: if retiring {
+            config["retire_on_present"]
+                .as_bool()
+                .ok_or("retire_on_present must be boolean")?
         } else {
             false
         },
@@ -174,7 +195,7 @@ fn adopt(fd: i32) -> Result<UnixStream> {
 }
 
 impl Wire {
-    fn connect(source: Source) -> Result<Self> {
+    fn connect(source: Source, retire_on_present: bool) -> Result<Self> {
         if std::env::var_os("SOPHIA_SHELL_SOCKET").is_some() {
             return Err("ambiguous shell wire".into());
         }
@@ -202,14 +223,24 @@ impl Wire {
             Source::DmaBuf => IMAGE_CAPABILITY_DMA_BUF,
             Source::OwnedRing { .. } => 0,
         };
+        // W2 asks for exactly r12 and its capability; it never falls back.
+        let (revision, w2) = if retire_on_present {
+            (
+                SOPHIA_SHELL_RETIRE_ON_PRESENT_REVISION,
+                SOPHIA_SHELL_CAPABILITY_CONTENT_RETIRE_ON_PRESENT,
+            )
+        } else {
+            (10, 0)
+        };
         let options = ShellClientOptions {
-            minimum_revision: 10,
-            maximum_revision: 10,
+            minimum_revision: revision,
+            maximum_revision: revision,
             required_capabilities: SOPHIA_SHELL_CAPABILITY_DESCRIPTOR_SWITCHER
                 | SOPHIA_SHELL_CAPABILITY_CONTENT_SURFACE
                 | SOPHIA_SHELL_CAPABILITY_CONTENT_DISCRETE_INPUT
                 | IMAGE_CAPABILITY_OWNED_RING
-                | dma,
+                | dma
+                | w2,
             handshake_timeout: WAIT,
         };
         Ok(Self {
@@ -220,14 +251,23 @@ impl Wire {
 
     fn send(&mut self, id: u64, records: &[ShellContentRecord]) -> Result<()> {
         let transaction = TransactionId::from_raw(id);
+        self.admit(|client| {
+            if records.len() == 1 {
+                client.enqueue_content(transaction, &records[0])
+            } else {
+                client.enqueue_content_group(transaction, records)
+            }
+        })
+    }
+
+    /// Admit one unit, retrying while the local queue is full.
+    fn admit(
+        &mut self,
+        mut enqueue: impl FnMut(&mut ShellConnection) -> std::result::Result<(), ShellClientError>,
+    ) -> Result<()> {
         let deadline = Instant::now() + WAIT;
         loop {
-            let result = if records.len() == 1 {
-                self.client.enqueue_content(transaction, &records[0])
-            } else {
-                self.client.enqueue_content_group(transaction, records)
-            };
-            match result {
+            match enqueue(&mut self.client) {
                 Ok(()) => break,
                 Err(ShellClientError::QueueSaturated) if Instant::now() < deadline => {
                     self.client
@@ -241,10 +281,14 @@ impl Wire {
     }
 
     fn receive(&mut self) -> Result<ShellContentRecord> {
+        self.receive_tx().map(|(_, record)| record)
+    }
+
+    fn receive_tx(&mut self) -> Result<(TransactionId, ShellContentRecord)> {
         let deadline = Instant::now() + WAIT;
         loop {
-            if let Some((_, record)) = self.client.poll_content()? {
-                return Ok(record);
+            if let Some(received) = self.client.poll_content()? {
+                return Ok(received);
             }
             if Instant::now() >= deadline {
                 return Err("response timeout".into());
@@ -397,6 +441,39 @@ impl Wire {
     }
 }
 
+/// The candidate dialogue `present` needs, so tests can script the session.
+trait Dialogue {
+    fn send(&mut self, id: u64, records: &[ShellContentRecord]) -> Result<()>;
+    fn send_retiring(
+        &mut self,
+        id: u64,
+        records: &[ShellContentRecord],
+        retire: ContentCandidateRetire,
+    ) -> Result<()>;
+    fn receive_tx(&mut self) -> Result<(TransactionId, ShellContentRecord)>;
+    fn receive(&mut self) -> Result<ShellContentRecord> {
+        self.receive_tx().map(|(_, record)| record)
+    }
+}
+
+impl Dialogue for Wire {
+    fn send(&mut self, id: u64, records: &[ShellContentRecord]) -> Result<()> {
+        Wire::send(self, id, records)
+    }
+    fn send_retiring(
+        &mut self,
+        id: u64,
+        records: &[ShellContentRecord],
+        retire: ContentCandidateRetire,
+    ) -> Result<()> {
+        let transaction = TransactionId::from_raw(id);
+        self.admit(|client| client.enqueue_content_group_with_retire(transaction, records, retire))
+    }
+    fn receive_tx(&mut self) -> Result<(TransactionId, ShellContentRecord)> {
+        Wire::receive_tx(self)
+    }
+}
+
 fn clock_usec() -> u64 {
     let t = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
     u64::try_from(t.tv_sec).unwrap() * 1_000_000 + u64::try_from(t.tv_nsec).unwrap() / 1000
@@ -436,10 +513,14 @@ fn run() -> Result<()> {
         frames,
         height,
         hold_msec: hold,
+        retire_on_present,
     } = parse_config(&text)?;
     let _ = SCHEMA.set(source.schema());
     let socket = std::env::var_os("SOPHIA_SHELL_9P_SOCKET").ok_or("missing file endpoint")?;
-    let mut wire = Wire::connect(source)?;
+    let mut wire = Wire::connect(source, retire_on_present)?;
+    if retire_on_present && !wire.client.retire_on_present() {
+        return Err("session did not grant retire-on-present".into());
+    }
     let ShellContentRecord::Limits(limits) = wire.receive()? else {
         return Err("missing limits".into());
     };
@@ -558,6 +639,7 @@ fn run() -> Result<()> {
     }
     let mut timing_start = None;
     let mut timing_end = None;
+    let mut retire = retire_on_present.then(|| RetireOnPresent::new(grant));
     for generation in 1..=frames {
         let resource = resource_for_frame(generation);
         if let Some(canvas) = &mut ring_canvas {
@@ -604,6 +686,7 @@ fn run() -> Result<()> {
             output.output,
             facts.facts_generation,
             generation,
+            retire.as_mut(),
         )?;
         if capture_profile && source == Source::DmaBuf && matches!(generation, 120 | 2120) {
             let snapshot =
@@ -614,6 +697,9 @@ fn run() -> Result<()> {
                 timing_end = Some(snapshot);
             }
         }
+    }
+    if let Some(retire) = &retire {
+        drained(retire, frames)?;
     }
     // A reused export is destroyed only now, after the counted window.
     drop(backing);
@@ -719,14 +805,17 @@ fn ring_frame(
 }
 
 /// Demand, permit, the one-placement candidate through presentation, then
-/// retirement of the predecessor once its successor is shown.
+/// retirement of the predecessor once its successor is shown. With `retire`
+/// (W2) the candidate names its predecessor instead of a separate retire, and
+/// the predecessor's exact release is still awaited before the next frame.
 fn present(
-    wire: &mut Wire,
+    wire: &mut impl Dialogue,
     grant: ContentGrant,
     allocation: &ContentAllocationResult,
     output: ContentOutputId,
     facts_generation: u64,
     generation: u64,
+    mut retire: Option<&mut RetireOnPresent>,
 ) -> Result<()> {
     let resource = resource_for_frame(generation);
     let demand_time = clock_usec();
@@ -806,10 +895,30 @@ fn present(
         candidate_generation: generation,
         submitted_monotonic_usec: clock_usec(),
     })?;
-    wire.send(6, &records)?;
+    // The first frame has no predecessor to name.
+    let intent = retire
+        .as_ref()
+        .filter(|_| generation > 1)
+        .map(|_| ContentCandidateRetire {
+            retire_transaction: TransactionId::from_raw(7),
+            resource: resource_for_frame(generation - 1),
+        });
+    match intent {
+        Some(intent) => {
+            wire.send_retiring(6, &records, intent)?;
+            if let Some(tracker) = retire.as_deref_mut() {
+                tracker
+                    .name(output, generation, intent)
+                    .map_err(|e| format!("retire intent refused: {e:?}"))?;
+            }
+        }
+        None => wire.send(6, &records)?,
+    }
     let mut prepared = false;
     loop {
-        let ShellContentRecord::CandidateOutcome(outcome) = wire.receive()? else {
+        let (transaction, record) = wire.receive_tx()?;
+        let progress = observe(&mut retire, transaction, &record)?;
+        let ShellContentRecord::CandidateOutcome(outcome) = record else {
             return Err("unexpected candidate response".into());
         };
         if outcome.grant != grant
@@ -839,13 +948,32 @@ fn present(
             reason: outcome.reason,
             observed_monotonic_usec: clock_usec(),
         })?;
+        // A named predecessor of a rejected candidate stays ours (Kept).
         if outcome.kind != 2 {
             return Err("candidate was not presented".into());
+        }
+        if let Some(intent) = intent
+            && progress != RetireProgress::Retiring(intent.resource)
+        {
+            return Err("presented candidate did not retire its predecessor".into());
         }
         if !prepared || outcome.presentation_epoch == 0 {
             return Err("presentation lacks preparation or epoch".into());
         }
         break;
+    }
+    // The release may share the Presented read; it is the next record either
+    // way, and nothing else is in flight until it arrives.
+    if let Some(intent) = intent {
+        let (transaction, record) = wire.receive_tx()?;
+        let progress = observe(&mut retire, transaction, &record)?;
+        let ShellContentRecord::ResourceReleased(released) = record else {
+            return Err("missing retired resource release".into());
+        };
+        if progress != RetireProgress::Released(intent.resource) || released.reason != 0 {
+            return Err("wrong retired resource release".into());
+        }
+        return Ok(());
     }
     // Keep the currently displayed resource until a successor is shown.
     if generation > 1 {
@@ -863,6 +991,29 @@ fn present(
         if released.grant != grant || released.resource != old || released.reason != 0 {
             return Err("wrong retired resource release".into());
         }
+    }
+    Ok(())
+}
+
+fn observe(
+    retire: &mut Option<&mut RetireOnPresent>,
+    transaction: TransactionId,
+    record: &ShellContentRecord,
+) -> Result<RetireProgress> {
+    match retire {
+        Some(tracker) => tracker
+            .observe(transaction, record)
+            .map_err(|e| format!("retire-on-present: {e:?}").into()),
+        None => Ok(RetireProgress::Unrelated),
+    }
+}
+
+/// After the final frame no predecessor is still named or retiring. The
+/// last resource is never named (it has no successor); it stays displayed
+/// and ours until disconnect, as on the explicit path.
+fn drained(retire: &RetireOnPresent, frames: u64) -> Result<()> {
+    if (frames.saturating_sub(1).max(1)..=frames).any(|f| retire.holds(resource_for_frame(f))) {
+        return Err("retire-on-present left a predecessor undrained".into());
     }
     Ok(())
 }
@@ -899,6 +1050,9 @@ fn main() {
     }
 }
 
+#[cfg(test)]
+#[path = "../tests/support/present_retire.rs"]
+mod present_retire;
 #[cfg(test)]
 #[path = "../tests/support/config.rs"]
 mod tests;

@@ -20,6 +20,15 @@ Optional `dma_reuse` (boolean) is accepted only for `dma_buf`; absent or
 `capture_profile: true` (and so its bounds), so no comparison plan can treat
 reused backing as fresh G before a separate measured acceptance.
 
+Optional `retire_on_present` (boolean, W2 prototype) negotiates exactly r12
+with capability bit 17 and fails if the session does not grant it. Each
+successor candidate then names its predecessor (retire transaction 7) instead
+of sending a separate `ResourceRetire`; the first frame names nothing, the
+predecessor's exact `ResourceReleased` is still awaited before the next
+frame, and the last resource stays held until disconnect as on the explicit
+path. No production session advertises r12 today, so this path is
+device-free only.
+
 Optional `capture_profile: true` enables cumulative producer DMA-stage timing
 for a 24-row, 2120-frame, 60000-ms diagnostic. The runner must also pin
 `instrumentation: "capture-profile"`; it enables the host's render counters.

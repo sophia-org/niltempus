@@ -21,3 +21,19 @@ sophia-shell-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-
 sophia-launch-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "0706ea2c78cd16ba59ed209620354f30a2c78906" }
 sophia-9p-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "0706ea2c78cd16ba59ed209620354f30a2c78906" }
 sophia-image-producer = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "0706ea2c78cd16ba59ed209620354f30a2c78906" }
+
+# W2 PROTOTYPE ONLY (cpu/w2-peer): the SDK's unpublished local commit
+# 8b1f7042 (cpu/w2-codec), adding the r12/bit-17 retire-on-present client.
+# This breaks PROVENANCE.txt's public-URL rule on purpose, for device-free
+# tests; it must not be packaged, released or merged until the commit is
+# reachable upstream and this patch is removed.
+[patch."https://github.com/sophia-org/sophia-desktop-sdk-rs"]
+sophia-9p-client = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "8b1f7042225f876163ccc2ecfc023f33378de7f7" }
+sophia-9p-records = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "8b1f7042225f876163ccc2ecfc023f33378de7f7" }
+sophia-desktop-ids = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "8b1f7042225f876163ccc2ecfc023f33378de7f7" }
+sophia-image-producer = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "8b1f7042225f876163ccc2ecfc023f33378de7f7" }
+sophia-isb = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "8b1f7042225f876163ccc2ecfc023f33378de7f7" }
+sophia-launch-client = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "8b1f7042225f876163ccc2ecfc023f33378de7f7" }
+sophia-lock-protocol = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "8b1f7042225f876163ccc2ecfc023f33378de7f7" }
+sophia-shell-client = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "8b1f7042225f876163ccc2ecfc023f33378de7f7" }
+sophia-shell-protocol = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "8b1f7042225f876163ccc2ecfc023f33378de7f7" }
