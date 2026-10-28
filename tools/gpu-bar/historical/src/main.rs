@@ -801,6 +801,7 @@ fn run() -> Result<()> {
     emit(Event::End {
         offered: frames,
         completed: frames,
+        retire: None,
     })?;
     std::thread::sleep(Duration::from_millis(hold));
     Ok(())

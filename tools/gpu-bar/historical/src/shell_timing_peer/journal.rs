@@ -25,6 +25,34 @@ pub struct Placement {
     pub destination_y_px: i32,
 }
 
+/// Run totals for the predecessor-retirement exchange (`retire_counter_schema`
+/// is 1). A send counts once it succeeded; a release counts only after the
+/// peer's exact validation, never from the expected frame total.
+#[derive(Serialize, Debug, PartialEq, Eq)]
+pub struct RetireCounters {
+    pub retire_counter_schema: u8,
+    pub explicit_retires_sent: u64,
+    pub predecessor_releases_received: u64,
+}
+
+impl RetireCounters {
+    pub const SCHEMA: u8 = 1;
+
+    pub fn new() -> Self {
+        Self {
+            retire_counter_schema: Self::SCHEMA,
+            explicit_retires_sent: 0,
+            predecessor_releases_received: 0,
+        }
+    }
+}
+
+impl Default for RetireCounters {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event<'a> {
@@ -85,6 +113,9 @@ pub enum Event<'a> {
     End {
         offered: u64,
         completed: u64,
+        /// Additive, versioned; a peer without counters emits the old line.
+        #[serde(flatten)]
+        retire: Option<RetireCounters>,
     },
     Failed {
         error: &'a str,
@@ -116,6 +147,37 @@ mod tests {
         let mut out = Vec::new();
         write(&mut out, schema, event).unwrap();
         String::from_utf8(out).unwrap()
+    }
+
+    /// Without counters the end record is byte-identical to the old one; with
+    /// them it carries exactly the versioned extension, at the run's schema.
+    #[test]
+    fn end_record_counters_are_an_additive_versioned_extension() {
+        assert_eq!(
+            record(
+                7,
+                Event::End {
+                    offered: 2120,
+                    completed: 2120,
+                    retire: None,
+                }
+            ),
+            "{\"schema\":7,\"event\":\"end\",\"offered\":2120,\"completed\":2120}\n"
+        );
+        let mut counters = RetireCounters::new();
+        counters.explicit_retires_sent = 2119;
+        counters.predecessor_releases_received = 2119;
+        assert_eq!(
+            record(
+                7,
+                Event::End {
+                    offered: 2120,
+                    completed: 2120,
+                    retire: Some(counters),
+                }
+            ),
+            "{\"schema\":7,\"event\":\"end\",\"offered\":2120,\"completed\":2120,\"retire_counter_schema\":1,\"explicit_retires_sent\":2119,\"predecessor_releases_received\":2119}\n"
+        );
     }
 
     /// A fresh run's start record is byte-identical to the schema-2 record

@@ -119,7 +119,78 @@ fn run_frame(
     generation: u64,
     retire: Option<&mut RetireOnPresent>,
 ) -> Result<()> {
-    present(script, GRANT, &allocation(), OUTPUT, 1, generation, retire)
+    run_counted(script, generation, retire, &mut RetireCounters::new())
+}
+
+fn run_counted(
+    script: &mut Script,
+    generation: u64,
+    retire: Option<&mut RetireOnPresent>,
+    counters: &mut RetireCounters,
+) -> Result<()> {
+    present(
+        script,
+        GRANT,
+        &allocation(),
+        OUTPUT,
+        1,
+        generation,
+        retire,
+        counters,
+    )
+}
+
+fn counts(sent: u64, received: u64) -> RetireCounters {
+    RetireCounters {
+        retire_counter_schema: 1,
+        explicit_retires_sent: sent,
+        predecessor_releases_received: received,
+    }
+}
+
+/// Both paths count one validated release per retired predecessor; only the
+/// explicit path sends retires. A refused release and the first frame count
+/// nothing.
+#[test]
+fn counters_follow_validated_exchanges_not_frames() {
+    let mut script = Script::default();
+    script.frame(1, 2);
+    for generation in 2..=3 {
+        script
+            .frame(generation, 2)
+            .released(7, GRANT, resource_for_frame(generation - 1));
+    }
+    let mut explicit = RetireCounters::new();
+    for generation in 1..=3 {
+        run_counted(&mut script, generation, None, &mut explicit).unwrap();
+    }
+    assert_eq!(explicit, counts(2, 2));
+
+    let mut script = Script::default();
+    script.frame(1, 2);
+    for generation in 2..=3 {
+        script
+            .frame(generation, 2)
+            .released(7, GRANT, resource_for_frame(generation - 1));
+    }
+    let mut tracker = RetireOnPresent::new(GRANT);
+    let mut named = RetireCounters::new();
+    for generation in 1..=3 {
+        run_counted(&mut script, generation, Some(&mut tracker), &mut named).unwrap();
+    }
+    assert_eq!(named, counts(0, 2));
+
+    let mut script = Script::default();
+    script.frame(2, 2).released(7, GRANT, resource_for_frame(5));
+    let mut refused = RetireCounters::new();
+    assert!(run_counted(&mut script, 2, None, &mut refused).is_err());
+    assert_eq!(refused, counts(1, 0));
+    let mut script = Script::default();
+    script.frame(2, 2).released(7, GRANT, resource_for_frame(5));
+    let mut tracker = RetireOnPresent::new(GRANT);
+    let mut refused = RetireCounters::new();
+    assert!(run_counted(&mut script, 2, Some(&mut tracker), &mut refused).is_err());
+    assert_eq!(refused, counts(0, 0));
 }
 
 fn intent_for(generation: u64) -> ContentCandidateRetire {

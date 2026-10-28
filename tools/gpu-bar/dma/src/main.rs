@@ -28,7 +28,7 @@ const JOURNAL_SCHEMA: u8 = 2;
 #[path = "../../historical/src/shell_timing_peer/journal.rs"]
 #[allow(dead_code)] // arm G emits no probe or retained-placement records
 mod journal;
-use journal::{Event, Upload};
+use journal::{Event, RetireCounters, Upload};
 #[path = "../../common/gpu_canvas.rs"]
 mod canvas;
 mod dma_frame;
@@ -640,6 +640,7 @@ fn run() -> Result<()> {
     let mut timing_start = None;
     let mut timing_end = None;
     let mut retire = retire_on_present.then(|| RetireOnPresent::new(grant));
+    let mut counters = RetireCounters::new();
     for generation in 1..=frames {
         let resource = resource_for_frame(generation);
         if let Some(canvas) = &mut ring_canvas {
@@ -687,6 +688,7 @@ fn run() -> Result<()> {
             facts.facts_generation,
             generation,
             retire.as_mut(),
+            &mut counters,
         )?;
         if capture_profile && source == Source::DmaBuf && matches!(generation, 120 | 2120) {
             let snapshot =
@@ -706,6 +708,7 @@ fn run() -> Result<()> {
     emit(Event::End {
         offered: frames,
         completed: frames,
+        retire: Some(counters),
     })?;
     if capture_profile && source == Source::DmaBuf {
         let record = if dma_reuse {
@@ -816,6 +819,7 @@ fn present(
     facts_generation: u64,
     generation: u64,
     mut retire: Option<&mut RetireOnPresent>,
+    counters: &mut RetireCounters,
 ) -> Result<()> {
     let resource = resource_for_frame(generation);
     let demand_time = clock_usec();
@@ -973,6 +977,7 @@ fn present(
         if progress != RetireProgress::Released(intent.resource) || released.reason != 0 {
             return Err("wrong retired resource release".into());
         }
+        counters.predecessor_releases_received += 1;
         return Ok(());
     }
     // Keep the currently displayed resource until a successor is shown.
@@ -985,12 +990,14 @@ fn present(
                 resource: old,
             })],
         )?;
+        counters.explicit_retires_sent += 1;
         let ShellContentRecord::ResourceReleased(released) = wire.receive()? else {
             return Err("missing retired resource release".into());
         };
         if released.grant != grant || released.resource != old || released.reason != 0 {
             return Err("wrong retired resource release".into());
         }
+        counters.predecessor_releases_received += 1;
     }
     Ok(())
 }
