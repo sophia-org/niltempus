@@ -332,6 +332,63 @@ class Report(unittest.TestCase):
         _, stats = bench.plan_run('s', self.root / 'imported')
         self.assertEqual((stats['evidence'], stats['missed_vblank_gaps'], stats['nominal_hz']), ('native', 0, 119.88))
 
+    def cpu_sophia(self, root):
+        src = sophia_run(root, 'none')
+        peer = src / 'peer.json'
+        peer.write_text(json.dumps(dict(producer='cpu', source='owned_ring')))
+        edit_json(src / 'plan.json', lambda v: v['request'].update(
+            wire='files', artifacts={'peer-config': dict(path=str(peer), sha256=bench.sha256(peer))}))
+        edit_json(src / 'panel-diagnostic.json', lambda v: v.update(schema=4))
+        edit_json(src / 'native-samples.json', lambda v: v.update(
+            producer=dict(kind='cpu', receipt=bench.CPU_RECEIPT)))
+        return src
+
+    def test_matched_cpu_requires_observed_and_pinned_producer(self):
+        mutations = {
+            'missing receipt': ('native-samples.json', lambda v: v.pop('producer')),
+            'null receipt': ('native-samples.json', lambda v: v.update(producer=None)),
+            'wrong fill': ('native-samples.json', lambda v: v['producer'].update(receipt=bench.CPU_RECEIPT + ' x')),
+            'extra field': ('native-samples.json', lambda v: v['producer'].update(extra=1)),
+            'gpu request': ('plan.json', lambda v: v['request'].update(producer='gpu')),
+            'null request': ('plan.json', lambda v: v['request'].update(producer=None)),
+            'old schema': ('panel-diagnostic.json', lambda v: v.update(schema=3)),
+            'float schema': ('panel-diagnostic.json', lambda v: v.update(schema=4.0)),
+            'unbound config': ('plan.json', lambda v: v['request'].update(artifacts={})),
+            'changed config': ('peer.json', lambda v: v.update(producer='gpu')),
+        }
+        src = self.cpu_sophia(self.root)
+        self.assertEqual(bench.sophia_producer(src), 'cpu_shm')
+        edit_json(src / 'plan.json', lambda v: v['request'].update(producer='cpu'))
+        self.assertEqual(bench.sophia_producer(src), 'cpu_shm')
+        for index, (name, (file, change)) in enumerate(mutations.items()):
+            root = self.root / str(index)
+            root.mkdir()
+            src = self.cpu_sophia(root)
+            edit_json(src / file, change)
+            with self.subTest(name=name), self.assertRaises(bench.Refused):
+                bench.sophia_producer(src)
+
+    def test_matched_report_refuses_historical_or_gpu_sophia(self):
+        external = run_dir(self.root, 'niri')
+        for index, producer in enumerate((None, 'gpu', 'cpu')):
+            root = self.root / str(index)
+            root.mkdir()
+            src = self.cpu_sophia(root) if producer == 'cpu' else sophia_run(root, 'none')
+            if producer == 'gpu':
+                edit_json(src / 'plan.json', lambda v: v['request'].update(producer='gpu'))
+            imported = root / 'imported'
+            self.assertEqual(bench.cmd_import_sophia(types.SimpleNamespace(
+                out=imported, run=src, allow_instrumented=False)), 0)
+            out = root / 'report'
+            status = bench.cmd_report(types.SimpleNamespace(
+                out=out, runs=[external, imported], matched_cpu=True, quiet=True))
+            report = json.loads((out / 'report.json').read_text())
+            self.assertEqual(status, 0 if producer == 'cpu' else 1)
+            self.assertEqual(bool(report['differences']), producer == 'cpu')
+            self.assertEqual(bool(report['refused']), producer != 'cpu')
+            if producer == 'cpu':
+                self.assertEqual({r['producer'] for r in report['rows']}, {'cpu_shm'})
+
     def test_sophia_import_refuses_a_failed_or_malformed_run(self):
         def dup(v):
             v['samples'][1] = dict(v['samples'][0])

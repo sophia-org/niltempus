@@ -193,3 +193,18 @@ Native defaults:
 - The installed niri 26.04 has not been proven to match `~/src/niri`.
 
 Tests: `python3 -I -B -W error tools/desktop-cpu/test_bench.py`.
+
+### Matched CPU producers
+
+Use `report --matched-cpu --out DIR RUN...` for the matched CPU comparison.
+External clients must still match the pinned two-buffer, full-damage
+`shade_mod128_a255` recipe. A Sophia row additionally needs panel schema 4,
+files/owned_ring with no instrumentation, the runner's exact observed CPU
+producer receipt, and an unchanged pinned peer configuration with
+`producer: "cpu"`. An absent historical request producer is not proof.
+Historical and GPU-readback rows are refused in this mode; ordinary reports
+remain available, with each row's producer recorded explicitly.
+
+This matches CPU pixel generation, not the protocols' custody, copy or
+presentation contracts. CPU covers only the bound processes, and each stack's
+latency remains its own submit-to-presentation span.

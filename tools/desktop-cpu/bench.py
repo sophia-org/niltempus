@@ -39,6 +39,7 @@ REPO = HERE.parent.parent
 CPUWIN = REPO / 'tools/cpu-window/cpuwin.py'
 CLIENTS = REPO / 'tools/external-bar/build'
 SCHEMA = 1
+CPU_RECEIPT = 'cpu_bar schema=1 source=owned_ring producer=cpu_shm fill=shade_mod128_a255'
 RIG_OTHER_OUTPUTS = ['HDMI-A-1', 'HDMI-A-2', 'DP-2', 'DP-3', 'DP-4', 'DP-5', 'DP-6',
                      'Writeback-1', 'Writeback-2']
 NATIVE_SOURCES = {'niri': {'wp_presentation'}, 'xlibre': {'xpresent', 'xpresent_late'}}
@@ -498,6 +499,31 @@ def relocate(out):
     return 0
 
 
+def sophia_producer(src):
+    """A missing historical request field is not evidence of the matched CPU path."""
+    native = json.loads((src / 'native-samples.json').read_text())
+    request = json.loads((src / 'plan.json').read_text())['request']
+    panel = json.loads((src / 'panel-diagnostic.json').read_text())
+    if 'producer' not in native and panel.get('schema') != 4:
+        return 'gpu_readback' if request.get('producer') == 'gpu' else 'unspecified'
+    if (native.get('producer') != dict(kind='cpu', receipt=CPU_RECEIPT)
+            or type(panel.get('schema')) is not int or panel['schema'] != 4
+            or request.get('producer', 'cpu') != 'cpu'
+            or request.get('wire') != 'files'
+            or request.get('source') != 'owned_ring'
+            or request.get('instrumentation') != 'none'):
+        raise Refused('matched CPU producer needs schema 4, files/owned_ring, no instrumentation and its exact receipt')
+    artifact = request.get('artifacts', {}).get('peer-config', {})
+    path = artifact.get('path')
+    if not path or sha256(path) != artifact.get('sha256'):
+        raise Refused('matched CPU peer configuration is missing or changed')
+    peer = json.loads(Path(path).read_text())
+    if (peer.get('producer') != 'cpu' or peer.get('source') != 'owned_ring'
+            or peer.get('capture_profile', False) is not False or 'dma_reuse' in peer):
+        raise Refused('matched CPU peer configuration is not the direct-fill owned-ring path')
+    return 'cpu_shm'
+
+
 def sophia_window(src):
     """A shell-timing run's counted window, validated: run outcome, output and
     shape, exact kernel-completion joins and sampled identity. Returns
@@ -553,6 +579,7 @@ def cmd_import_sophia(args):
     src = args.run.resolve()
     try:
         instrumentation, expect, _, _ = sophia_window(src)
+        sophia_producer(src)
     except (Refused, KeyError, TypeError, ValueError, OSError) as e:
         print(f'REFUSED: {e!r}', file=sys.stderr)
         return 2
@@ -672,6 +699,7 @@ def plan_run(name, run_dir):
     if record.get('schema') != SCHEMA:
         raise Refused(f'{run_dir}: run.json schema {record.get("schema")}')
     notes, evidence = [], record['evidence']
+    producer = 'cpu_shm'
     if record['stack'] == 'sophia':
         src = Path(record['source'])
         if sorted(record['files']) != sorted(SOPHIA_FILES):
@@ -680,6 +708,7 @@ def plan_run(name, run_dir):
             if f['path'] != str(src / label) or sha256(f['path']) != f['sha256']:
                 raise Refused(f'{run_dir}: {label} changed since import')
         instrumentation, expect, presented, latency = sophia_window(src)
+        producer = sophia_producer(src)
         if expect != record['expect']:
             raise Refused(f'{run_dir}: bound processes differ from the import')
         evidence = 'native' if instrumentation == 'none' else 'diagnostic'
@@ -746,7 +775,7 @@ def plan_run(name, run_dir):
                  anchor_start_ns=presented[0], anchor_end_ns=presented[-1],
                  expect={k: dict(pid=v['pid'], starttime=v['starttime']) for k, v in record['expect'].items()})
     return entry, dict(name=name, stack=record['stack'], mode=record['mode'], evidence=evidence,
-                       run=str(run_dir), notes=notes, **stats)
+                       run=str(run_dir), producer=producer, notes=notes, **stats)
 
 
 def cmd_report(args):
@@ -757,6 +786,8 @@ def cmd_report(args):
         name = f'{index:02d}-{run.name}'
         try:
             entry, stats = plan_run(name, run.resolve())
+            if getattr(args, 'matched_cpu', False) and stats['producer'] != 'cpu_shm':
+                raise Refused('matched CPU comparison refuses an unqualified or GPU producer')
         except (Refused, KeyError, ValueError) as e:
             refused.append(dict(name=name, run=str(run), reason=str(e)))
             continue
@@ -788,6 +819,7 @@ def cmd_report(args):
     # A difference is only reported when every requested row is native and accepted.
     native = evidence == {'native'} and not refused
     report = dict(schema=SCHEMA, evidence='native' if native else 'diagnostic',
+                  matched_cpu=getattr(args, 'matched_cpu', False),
                   rows=rows, stacks=cpu.get('arms', {}), differences=cpu.get('differences', {}) if native else {},
                   refused=refused, cpuwin_status=status)
     write_json(out / 'report.json', report)
@@ -818,10 +850,15 @@ def render(report):
     lines.append('- CPU is the bound processes only (each thread group, not its children). The start and end '
                  'process snapshots are a boundary inventory, not exhaustive: transient children and setsid '
                  'helpers between them are missed. This is not whole-desktop CPU.')
-    lines.append('- Pixel producers differ: the external clients fill shared memory on the CPU, while the '
-                 'Sophia peer renders on the GPU and copies a readback into its owned ring. Server and client '
-                 'rows are reported separately; a combined figure describes these concrete paths, not '
-                 'intrinsic compositor efficiency.')
+    if report.get('matched_cpu'):
+        lines.append('- Matched CPU producers fill two reusable shared-memory buffers directly with '
+                     'shade_mod128_a255. Sophia uses its owned ring, niri wl_shm, and XLibre MIT-SHM. '
+                     'Their admission, copying and presentation contracts remain different; this measures '
+                     'these paths, not intrinsic compositor efficiency.')
+    else:
+        lines.append('- Producers are recorded per row. Historical or GPU-readback Sophia rows are not '
+                     'a matched CPU comparison with the external shared-memory clients. Use --matched-cpu '
+                     'to require qualified CPU producers in every row.')
     lines.append('- Bounds are tick attribution intervals, not confidence intervals. Latency is each '
                  "stack's own submit-to-presentation span, not a common end-to-end measure.")
     return '\n'.join(lines) + '\n'
@@ -862,6 +899,7 @@ def main():
     s.set_defaults(fn=cmd_import_sophia)
     p = sub.add_parser('report')
     p.add_argument('--out', type=Path, required=True)
+    p.add_argument('--matched-cpu', action='store_true', help='require qualified CPU shared-memory producers in every row')
     p.add_argument('runs', type=Path, nargs='+')
     p.set_defaults(fn=cmd_report)
     args = ap.parse_args()
