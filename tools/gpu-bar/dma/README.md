@@ -56,3 +56,27 @@ when the peer observed the event, so acceptance and release may be equal.
 
 Tests live in `tests/support/` and are compiled as private `#[cfg(test)]`
 modules of the binary.
+
+## Matched CPU producer
+
+`"producer": "cpu"` is an explicit owned-ring-only mode. It fills the mapped
+SDK ring slot directly through `image_upload_ring_fill`, using
+`shade_mod128_a255` (all RGB bytes equal generation modulo 128, alpha 255).
+It initializes no GPU producer and performs no readback or staging copy.
+Acceptance, exact slot settlement, candidate presentation and predecessor
+retirement use the unchanged ring loop. The two configured slots do not imply
+two frames in flight: this peer remains serial.
+
+Absent `producer`, or `"producer": "gpu"`, keeps the GPU path. Other types/values
+are refused. CPU mode refuses DMA-BUF, enabled capture profiling and any
+`dma_reuse` key. It emits exactly one stderr producer receipt:
+
+```
+cpu_bar schema=1 source=owned_ring producer=cpu_shm fill=shade_mod128_a255
+```
+
+The historical `gpu_bar_prepare` tag is retained for compatibility; in CPU mode
+its span measures only the direct fill callback. It is not GPU evidence.
+Schema-7 journal records and settlement rules are unchanged. A new runner/package
+must pair the requested producer, config and observed receipt; old GPU-only
+postflight rules must not be relaxed silently. No benchmark result is implied.

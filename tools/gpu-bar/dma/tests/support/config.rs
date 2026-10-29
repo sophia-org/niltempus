@@ -68,3 +68,25 @@ fn dma_reuse_is_a_dma_only_boolean_diagnostic() {
         assert!(parse_config(&ring).is_err(), "{value}");
     }
 }
+
+#[test]
+fn cpu_is_explicit_and_only_the_plain_owned_ring_path() {
+    assert_eq!(parse_config(RING).unwrap().producer, Producer::Gpu);
+    assert_eq!(parse_config(DMA).unwrap().producer, Producer::Gpu);
+    let cpu = RING.replace('}', r#","producer":"cpu"}"#);
+    assert_eq!(parse_config(&cpu).unwrap().producer, Producer::Cpu);
+    assert_eq!(
+        parse_config(&RING.replace('}', r#","producer":"gpu"}"#)).unwrap(),
+        parse_config(RING).unwrap()
+    );
+    for bad in ["null", "true", "1", "[]", "{}", "\"CPU\"", "\"other\""] {
+        assert!(parse_config(&RING.replace('}', &format!(",\"producer\":{bad}}}"))).is_err());
+    }
+    for bad in [
+        DMA.replace('}', r#","producer":"cpu"}"#),
+        cpu.replace('}', r#","capture_profile":true}"#),
+        cpu.replace('}', r#","dma_reuse":false}"#),
+    ] {
+        assert!(parse_config(&bad).is_err(), "{bad}");
+    }
+}
