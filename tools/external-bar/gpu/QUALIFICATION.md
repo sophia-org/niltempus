@@ -77,20 +77,27 @@ write into the observer's private tmpfs, lost on exit. The recipe grammar's
 `source` property does not add filesystem authority. Do not present a writable
 destination as configuration available today.
 
-The preferred next implementation is a bounded, framed pixel stream from a
-diagnostic observer through its already inherited stdout, avoiding new writable
-mount authority. Source tracing finds default inherited FDs 0/1/2 in
-`supervisor/protection.rs`, with observer preparation redirecting diagnostic
-stderr only in `namespace_launch.rs::prepare`. This is not yet an execution
-proof: verify the complete spawn/wrapper chain with a confined device-free child
-before relying on stdout. The existing capture CLI emits only metadata/checksum,
-so a narrowly scoped diagnostic delivery helper or CLI change is still required.
-Bind its source/executable, process and request; bound records below PIPE_BUF,
-sequence and size-check all chunks, bind the full-frame checksum and generation,
-and reject interleaving, truncation, duplicate chunks and EOF. Persist reconstructed
-PAM only in the outer private evidence directory, never through a broader recipe.
-If this route cannot be proved, stop for a separate reviewed delivery design;
-neither checksum-only acceptance nor a new host write grant is an implicit fallback.
+Inherited stdout is **not** a suitable capture channel either. The observer
+inherits Session's fd 1, not the `sophia launch` caller's pipe. At d9116ff0 the
+session wrapper may discard it, write it to explicitly untrusted output, or tee
+it into shared logs and the operator VT. Atomic chunks do not identify their
+writer. Neither shared Session stdout nor the untrusted-output branch is capture
+acceptance evidence. Do not change an environment variable to bypass that rule.
+
+The immediate prerequisite is a separately reviewed, bounded diagnostic delivery
+channel with a private endpoint bound by the process owner to this observer.
+Prefer a dedicated observer stdout pipe at spawn over new writable mount authority;
+this needs host/supervisor diagnostic plumbing and its own source/build/proof gate.
+The normal recipe and Session stdout policy must stay unchanged. The launch caller
+cannot nominate an arbitrary FD or destination through the public launch request.
+The existing capture CLI emits only metadata/checksum, so a diagnostic pixel
+delivery helper or CLI change is required too. Bind source/executable, process,
+request and output generation; enforce total size, sequencing, deadline and full
+frame checksum, rejecting truncation, duplicates and EOF. Keep pixel bytes out of
+Session metadata logs and the VT; persist PAM only through the trusted private
+collector. A complete same-namespace launch and private-delivery execution proof
+is required before sealing. Neither checksum-only acceptance, a writable recipe
+extension nor broad FD inheritance is an implicit fallback.
 
 Confirm the exact host artifact contains the role/launch paths and DMA
 feature/capability gate.
