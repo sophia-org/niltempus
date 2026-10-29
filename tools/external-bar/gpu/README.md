@@ -17,6 +17,7 @@ CARGO_BUILD_JOBS=2 cargo-slot niltempus sh -c '
 make -C tools/external-bar gpu-check
 python3 -I -B tools/external-bar/test/gpu_cli.py
 python3 -I -B -W error tools/external-bar/test/gpu_receipts.py
+python3 -I -B -W error tools/external-bar/test/gpu_pixels.py
 ```
 
 The GPU clients require `--lifecycle fresh --buffers 2 --workload fresh`.
@@ -97,3 +98,8 @@ The XML is the installed stable linux-dmabuf-v1 protocol copied with its license
 Generated code stays in ignored build output. The bridge's local signed Lom
 `file://` pin remains an experimental provenance exception, not publication or
 packaging approval.
+
+The next native gate is specified in [QUALIFICATION.md](QUALIFICATION.md).
+`pixels.py` provides its strict, device-free non-grey consumer-capture check.
+The diagnostic colour/hold producers and capture controller are still required;
+neither validator is a native launch recipe or a qualification pass.
