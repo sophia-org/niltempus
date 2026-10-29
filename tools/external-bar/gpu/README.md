@@ -16,6 +16,7 @@ CARGO_BUILD_JOBS=2 cargo-slot niltempus sh -c '
 '
 make -C tools/external-bar gpu-check
 python3 -I -B tools/external-bar/test/gpu_cli.py
+python3 -I -B -W error tools/external-bar/test/gpu_receipts.py
 ```
 
 The GPU clients require `--lifecycle fresh --buffers 2 --workload fresh`.
@@ -53,16 +54,24 @@ detach; Sophia releases its producer source after capture. Two is a common upper
 bound, not a claim of identical instantaneous retention or zero-copy behavior.
 Fresh allocation/import costs are intentionally inside this separate GPU lane.
 
-## Evidence contract for the future harness
+## Receipt validation and remaining harness gates
 
 GPU headers identify `fill=vello_shade_mod128_opaque_rgb`; XR24 padding is not
 an alpha assertion. `fill_start` precedes scene render/export and producer
 completion, not a CPU fill. CPU headers remain unchanged.
 
-A GPU qualifier must require exactly one of each `# gpu_producer`, `# gpu_import`
-and `# gpu_end`, with exact fields/values for that transport and rendered/released
-equal to frames plus warmup. It must bind the client/bridge source and binary,
-device and display identities, and the existing timestamps/journal/cleanup.
+`gpu/qualify.py JOURNAL --transport wayland|x11 --frames N --warmup N` requires
+exactly one of each `# gpu_producer`, `# gpu_import` and `# gpu_end`, with exact
+fields/values for the declared transport and rendered/released equal to frames
+plus warmup. It also checks the GPU header, contiguous counted rows, timestamp
+order and native presentation source, and X's whole-run clock-check counts.
+All metadata is allowlisted, unique and in the writer's exact order. Wayland's
+DP-1/1920×1080/scale-1 output row is required before the header; its drain receipt
+precedes the counted rows, unlike X. The returned client PID still needs binding
+to the sampled process. Foreign CPU attachment/mode records are refused.
+Its result is only `receipts_valid`. The future harness must still bind the
+client/bridge source and binary, device/display/process identities, native
+anchors and cleanup. It must not treat this receipt validator as a native pass.
 These lines are self-reported supporting evidence, not authenticated custody.
 The current CPU comparison harness is not extended or qualified for GPU rows.
 
@@ -70,9 +79,19 @@ The current CPU comparison harness is not extended or qualified for GPU rows.
 socket-pair timeout. It never connects to a display or opens a GPU. The mock
 exports memfds for FD-contract tests, not DMA-BUFs; it is never linked into either
 GPU binary. Native pixel correctness (including a non-grey channel-order oracle),
-real imports, implicit synchronization, release/drain and installed niri device
-configuration remain separate qualification gates. Failure listener presence
+real imports, implicit synchronization and release/drain remain separate
+qualification gates. Failure listener presence
 does not prove that a compositor successfully imports the real export.
+
+`gpu/niri.kdl` is a separate diagnostic configuration for this rig. It pins
+renderD128 with `debug { render-drm-device ... }`, DP-1 at 1920×1080/119.880 Hz,
+and disables the other known outputs. `niri validate --config PATH` checks
+syntax only; the installed binary's hash/version and this file's hash must be
+recorded. It does not prove that a live compositor used that device or mode.
+Live surface feedback must still resolve the main/tranche devices to 03:00.0,
+and output readback must match; retain the live niri render-device log if emitted.
+No existing CPU configuration is changed. A misspelled device-key negative control
+must fail validation, alongside successful validation of the pinned configuration.
 
 The XML is the installed stable linux-dmabuf-v1 protocol copied with its license.
 Generated code stays in ignored build output. The bridge's local signed Lom

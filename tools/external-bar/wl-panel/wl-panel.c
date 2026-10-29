@@ -477,6 +477,9 @@ int main(int argc, char **argv) {
                    opt_workload == WL_BURSTY ? opt_interval_ms : 0,
                    opt_workload == WL_BURSTY ? "96x24+1824+0" : "full",
                    opt_workload == WL_IDLE ? opt_idle_sec : 0,
+#ifdef MATCHED_GPU
+                   "wp_presentation CLOCK_MONOTONIC (id=1); DMA-BUF implicit sync");
+#else
                    fresh_mode
                        ? "wp_presentation clock_id asserted CLOCK_MONOTONIC "
                          "(id=1), recorded as-is, not converted; fresh pools "
@@ -484,6 +487,7 @@ int main(int argc, char **argv) {
                          "wl_shm mmaps pools PROT_READ|PROT_WRITE MAP_SHARED)"
                        : "wp_presentation clock_id asserted CLOCK_MONOTONIC "
                          "(id=1), recorded as-is, not converted");
+#endif
 
     panel_init(&main_panel, PANEL_W, PANEL_H,
                ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |

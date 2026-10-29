@@ -1,0 +1,29 @@
+// Diagnostic configuration for the pinned 03:00.0 / renderD128 rig.
+debug {
+    render-drm-device "/dev/dri/renderD128"
+}
+hotkey-overlay {
+    skip-at-startup
+}
+animations {
+    off
+}
+xwayland-satellite {
+    off
+}
+prefer-no-csd
+output "DP-1" {
+    mode "1920x1080@119.880"
+    scale 1
+    transform "normal"
+    position x=0 y=0
+}
+output "HDMI-A-1" { off; }
+output "HDMI-A-2" { off; }
+output "DP-2" { off; }
+output "DP-3" { off; }
+output "DP-4" { off; }
+output "DP-5" { off; }
+output "DP-6" { off; }
+output "Writeback-1" { off; }
+output "Writeback-2" { off; }
