@@ -4,7 +4,9 @@
 //! GPU execution time is not measured; frame cadence from the journal is the
 //! primary result and the stderr preparation span is host wall-clock only.
 #![allow(dead_code)] // arms I/S use the readback half, arm G the export half
-use imaging::{Painter, kurbo::Rect, peniko::Color, record::Scene};
+#[path = "gpu_scene.rs"]
+mod gpu_scene;
+pub(crate) use gpu_scene::scene;
 use sophia_shell_gpu::{GpuGrant, GpuPreview};
 use std::{cell::RefCell, sync::OnceLock};
 
@@ -40,19 +42,6 @@ pub(crate) fn with_gpu<T>(
     work: impl FnOnce(&mut GpuPreview) -> Result<T, String>,
 ) -> Result<T, String> {
     GPU.with(|cell| work(cell.borrow_mut().as_mut().ok_or("GPU was not opened")?))
-}
-
-/// The comparator's pixels: opaque, every channel the generation's shade.
-/// A grey is byte-identical in RGBA readback and XR24 export.
-pub(crate) fn scene(width: u32, height: u32, generation: u64) -> Scene {
-    let shade = (generation % 128) as u8;
-    let mut scene = Scene::new();
-    {
-        let mut painter = Painter::new(&mut scene);
-        let rect = Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
-        painter.fill_rect(rect, Color::from_rgb8(shade, shade, shade));
-    }
-    scene
 }
 
 /// Bytes of a 4-byte-per-pixel image, or None when the size overflows.

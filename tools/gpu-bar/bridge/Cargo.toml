@@ -1,0 +1,17 @@
+[package]
+name = "gpu-bar-bridge"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96.1"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+imaging = "0.0.1"
+rustix = { version = "1.1", default-features = false, features = ["std", "fs"] }
+# Matched-GPU prototype only: signed local pin, not for publication or packaging.
+sophia-shell-gpu = { git = "file:///home/niltempus/dev/lom", rev = "1a0dc2329e18fe17f9bdf08e0d9ddcb03f57fbc7" }
