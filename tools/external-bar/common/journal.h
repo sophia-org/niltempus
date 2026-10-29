@@ -80,7 +80,11 @@ static inline void journal_header(FILE *j, const char *arm, unsigned width,
             "lifecycle=%s workload=%s tiles=%u interval_ms=%u damage=%s "
             "idle_sec=%u clock=CLOCK_MONOTONIC_ns presented_clock=%s\n",
             arm, width, height, buffers,
+#ifdef MATCHED_GPU
+            "vello_shade_mod128_opaque_rgb", /* fill_start precedes render/export, not CPU fill. */
+#else
             strcmp(workload, "bursty") == 0 ? "bursty_static_background_v1" : "shade_mod128_a255",
+#endif
             frames, warmup, bulk, bulk_width,
             bulk_height, lifecycle, workload, tiles, interval_ms, damage,
             idle_sec, presented_clock);

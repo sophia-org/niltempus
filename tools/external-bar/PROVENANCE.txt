@@ -14,3 +14,11 @@ license notice intact, from the installed wayland-protocols-wlr-0.3.12 crate:
 ~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wayland-protocols-wlr-0.3.12/wlr-protocols/unstable/wlr-output-management-unstable-v1.xml
 It is used only by the isolated HEADLESS-1 smoke output helper. The receipt
 records its hash. Generated output-helper files remain ignored build output.
+
+Matched GPU adapters are separate wl-panel-gpu/x-panel-gpu targets. Their
+in-process producer is tools/gpu-bar/bridge, pinned to signed local Lom 1a0dc2329
+under the documented file:// diagnostic exception. CPU targets stay independent.
+gpu/linux-dmabuf-v1.xml is copied byte-identically from the installed
+/usr/share/wayland-protocols/stable/linux-dmabuf/linux-dmabuf-v1.xml with its
+copyright/license intact. Generated bindings remain ignored build output.
+See gpu/README.md for device-free proof limits and native qualification gates.

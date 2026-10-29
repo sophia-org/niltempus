@@ -81,6 +81,9 @@ static void die(const char *what) {
 }
 
 #include "output.h"
+#ifdef MATCHED_GPU
+#include "../gpu/wayland.h"
+#endif
 
 /* ---------- registry / presentation clock ---------- */
 
@@ -98,6 +101,13 @@ static void registry_global(void *data, struct wl_registry *registry,
                             uint32_t name, const char *interface,
                             uint32_t version) {
     (void)data;
+#ifdef MATCHED_GPU
+    if (!strcmp(interface, zwp_linux_dmabuf_v1_interface.name)) {
+        if (version < 4 || dmabuf) die("missing/duplicate linux-dmabuf v4");
+        dmabuf = wl_registry_bind(registry, name, &zwp_linux_dmabuf_v1_interface, 4);
+        dmabuf_global = name;
+    }
+#endif
     if ((strcmp(interface, wl_compositor_interface.name) == 0 ||
          strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) && version < 4)
         die("required compositor/layer-shell protocol version unavailable");
@@ -123,6 +133,9 @@ static void registry_global(void *data, struct wl_registry *registry,
 }
 static void registry_remove(void *d, struct wl_registry *r, uint32_t n) {
     (void)d; (void)r;
+#ifdef MATCHED_GPU
+    if (n == dmabuf_global) die("dmabuf global removed");
+#endif
     if (selected_output && n==selected_output->global) die("selected output removed");
 }
 static const struct wl_registry_listener registry_listener = {
@@ -237,6 +250,9 @@ static void feedback_presented(void *data,
 }
 static void feedback_discarded(void *data,
                                struct wp_presentation_feedback *feedback) {
+#ifdef MATCHED_GPU
+    die("GPU presentation discarded");
+#endif
     wp_presentation_feedback_destroy(feedback);
     free(data); /* presented stays -1: discarded is never renumbered */
 }
@@ -269,11 +285,20 @@ static unsigned fresh_inflight, fresh_inflight_bulk;
 struct fresh_slot {
     struct wl_buffer *buffer;
     unsigned *inflight;
+#ifdef MATCHED_GPU
+    uint64_t token;
+    struct zwp_linux_buffer_params_v1 *params;
+#endif
 };
 
 static void fresh_release(void *data, struct wl_buffer *buffer) {
     (void)buffer;
     struct fresh_slot *s = data;
+#ifdef MATCHED_GPU
+    if (s->buffer != buffer || !*s->inflight || !s->token) die("misattributed buffer release");
+    gpu_release(s->token);
+    zwp_linux_buffer_params_v1_destroy(s->params);
+#endif
     wl_buffer_destroy(s->buffer);
     (*s->inflight)--;
     free(s);
@@ -323,7 +348,13 @@ static void submit_fresh(struct wl_surface *surface, unsigned width,
         die("alloc");
     s->inflight = inflight;
     (*inflight)++;
+#ifdef MATCHED_GPU
+    if (width != PANEL_W || height != PANEL_H) die("GPU panel shape differs");
+    s->buffer = gpu_wayland_buffer(generation, &s->token, &s->params);
+    wl_buffer_add_listener(s->buffer, &fresh_listener, s);
+#else
     s->buffer = fresh_buffer(width, height, generation, &fresh_listener, s);
+#endif
     wl_surface_attach(surface, s->buffer, 0, 0);
     if (damage_w && generation != 1)
         wl_surface_damage_buffer(surface, damage_x, damage_y,
@@ -388,6 +419,11 @@ int main(int argc, char **argv) {
     if (opt_workload == WL_IDLE && (!opt_idle_sec || opt_frames != 1 || opt_warmup != 0))
         die("idle requires --frames 1 --warmup 0 and positive --idle-sec");
 
+#ifdef MATCHED_GPU
+    if (opt_buffers != 2 || !opt_fresh || opt_bulk || opt_workload != WL_FRESH ||
+        opt_frames > 1000000 || opt_warmup > 1000000 || !requested_output)
+        die("GPU mode requires fresh full panel, two buffers, named output, bounded frames");
+#endif
     display = wl_display_connect(NULL);
     if (!display)
         die("no Wayland display");
@@ -395,7 +431,12 @@ int main(int argc, char **argv) {
     wl_registry_add_listener(registry, &registry_listener, NULL);
     if (wl_display_roundtrip(display) < 0)
         die("registry roundtrip");
+#ifdef MATCHED_GPU
+    if (!dmabuf) die("linux-dmabuf v4 missing");
+    if (!compositor || !layer_shell || !presentation)
+#else
     if (!compositor || !shm || !layer_shell || !presentation)
+#endif
         die("compositor lacks compositor/shm/layer-shell/presentation");
     if (wl_display_roundtrip(display) < 0)
         die("bound globals roundtrip");
@@ -448,6 +489,9 @@ int main(int argc, char **argv) {
                ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
                    ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT,
                (int32_t)PANEL_H, opt_buffers);
+#ifdef MATCHED_GPU
+    gpu_wayland_init(main_panel.surface, journal);
+#endif
     if (opt_bulk)
         panel_init(&bulk_panel, BULK_W, BULK_H,
                    ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
@@ -578,6 +622,9 @@ int main(int argc, char **argv) {
         uint64_t generation = i; /* includes warmup, matching Sophia */
         struct slot *slot = NULL, *bslot = NULL;
         callback_done = (i == 1) || opt_workload == WL_BURSTY;
+#ifdef MATCHED_GPU
+        uint64_t gpu_deadline = mono_ns() + 5000000000ull;
+#endif
         /* Wait for the previous frame callback and capacity on every
          * surface that takes part in this submission: a free pool slot
          * (reuse) or in-flight headroom under --buffers (fresh). */
@@ -592,8 +639,12 @@ int main(int argc, char **argv) {
                 if (callback_done && slot && (!opt_bulk || bslot))
                     break;
             }
+#ifdef MATCHED_GPU
+            gpu_dispatch_until(gpu_deadline);
+#else
             if (wl_display_dispatch(display) < 0)
                 die("dispatch while pacing");
+#endif
         }
         if (opt_workload == WL_BURSTY) {
             /* Absolute timer, no drift, not callback-gated: update i is
@@ -682,6 +733,15 @@ int main(int argc, char **argv) {
         if (wl_display_dispatch_timeout(display, &ts) < 0)
             break;
     }
+#ifdef MATCHED_GPU
+    for (unsigned k = 0; k < opt_frames; k++)
+        if (rec_presented[k] < 0) die("GPU presentation missing/discarded");
+    wl_surface_attach(main_panel.surface, NULL, 0, 0);
+    wl_surface_commit(main_panel.surface);
+    uint64_t release_deadline = mono_ns() + 5000000000ull;
+    while (fresh_inflight) gpu_dispatch_until(release_deadline);
+    gpu_close(journal, total);
+#endif
     for (unsigned i = opt_warmup + 1; i <= total; i++) {
         unsigned k = i - opt_warmup;
         journal_frame(journal, k, fill_start[i], submit[i],

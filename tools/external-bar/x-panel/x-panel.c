@@ -70,6 +70,9 @@ struct back {
     struct sysv shm; /* reuse lifecycle, fresh/bursty/idle only */
     int busy;        /* presented and not yet idle */
     uint32_t serial;
+#ifdef MATCHED_GPU
+    uint64_t token;
+#endif
 };
 
 struct ctx {
@@ -91,12 +94,19 @@ struct ctx {
     struct back *backs;
     unsigned nbacks;
     uint64_t clock_ok, clock_bad;
+#ifdef MATCHED_GPU
+    uint32_t present_eid;
+    uint64_t deadline;
+#endif
 };
 
 static void die(const char *what) {
     fprintf(stderr, "x-panel: %s (errno %d: %s)\n", what, errno, strerror(errno));
     exit(2);
 }
+#ifdef MATCHED_GPU
+#include "../gpu/x11.h"
+#endif
 
 static void sysv_create(struct ctx *c, struct sysv *s, unsigned w, unsigned h) {
     s->image = XShmCreateImage(c->dpy, DefaultVisual(c->dpy, DefaultScreen(c->dpy)),
@@ -168,6 +178,11 @@ static int handle(struct ctx *c, xcb_generic_event_t *ev) {
         if (ge->event_type == XCB_PRESENT_EVENT_COMPLETE_NOTIFY) {
             xcb_present_complete_notify_event_t *cn = (xcb_present_complete_notify_event_t *)ev;
             if (cn->window != c->win) die("Present completion for wrong window");
+#ifdef MATCHED_GPU
+            if (cn->kind != XCB_PRESENT_COMPLETE_KIND_PIXMAP || cn->serial != c->pending_serial ||
+                cn->event != c->present_eid || c->complete_seen)
+                die("stale, duplicate or foreign GPU completion");
+#endif
             if (cn->kind == XCB_PRESENT_COMPLETE_KIND_PIXMAP && cn->serial == c->pending_serial) {
                 if (cn->mode == XCB_PRESENT_COMPLETE_MODE_SKIP)
                     die("Present skipped a frame; no delivered-frame row");
@@ -184,9 +199,13 @@ static int handle(struct ctx *c, xcb_generic_event_t *ev) {
         }
         if (ge->event_type == XCB_PRESENT_EVENT_IDLE_NOTIFY) {
             xcb_present_idle_notify_event_t *in = (xcb_present_idle_notify_event_t *)ev;
+#ifdef MATCHED_GPU
+            gpu_x_idle(c, in);
+#else
             for (unsigned i = 0; i < c->nbacks; i++)
                 if (in->window == c->win && c->backs[i].pixmap == in->pixmap &&
                     c->backs[i].serial == in->serial) c->backs[i].busy = 0;
+#endif
             return 1;
         }
         return 0;
@@ -200,7 +219,19 @@ static int handle(struct ctx *c, xcb_generic_event_t *ev) {
 }
 
 static void pump_one(struct ctx *c) {
+#ifdef MATCHED_GPU
+    xcb_generic_event_t *ev = NULL;
+    while (!(ev = xcb_poll_for_event(c->conn))) {
+        uint64_t now = mono_ns();
+        if (xcb_connection_has_error(c->conn)) die("GPU X connection lost");
+        if (now >= c->deadline) die("GPU consumer/presentation deadline expired");
+        int ms = (int)((c->deadline - now + 999999) / 1000000);
+        struct pollfd fd = {.fd = xcb_get_file_descriptor(c->conn), .events = POLLIN};
+        if (poll(&fd, 1, ms) < 0 && errno != EINTR) die("GPU X event wait failed");
+    }
+#else
     xcb_generic_event_t *ev = xcb_wait_for_event(c->conn);
+#endif
     if (!ev) die("connection lost while waiting for an event");
     handle(c, ev);
     free(ev);
@@ -231,6 +262,9 @@ static int64_t present_and_wait(struct ctx *c, struct back *b, uint32_t serial,
         return (int64_t)c->complete_ust_ns;
     }
     c->clock_bad++;
+#ifdef MATCHED_GPU
+    die("GPU Present timestamp is outside the submission/receipt interval");
+#endif
     *source = "xpresent_recv";
     return (int64_t)c->complete_recv_ns;
 }
@@ -240,6 +274,11 @@ static int64_t present_and_wait(struct ctx *c, struct back *b, uint32_t serial,
 static void paint_panel(struct ctx *c, struct back *b, unsigned w, unsigned h,
                         uint64_t generation, unsigned rx, unsigned ry, unsigned rw,
                         unsigned rh) {
+#ifdef MATCHED_GPU
+    if (w != 1920 || h != 24 || rx || ry || rw != w || rh != h)
+        die("GPU full-panel shape differs");
+    gpu_x_paint(c, b, generation);
+#else
     if (c->fresh_lifecycle) {
         fresh_upload(c, b->pixmap, w, h, generation, rx, ry, rw, rh, 0);
     } else {
@@ -247,6 +286,7 @@ static void paint_panel(struct ctx *c, struct back *b, unsigned w, unsigned h,
         if (c->bursty) fill_bursty_panel((uint8_t *)b->shm.info.shmaddr, generation);
         else fill_pixels((uint8_t *)b->shm.info.shmaddr, b->shm.len, generation);
     }
+#endif
 }
 
 static void sleep_until_ns(uint64_t t) {
@@ -310,6 +350,11 @@ int main(int argc, char **argv) {
     if (frames < 0) frames = wl == W_BURSTY ? 240 : 1000;
     if (warmup < 0) warmup = wl == W_BURSTY ? 8 : 120;
     if (frames < 1 || interval_ms < 1) usage();
+#ifdef MATCHED_GPU
+    if (wl != W_FRESH || strcmp(lifecycle, "fresh") || nbacks != 2 || bulk ||
+        frames > 1000000 || warmup < 0 || warmup > 1000000)
+        die("GPU mode requires fresh full panel, two buffers and bounded frames");
+#endif
 
     struct ctx c = {0};
     c.fresh_lifecycle = !strcmp(lifecycle, "fresh");
@@ -321,6 +366,7 @@ int main(int argc, char **argv) {
     int screen = DefaultScreen(c.dpy);
     c.depth = DefaultDepth(c.dpy, screen);
 
+#ifndef MATCHED_GPU
     const xcb_query_extension_reply_t *shm_ext = xcb_get_extension_data(c.conn, &xcb_shm_id);
     if (!shm_ext || !shm_ext->present) die("no MIT-SHM");
     c.shm_first_event = shm_ext->first_event;
@@ -332,6 +378,7 @@ int main(int argc, char **argv) {
     free(sv);
     if (c.fresh_lifecycle && !shm_fd_ok) die("--lifecycle fresh needs MIT-SHM 1.2 (fd passing)");
     if (!c.fresh_lifecycle && !shm_pixmaps) die("--lifecycle reuse needs shared ZPixmap pixmaps");
+#endif
     const xcb_query_extension_reply_t *pres = xcb_get_extension_data(c.conn, &xcb_present_id);
     if (!pres || !pres->present) die("no Present extension");
     c.present_opcode = pres->major_opcode;
@@ -365,6 +412,9 @@ int main(int argc, char **argv) {
     c.backs = calloc(nbacks, sizeof *c.backs);
     int shm_backs = !c.fresh_lifecycle && wl != W_RETAINED;
     for (unsigned i = 0; i < nbacks; i++) {
+#ifdef MATCHED_GPU
+        continue; /* Every generation imports a new pixmap. */
+#endif
         if (shm_backs) {
             sysv_create(&c, &c.backs[i].shm, width, height);
             c.backs[i].pixmap = XShmCreatePixmap(c.dpy, c.win, c.backs[i].shm.info.shmaddr,
@@ -407,6 +457,9 @@ int main(int argc, char **argv) {
     }
 
     xcb_present_event_t eid = xcb_generate_id(c.conn);
+#ifdef MATCHED_GPU
+    c.present_eid = eid;
+#endif
     xcb_present_select_input(c.conn, eid, c.win,
                              XCB_PRESENT_EVENT_MASK_COMPLETE_NOTIFY |
                                  XCB_PRESENT_EVENT_MASK_IDLE_NOTIFY);
@@ -421,13 +474,21 @@ int main(int argc, char **argv) {
                    wl == W_RETAINED ? TILES : 0, wl == W_BURSTY ? interval_ms : 0, damage,
                    wl == W_IDLE ? idle_sec : 0,
                    "xpresent_ust_usec_assumed_CLOCK_MONOTONIC_checked_per_frame");
+#ifdef MATCHED_GPU
+    gpu_x_open(&c, j);
+    fprintf(j, "# pid %d\n# attach dri3_pixmap_from_buffers\n", (int)getpid());
+#else
     fprintf(j, "# pid %d\n# attach %s\n", (int)getpid(),
             c.fresh_lifecycle ? "memfd_readonly_putimage" : "sysv_shm_pixmap");
+#endif
 
     unsigned total = (unsigned)(frames + warmup);
     int64_t pace = -1;
     uint64_t t0 = mono_ns();
     for (unsigned f = 1; f <= total; f++) {
+#ifdef MATCHED_GPU
+        c.deadline = mono_ns() + 5000000000ull;
+#endif
         struct back *b = &c.backs[(f - 1) % nbacks];
         uint64_t generation = f; /* Sophia counts warmup in its generation. */
         if (wl == W_BURSTY) {
@@ -486,12 +547,20 @@ int main(int argc, char **argv) {
         sleep_until_ns(c.complete_recv_ns + ((uint64_t)idle_sec + 4) * 1000000000ull);
     }
 
+#ifdef MATCHED_GPU
+    c.deadline = mono_ns() + 5000000000ull;
+    for (unsigned i = 0; i < nbacks; i++) wait_idle(&c, &c.backs[i]);
+    gpu_close(j, total);
+#endif
     journal_footer_rusage(j);
     fprintf(j, "# presented_clock_check ok=%llu violations=%llu\n",
             (unsigned long long)c.clock_ok, (unsigned long long)c.clock_bad);
     fclose(j);
 
     for (unsigned i = 0; i < nbacks; i++) {
+#ifdef MATCHED_GPU
+        continue; /* Each imported pixmap was destroyed on exact IdleNotify. */
+#endif
         XFreePixmap(c.dpy, c.backs[i].pixmap);
         if (shm_backs) sysv_destroy(&c, &c.backs[i].shm);
     }
