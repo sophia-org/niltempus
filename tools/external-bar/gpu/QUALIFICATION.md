@@ -2,8 +2,9 @@
 
 This is the implementation contract for the next device gate, **not a launch
 recipe or a native pass**. `qualify.py` and `pixels.py` are device-free validators.
-The diagnostic colour/hold producers, capture controller, diagnostic core, release
-artifacts and sealed native package are not implemented by these validators.
+`capture_sophia.py` implements one private Sophia capture per declared hold;
+its fixtures do not execute a Sophia session. Colour/hold producers, the parent
+READY/ACK driver, wrapper integration, releases and the native package remain.
 No existing CPU package or timed grey-strip binary may be replaced or reused as
 if it already implemented this contract.
 
@@ -84,20 +85,13 @@ it into shared logs and the operator VT. Atomic chunks do not identify their
 writer. Neither shared Session stdout nor the untrusted-output branch is capture
 acceptance evidence. Do not change an environment variable to bypass that rule.
 
-The immediate prerequisite is a separately reviewed, bounded diagnostic delivery
-channel with a private endpoint bound by the process owner to this observer.
-Prefer a dedicated observer stdout pipe at spawn over new writable mount authority;
-this needs host/supervisor diagnostic plumbing and its own source/build/proof gate.
-The normal recipe and Session stdout policy must stay unchanged. The launch caller
-cannot nominate an arbitrary FD or destination through the public launch request.
-The existing capture CLI emits only metadata/checksum, so a diagnostic pixel
-delivery helper or CLI change is required too. Bind source/executable, process,
-request and output generation; enforce total size, sequencing, deadline and full
-frame checksum, rejecting truncation, duplicates and EOF. Keep pixel bytes out of
-Session metadata logs and the VT; persist PAM only through the trusted private
-collector. A complete same-namespace launch and private-delivery execution proof
-is required before sealing. Neither checksum-only acceptance, a writable recipe
-extension nor broad FD inheritance is an implicit fallback.
+The source prerequisite is now implemented in Sophia `a56ace891`: private
+observer stdout/stderr installed at spawn, with no new writable mount authority
+or caller-selected FD. The controller contract below validates its result.
+Normal recipe and Session stdout policy stay unchanged; pixel bytes never
+belong in shared metadata logs or the VT. Actual same-namespace launch and
+private-delivery execution remain required before sealing. Checksum-only
+acceptance, writable recipes and broad FD inheritance are not fallbacks.
 
 Confirm the exact host artifact contains the role/launch paths and DMA
 feature/capability gate.
@@ -121,6 +115,77 @@ pixels below row 23. It hashes the original capture and strip. Its result is
 **pixels_match only**: no device, source/process, generation, synchronization,
 release, presentation or performance proof. Never infer the expected pattern
 from the captured image. Keep all three original captures and generation joins.
+
+## Sophia controller contract (device-free implementation)
+
+Sophia `a56ace891`, based on `d9116ff0`, implements the preceding private-delivery
+source prerequisite under default-off `diagnostic-capture-delivery`. It replaces
+stdout/stderr only for the exact admitted observer, binds its child after
+authenticated startup, and records server-served pixels. It gives the child no
+writable host mount. Delivery is custody-only, not per-message writer identity.
+Actual authenticated execution remains unqualified.
+
+The parent driver must start the helper as Session's sibling in the same user,
+mount and PID namespaces, retain the producer READY hold, invoke it once, and
+ACK only on exit zero. It must wait before stopping Session. No nsenter or outer
+SSH invocation is supported:
+
+```
+python3 -I -B capture_sophia.py --expected EXPECTED.json --evidence NEW_PRIVATE_DIR
+```
+
+The exact expected object has integer `schema: 1`; `session` with `pid`,
+`starttime`, absolute `executable` and `sha256`; absolute `session_log` and
+`delivery_directory`; positive `output_generation`; and `hold` with positive
+`generation`, `pattern`, `connection_epoch`, `content_grant_epoch` and
+`presentation_epoch`. Generation/pattern pairs are 1/1, 2/2, 3/1. The parent must
+derive the hold from its bound producer and owner records; the input file alone
+does not authenticate a producer.
+
+The helper pins Session by pidfd, starttime, executable hash/dev/inode, UID and
+namespaces. The output ID comes only from this run's exact ready-head mapping
+for `DP-1`, 1920×1080 with nominal `refresh_millihz=120000`. That log names a
+connector without its PCI prefix. The receipt must carry the same output ID
+and the fully qualified `pci-0000:03:00.0/DP-1`, which Session rechecks against
+the live head at publication. Actual 119.880 Hz remains a separate output-readback
+gate; the nominal log value does not prove it. The log-derived launch
+socket must have one LISTEN entry and its inode in Session's fd table. There is
+no probe connection. The CLI later reconnects by path, leaving a time-of-check
+gap inside the owned 0700 runtime directory; no stronger binding is claimed.
+
+One exact self-executable launch uses recipe `capture` and that output ID.
+The launch client's stdout/stderr are private and bounded to 4096 bytes each
+(one extra byte may be retained to demonstrate overflow). Its 35-second wait
+and `Started` result establish readiness only. A separate 30-second terminal
+wait exceeds Session's 20-second delivery deadline; all waits also share a
+75-second outer limit. Inotify and pidfd readiness replace sleeps. Scheduling
+and filesystem operations have no hard real-time bound. CLI success without a
+terminal receipt refuses, with no retry.
+
+The directory starts empty, then retains exactly the prior complete triples.
+Acceptance needs JSON, matching full PAM SHA, an existing zero-byte stderr,
+no partial/refused files, and the declared pixel oracle. Fields, sizes, modes
+and ownership are exact; symlinks and hard-linked receipt files refuse. Receipt
+exe dev/inode must equal the pinned Session and self executable used by launch.
+Output/connector match the live mapping; incarnation and namespace stay fixed.
+Launch generation, request and capture presentation generation strictly increase
+across all three receipts, including the repeated first pattern at generation 3.
+
+The launch-to-receipt join is **one serialized new receipt in the exclusive
+directory**. Transaction 1 is a format check, not another join key. The launch result's
+process is a diagnostic monitor PID, never equated to the receipt's inner PID.
+The same owner candidate must remain latest presented before and after capture,
+with append-only complete log prefixes and no observed intervening candidate
+or invalidation. An incomplete final line is deferred, not interpreted; the
+parent hold channel is essential, not replaced by log sampling. Capture
+presentation generation is not shell presentation_epoch. The parent's hold
+channel custody remains a native qualification prerequisite.
+
+Session's three-attempt budget equals the three captures: any refusal ends the
+run, with no skipped generation or retry. The helper kills/reaps only its own
+launch client on failure; Session owns observer retirement and the parent owns
+session cleanup. `result.json` means `capture_verified` under this contract,
+not native qualification or authorization for timed comparison rows.
 
 ## Refusal, lifetime and cleanup controls
 
@@ -148,8 +213,8 @@ timed ones. Native controls require the genuine device and are recorded separate
 ## Exit and sequence
 
 1. Implement/review the diagnostic colour/hold entry points, capture normalization
-   and process/namespace controller, including Sophia's still-open pixel-delivery
-   route. Prove the refusal/identity paths device-free.
+   and parent READY/ACK plus same-namespace wrapper wiring. Use the private
+   delivery and controller source gates; prove remaining paths device-free.
 2. Produce separate signed release/link/build receipts and artifact argument
    preflights, preserving all frozen pools. Seal a fresh bounded diagnostic package.
 3. Mason launches through the existing attended SSH/PAM/VT handoff. Preserve failed

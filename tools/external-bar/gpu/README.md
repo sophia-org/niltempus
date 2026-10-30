@@ -18,6 +18,7 @@ make -C tools/external-bar gpu-check
 python3 -I -B tools/external-bar/test/gpu_cli.py
 python3 -I -B -W error tools/external-bar/test/gpu_receipts.py
 python3 -I -B -W error tools/external-bar/test/gpu_pixels.py
+python3 -I -B -W error tools/external-bar/test/gpu_capture.py
 ```
 
 The GPU clients require `--lifecycle fresh --buffers 2 --workload fresh`.
@@ -101,5 +102,8 @@ packaging approval.
 
 The next native gate is specified in [QUALIFICATION.md](QUALIFICATION.md).
 `pixels.py` provides its strict, device-free non-grey consumer-capture check.
-The diagnostic colour/hold producers and capture controller are still required;
-neither validator is a native launch recipe or a qualification pass.
+`capture_sophia.py` verifies one private Sophia capture per declared hold, using
+`capture_receipt.py` and the pixel oracle. Its process/socket/filesystem fixtures
+open no GPU and run no Sophia session. The parent READY/ACK driver, colour/hold
+producers and real same-namespace wrapper wiring remain required; see the exact
+contract and limits in `QUALIFICATION.md`.
