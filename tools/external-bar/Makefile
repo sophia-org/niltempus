@@ -36,6 +36,7 @@ $(BUILD)/headless-output: test/headless_output.c $(BUILD)/headless-output.h $(BU
 GPU_INC := -I../gpu-bar/bridge/include -I$(BUILD) -Igpu
 GPU_LIBS := -ldl -lgcc_s -lutil -lrt -lpthread -lm -ldl -lc
 GPU_COMMON := gpu/producer.c gpu/producer.h ../gpu-bar/bridge/include/gpu_bar_bridge.h
+GPU_TIMED_CHECK = python3 -I -B -c 'import subprocess,sys; symbols=subprocess.check_output(["nm","-g","--defined-only",sys.argv[1]],stderr=subprocess.DEVNULL,text=True); sys.exit("diagnostic bridge refused for timed client" if any(row.split()[-1:] == ["gpu_bar_bridge_render_colour"] for row in symbols.splitlines()) else 0)' "$(GPU_BRIDGE)"
 
 $(BUILD)/linux-dmabuf.h: gpu/linux-dmabuf-v1.xml | $(BUILD)
 	wayland-scanner client-header $< $@
@@ -43,12 +44,14 @@ $(BUILD)/linux-dmabuf.h: gpu/linux-dmabuf-v1.xml | $(BUILD)
 $(BUILD)/linux-dmabuf.c: gpu/linux-dmabuf-v1.xml | $(BUILD)
 	wayland-scanner private-code $< $@
 
-$(BUILD)/wl-panel-gpu: wl-panel/wl-panel.c wl-panel/output.h gpu/wayland.h $(GPU_COMMON) $(COMMON) $(WL_GEN) $(BUILD)/linux-dmabuf.c $(BUILD)/linux-dmabuf.h $(GPU_BRIDGE) | $(BUILD)
+$(BUILD)/wl-panel-gpu $(BUILD)/wl-panel-gpu-default-check: wl-panel/wl-panel.c wl-panel/output.h gpu/wayland.h $(GPU_COMMON) $(COMMON) $(WL_GEN) $(BUILD)/linux-dmabuf.c $(BUILD)/linux-dmabuf.h $(GPU_BRIDGE) | $(BUILD)
 	test -f "$(GPU_BRIDGE)"
+	$(GPU_TIMED_CHECK)
 	$(CC) $(CFLAGS) -std=c11 -DMATCHED_GPU $(GPU_INC) -Icommon -o $@ $< common/fill.c gpu/producer.c $(WL_GEN) $(BUILD)/linux-dmabuf.c $$(pkg-config --cflags --libs wayland-client) "$(GPU_BRIDGE)" $(GPU_LIBS)
 
-$(BUILD)/x-panel-gpu: x-panel/x-panel.c gpu/x11.h $(GPU_COMMON) $(COMMON) $(GPU_BRIDGE) | $(BUILD)
+$(BUILD)/x-panel-gpu $(BUILD)/x-panel-gpu-default-check: x-panel/x-panel.c gpu/x11.h $(GPU_COMMON) $(COMMON) $(GPU_BRIDGE) | $(BUILD)
 	test -f "$(GPU_BRIDGE)"
+	$(GPU_TIMED_CHECK)
 	$(CC) $(CFLAGS) -DMATCHED_GPU $(GPU_INC) -o $@ $< common/fill.c gpu/producer.c $$(pkg-config --cflags --libs $(X_PKGS) xcb-dri3) "$(GPU_BRIDGE)" $(GPU_LIBS)
 
 gpu: $(BUILD)/wl-panel-gpu $(BUILD)/x-panel-gpu
@@ -67,3 +70,24 @@ gpu-check: $(BUILD)/gpu-producer-test $(BUILD)/gpu-wl-test $(BUILD)/gpu-x-test
 	$(BUILD)/gpu-wl-test
 	$(BUILD)/gpu-x-test
 .PHONY: all gpu gpu-check
+
+# Separate diagnostic clients; never replace the timed or frozen CPU binaries.
+HOLD := gpu/hold.c gpu/hold.h
+$(BUILD)/wl-panel-gpu-hold: wl-panel/wl-panel.c wl-panel/output.h gpu/wayland.h $(GPU_COMMON) $(COMMON) $(HOLD) $(WL_GEN) $(BUILD)/linux-dmabuf.c $(BUILD)/linux-dmabuf.h $(GPU_DIAGNOSTIC_BRIDGE) | $(BUILD)
+	test -f "$(GPU_DIAGNOSTIC_BRIDGE)"
+	$(CC) $(CFLAGS) -std=c11 -DMATCHED_GPU -DDIAGNOSTIC_COLOUR_HOLD -Icommon $(GPU_INC) -o $@ $< common/fill.c gpu/producer.c gpu/hold.c $(WL_GEN) $(BUILD)/linux-dmabuf.c $$(pkg-config --cflags --libs wayland-client) "$(GPU_DIAGNOSTIC_BRIDGE)" $(GPU_LIBS)
+$(BUILD)/x-panel-gpu-hold: x-panel/x-panel.c gpu/x11.h $(GPU_COMMON) $(COMMON) $(HOLD) $(GPU_DIAGNOSTIC_BRIDGE) | $(BUILD)
+	test -f "$(GPU_DIAGNOSTIC_BRIDGE)"
+	$(CC) $(CFLAGS) -DMATCHED_GPU -DDIAGNOSTIC_COLOUR_HOLD -Icommon $(GPU_INC) -o $@ $< common/fill.c gpu/producer.c gpu/hold.c $$(pkg-config --cflags --libs $(X_PKGS) xcb-dri3) "$(GPU_DIAGNOSTIC_BRIDGE)" $(GPU_LIBS)
+$(BUILD)/gpu-normalize-png: gpu/normalize_png.c | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ $< $$(pkg-config --cflags --libs libpng)
+$(BUILD)/gpu-capture-x: gpu/capture_x.c gpu/x_pixels.h | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ $< $$(pkg-config --cflags --libs x11)
+$(BUILD)/gpu-hold-client-test: test/gpu_hold_client.c $(HOLD) | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ $< gpu/hold.c
+$(BUILD)/gpu-x-pixels-test: test/gpu_x_pixels.c gpu/x_pixels.h | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ $< $$(pkg-config --cflags --libs x11)
+$(BUILD)/gpu-wl-hold-test: test/gpu_wayland.c test/mock_bridge.c wl-panel/wl-panel.c gpu/wayland.h $(GPU_COMMON) $(COMMON) $(HOLD) $(WL_GEN) $(BUILD)/linux-dmabuf.c $(BUILD)/linux-dmabuf.h | $(BUILD)
+	$(CC) $(CFLAGS) -std=c11 -DDIAGNOSTIC_COLOUR_HOLD -Icommon $(GPU_INC) -o $@ $< test/mock_bridge.c common/fill.c gpu/producer.c gpu/hold.c $(WL_GEN) $(BUILD)/linux-dmabuf.c $$(pkg-config --cflags --libs wayland-client)
+$(BUILD)/gpu-x-hold-test: test/gpu_x.c test/mock_bridge.c x-panel/x-panel.c gpu/x11.h $(GPU_COMMON) $(COMMON) $(HOLD) | $(BUILD)
+	$(CC) $(CFLAGS) -DDIAGNOSTIC_COLOUR_HOLD -Icommon $(GPU_INC) -o $@ $< test/mock_bridge.c common/fill.c gpu/producer.c gpu/hold.c $$(pkg-config --cflags --libs $(X_PKGS) xcb-dri3)

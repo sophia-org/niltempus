@@ -243,6 +243,10 @@ static void wait_idle(struct ctx *c, struct back *b) {
 
 /* Present `b` with an optional update region; returns presented ns and
  * sets *source. */
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+#include "../gpu/hold.h"
+static void colour_dispatch(void *, int, short, uint64_t);
+#endif
 static int64_t present_and_wait(struct ctx *c, struct back *b, uint32_t serial,
                                 xcb_xfixes_region_t update, uint64_t *submit_out,
                                 const char **source) {
@@ -259,6 +263,9 @@ static int64_t present_and_wait(struct ctx *c, struct back *b, uint32_t serial,
     if (c->complete_ust_ns >= submit && c->complete_ust_ns <= c->complete_recv_ns) {
         c->clock_ok++;
         *source = "xpresent";
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+        hold_presented(serial, c->complete_ust_ns, colour_dispatch, c);
+#endif
         return (int64_t)c->complete_ust_ns;
     }
     c->clock_bad++;
@@ -306,6 +313,36 @@ static void usage(void) {
     exit(1);
 }
 
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+#include "../gpu/hold.h"
+static void colour_dispatch(void *context, int control, short events, uint64_t deadline) {
+    struct ctx *c = context;
+    for (;;) {
+        xcb_generic_event_t *event;
+        while ((event = xcb_poll_for_event(c->conn))) {
+            if (hold_now() >= deadline) die("colour hold event deadline");
+            handle(c, event); free(event);
+        }
+        if (xcb_connection_has_error(c->conn) || xcb_flush(c->conn) <= 0)
+            die("colour hold X connection lost");
+        struct pollfd fds[2] = {
+            {.fd = xcb_get_file_descriptor(c->conn), .events = POLLIN},
+            {.fd = control, .events = events}
+        };
+        hold_poll(fds, 2, deadline);
+        if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) die("colour hold X lost");
+        if (fds[1].revents) {
+            while ((event = xcb_poll_for_event(c->conn))) {
+                if (hold_now() >= deadline) die("colour hold event deadline");
+                handle(c, event); free(event);
+            }
+            if (xcb_connection_has_error(c->conn)) die("colour hold X lost");
+            return;
+        }
+    }
+}
+#endif
+
 int main(int argc, char **argv) {
     const char *display = NULL, *journal_path = NULL;
     const char *workload_name = "fresh", *lifecycle = "fresh";
@@ -313,6 +350,9 @@ int main(int argc, char **argv) {
     unsigned nbacks = 2, interval_ms = 250, idle_sec = 60;
     const unsigned width = 1920, height = 24;
     static struct option opts[] = {
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+        {"hold-fd", 1, 0, 'H'},
+#endif
         {"display", 1, 0, 'd'},   {"frames", 1, 0, 'n'},      {"warmup", 1, 0, 'u'},
         {"buffers", 1, 0, 'b'},   {"bulk", 0, 0, 'B'},        {"journal", 1, 0, 'j'},
         {"lifecycle", 1, 0, 'L'}, {"workload", 1, 0, 'W'},    {"interval-ms", 1, 0, 'I'},
@@ -320,6 +360,9 @@ int main(int argc, char **argv) {
     int o;
     while ((o = getopt_long(argc, argv, "", opts, NULL)) != -1) {
         switch (o) {
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+        case 'H': hold_fd(optarg); break;
+#endif
         case 'd': display = optarg; break;
         case 'n': frames = atoi(optarg); break;
         case 'u': warmup = atoi(optarg); break;
@@ -356,6 +399,9 @@ int main(int argc, char **argv) {
         die("GPU mode requires fresh full panel, two buffers and bounded frames");
 #endif
 
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+    hold_config((unsigned)frames, (unsigned)warmup);
+#endif
     struct ctx c = {0};
     c.fresh_lifecycle = !strcmp(lifecycle, "fresh");
     c.bursty = wl == W_BURSTY;
@@ -551,6 +597,9 @@ int main(int argc, char **argv) {
     c.deadline = mono_ns() + 5000000000ull;
     for (unsigned i = 0; i < nbacks; i++) wait_idle(&c, &c.backs[i]);
     gpu_close(j, total);
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+    hold_finish(colour_dispatch, &c);
+#endif
 #endif
     journal_footer_rusage(j);
     fprintf(j, "# presented_clock_check ok=%llu violations=%llu\n",

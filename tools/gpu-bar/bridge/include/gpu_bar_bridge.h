@@ -39,6 +39,10 @@ typedef struct {
  * These calls do not establish native import, pixel parity or presentation. */
 int32_t gpu_bar_bridge_open(const char *, const char *, GpuBarBridge **, char *, size_t);
 int32_t gpu_bar_bridge_render(GpuBarBridge *, uint64_t, GpuBarFrame *, char *, size_t);
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+/* Present only in the diagnostic-feature bridge; generations exactly 1..3. */
+int32_t gpu_bar_bridge_render_colour(GpuBarBridge *, uint64_t, GpuBarFrame *, char *, size_t);
+#endif
 int32_t gpu_bar_bridge_release(GpuBarBridge *, uint64_t, char *, size_t);
 int32_t gpu_bar_bridge_device(GpuBarBridge *, GpuBarDevice *, char *, size_t);
 int32_t gpu_bar_bridge_close(GpuBarBridge **, char *, size_t);

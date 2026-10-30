@@ -1,6 +1,18 @@
 use super::*;
 use std::os::unix::process::ExitStatusExt as _;
 
+#[cfg(feature = "diagnostic-colour-hold")]
+#[test]
+fn diagnostic_scene_accepts_only_three_full_strip_patterns() {
+    for generation in 1..=3 {
+        assert!(crate::gpu_scene::colour_scene(1920, 24, generation).is_ok());
+    }
+    for (width, height, generation) in [(1919, 24, 1), (1920, 25, 1), (1920, 24, 0), (1920, 24, 4)]
+    {
+        assert!(crate::gpu_scene::colour_scene(width, height, generation).is_err());
+    }
+}
+
 #[test]
 fn c_boundary_refusals_clear_outputs_and_bound_error_writes() {
     let mut error = [42_i8; 5];
@@ -30,6 +42,17 @@ fn c_boundary_refusals_clear_outputs_and_bound_error_writes() {
         );
         assert_eq!(frame.fd, -1);
         assert_eq!(frame.token, 0);
+        #[cfg(feature = "diagnostic-colour-hold")]
+        {
+            frame.fd = 99;
+            frame.token = 99;
+            assert_eq!(
+                gpu_bar_bridge_render_colour(owner, 1, &mut frame, std::ptr::null_mut(), 0),
+                -1
+            );
+            assert_eq!(frame.fd, -1);
+            assert_eq!(frame.token, 0);
+        }
         let mut device = GpuBarDevice {
             schema: 99,
             ..Default::default()

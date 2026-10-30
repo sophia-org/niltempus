@@ -143,6 +143,33 @@ pub unsafe extern "C" fn gpu_bar_bridge_render(
     }
 }
 
+/// Untimed diagnostic only: render the next held colour pattern (1,2,1).
+///
+/// # Safety
+/// `owner` must be live and exclusively borrowed for this call. Output/error
+/// storage must be valid, writable and disjoint from each other and the owner.
+#[cfg(feature = "diagnostic-colour-hold")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gpu_bar_bridge_render_colour(
+    owner: *mut GpuBarBridge,
+    generation: u64,
+    out: *mut GpuBarFrame,
+    error: *mut c_char,
+    capacity: usize,
+) -> i32 {
+    unsafe {
+        boundary(error, capacity, || {
+            if out.is_null() {
+                return Err("null frame output".into());
+            }
+            out.write(GpuBarFrame::default());
+            let owner = owner.as_mut().ok_or("null owner")?;
+            out.write(owner.render_colour(generation)?);
+            Ok(())
+        })
+    }
+}
+
 /// Drop exactly one retained frame after the consumer releases it.
 ///
 /// # Safety

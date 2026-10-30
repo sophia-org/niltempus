@@ -47,3 +47,18 @@ experimental source closure, not a public dependency or packaging approval.
 Registry and renderer versions remain pinned in each Cargo.lock. The Wayland and
 XLibre transports are not wired by this change. No frozen benchmark artifact is
 replaced.
+
+
+## Diagnostic colour entry point
+
+Only a build with `diagnostic-colour-hold` exports
+`gpu_bar_bridge_render_colour`. The ordinary symbol still renders the grey
+scene. The diagnostic entry uses the same fresh export and token/FD custody,
+but accepts only generations 1..3 of the shared 1920x24 patterns 1,2,1.
+The C declaration requires `DIAGNOSTIC_COLOUR_HOLD`; linking that client against
+a default bridge must fail. `check.sh` tests/clippies both modes and builds the default C ABI control,
+without a GPU. The diagnostic C ABI link is checked separately in its isolated
+slot so it never replaces the default static library. Use separate `wl-panel-gpu-hold` / `x-panel-gpu-hold`
+targets; they are not benchmark artifacts.
+The timed Make rules inspect the supplied library with `nm` and refuse the
+diagnostic symbol before linking, including after an interrupted bridge build.

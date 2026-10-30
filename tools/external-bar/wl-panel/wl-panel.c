@@ -364,6 +364,70 @@ static void submit_fresh(struct wl_surface *surface, unsigned width,
                                  (int32_t)height);
 }
 
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+#include "../gpu/hold.h"
+static void colour_dispatch(void *unused, int control, short events, uint64_t deadline) {
+    (void)unused;
+    for (;;) {
+        while (wl_display_prepare_read(display) != 0) {
+            if (hold_now() >= deadline || wl_display_dispatch_pending(display) < 0)
+                die("colour hold pending dispatch/deadline");
+        }
+        short interest = POLLIN;
+        if (wl_display_flush(display) < 0) {
+            if (errno != EAGAIN) die("colour hold flush");
+            interest |= POLLOUT;
+        }
+        struct pollfd fds[2] = {
+            {.fd = wl_display_get_fd(display), .events = interest},
+            {.fd = control, .events = events}
+        };
+        hold_poll(fds, 2, deadline);
+        if (fds[0].revents & POLLIN) {
+            if (wl_display_read_events(display) < 0) die("colour hold read");
+        } else wl_display_cancel_read(display);
+        if (fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) die("colour hold display lost");
+        if (wl_display_dispatch_pending(display) < 0) die("colour hold dispatch");
+        if (fds[1].revents) return;
+    }
+}
+#endif
+
+/* Shared fresh submission path: the diagnostic barrier cannot sit after its continue. */
+static void fresh_main_frame(unsigned generation, unsigned k, bool counted, uint64_t *submitted) {
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+    uint64_t deadline = mono_ns() + 5000000000ull;
+#endif
+    /* fill_start precedes memfd_create: the whole producer
+     * lifecycle is inside fill->presented, as on the peer. */
+    submit_fresh(main_panel.surface, PANEL_W, PANEL_H, generation,
+                 &fresh_inflight);
+    struct feedback *fb = calloc(1, sizeof(*fb));
+    fb->presented_ns = counted ? &rec_presented[k - 1] : NULL;
+    struct wp_presentation_feedback *pf =
+        wp_presentation_feedback(presentation, main_panel.surface);
+    wp_presentation_feedback_add_listener(pf, &feedback_listener, fb);
+    struct wl_callback *cb = wl_surface_frame(main_panel.surface);
+    wl_callback_add_listener(cb, &frame_listener, NULL);
+    callback_done = false;
+    if (opt_bulk && opt_workload == WL_FRESH) {
+        submit_fresh(bulk_panel.surface, BULK_W, BULK_H, generation,
+                     &fresh_inflight_bulk);
+        struct feedback *bfb = calloc(1, sizeof(*bfb));
+        struct wp_presentation_feedback *bpf =
+            wp_presentation_feedback(presentation, bulk_panel.surface);
+        wp_presentation_feedback_add_listener(bpf, &feedback_listener,
+                                              bfb);
+        wl_surface_commit(bulk_panel.surface);
+    }
+    *submitted = mono_ns();
+    wl_surface_commit(main_panel.surface);
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+    while (rec_presented[k - 1] < 0) gpu_dispatch_until(deadline);
+    hold_presented(generation, (uint64_t)rec_presented[k - 1], colour_dispatch, NULL);
+#endif
+}
+
 /* ---------- main ---------- */
 
 int main(int argc, char **argv) {
@@ -372,6 +436,9 @@ int main(int argc, char **argv) {
             "[--buffers B] [--bulk]");
     const char *journal_path = argv[1];
     for (int i = 2; i < argc; i++) {
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+        if (strcmp(argv[i], "--hold-fd") == 0 && i + 1 < argc) { hold_fd(argv[++i]); continue; }
+#endif
         if (strcmp(argv[i], "--frames") == 0 && i + 1 < argc)
             opt_frames = (unsigned)strtoul(argv[++i], NULL, 10);
         else if (strcmp(argv[i], "--warmup") == 0 && i + 1 < argc)
@@ -423,6 +490,9 @@ int main(int argc, char **argv) {
     if (opt_buffers != 2 || !opt_fresh || opt_bulk || opt_workload != WL_FRESH ||
         opt_frames > 1000000 || opt_warmup > 1000000 || !requested_output)
         die("GPU mode requires fresh full panel, two buffers, named output, bounded frames");
+#endif
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+    hold_config(opt_frames, opt_warmup);
 #endif
     display = wl_display_connect(NULL);
     if (!display)
@@ -670,30 +740,7 @@ int main(int argc, char **argv) {
         }
         fill_start[i] = mono_ns();
         if (fresh_mode) {
-            /* fill_start precedes memfd_create: the whole producer
-             * lifecycle is inside fill->presented, as on the peer. */
-            submit_fresh(main_panel.surface, PANEL_W, PANEL_H, generation,
-                         &fresh_inflight);
-            struct feedback *fb = calloc(1, sizeof(*fb));
-            fb->presented_ns = counted ? &rec_presented[k - 1] : NULL;
-            struct wp_presentation_feedback *pf =
-                wp_presentation_feedback(presentation, main_panel.surface);
-            wp_presentation_feedback_add_listener(pf, &feedback_listener, fb);
-            struct wl_callback *cb = wl_surface_frame(main_panel.surface);
-            wl_callback_add_listener(cb, &frame_listener, NULL);
-            callback_done = false;
-            if (opt_bulk && opt_workload == WL_FRESH) {
-                submit_fresh(bulk_panel.surface, BULK_W, BULK_H, generation,
-                             &fresh_inflight_bulk);
-                struct feedback *bfb = calloc(1, sizeof(*bfb));
-                struct wp_presentation_feedback *bpf =
-                    wp_presentation_feedback(presentation, bulk_panel.surface);
-                wp_presentation_feedback_add_listener(bpf, &feedback_listener,
-                                                      bfb);
-                wl_surface_commit(bulk_panel.surface);
-            }
-            submit[i] = mono_ns();
-            wl_surface_commit(main_panel.surface);
+            fresh_main_frame(generation, k, counted, &submit[i]);
             continue;
         }
         fill_pixels(slot->data, (size_t)PANEL_W * PANEL_H * 4, generation);
@@ -745,6 +792,9 @@ int main(int argc, char **argv) {
     uint64_t release_deadline = mono_ns() + 5000000000ull;
     while (fresh_inflight) gpu_dispatch_until(release_deadline);
     gpu_close(journal, total);
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+    hold_finish(colour_dispatch, NULL);
+#endif
 #endif
     for (unsigned i = opt_warmup + 1; i <= total; i++) {
         unsigned k = i - opt_warmup;

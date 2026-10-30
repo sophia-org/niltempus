@@ -51,7 +51,11 @@ void gpu_open(FILE *journal, const char *transport) {
 GpuBarFrame gpu_render(uint64_t generation) {
     char error[512];
     GpuBarFrame frame;
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+    if (gpu_bar_bridge_render_colour(owner, generation, &frame, error, sizeof error)) gpu_die(error);
+#else
     if (gpu_bar_bridge_render(owner, generation, &frame, error, sizeof error)) gpu_die(error);
+#endif
     int flags = fcntl(frame.fd, F_GETFD);
     off_t size = lseek(frame.fd, 0, SEEK_END);
     if (!gpu_frame_valid(&frame, generation) ||

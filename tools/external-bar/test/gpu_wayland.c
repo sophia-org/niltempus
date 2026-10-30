@@ -13,10 +13,10 @@ static void test_destroy(struct wl_buffer *buffer) { assert(buffer); destroyed++
 static struct capture {
     const struct zwp_linux_buffer_params_v1_listener *listener;
     int sent_fd, queued_fd, marker;
-} captures[2];
+} captures[3];
 static unsigned imports;
 static struct zwp_linux_buffer_params_v1 *test_params(struct zwp_linux_dmabuf_v1 *d) {
-    (void)d; assert(imports<2);
+    (void)d; assert(imports<3);
     return (void*)&captures[imports++];
 }
 static int test_listener(struct zwp_linux_buffer_params_v1 *p,
@@ -44,6 +44,43 @@ static bool test_device(const char *sysfs, dev_t device) {
     assert(!strcmp(sysfs, "/sys"));
     return major(device)==226 && (minor(device)==0 || minor(device)==128);
 }
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+#include "../wl-panel/gen/presentation-time.h"
+#include "../gpu/hold.h"
+unsigned diagnostic_holds;
+static void *held_slot, *held_feedback;
+static int dummy;
+static int test_buffer_listener(struct wl_buffer *buffer, const struct wl_buffer_listener *listener, void *data) {
+    (void)buffer; (void)listener; held_slot=data; return 0;
+}
+static void test_attach(struct wl_surface *surface, struct wl_buffer *buffer, int32_t x, int32_t y) {
+    (void)surface; assert(buffer && !x && !y);
+}
+static void test_damage(struct wl_surface *surface, int32_t x, int32_t y, int32_t w, int32_t h) {
+    (void)surface; assert(!x && !y && w==1920 && h==24);
+}
+static struct wp_presentation_feedback *test_feedback(struct wp_presentation *p, struct wl_surface *s) {
+    (void)p; (void)s; return (void *)&dummy;
+}
+static int test_feedback_listener(struct wp_presentation_feedback *p, const struct wp_presentation_feedback_listener *l, void *data) {
+    (void)p; (void)l; held_feedback=data; return 0;
+}
+static struct wl_callback *test_frame(struct wl_surface *s) { (void)s; return (void *)&dummy; }
+static int test_frame_listener(struct wl_callback *c, const struct wl_callback_listener *l, void *d) {
+    (void)c; (void)l; (void)d; return 0;
+}
+static void test_commit(struct wl_surface *);
+static void test_hold(unsigned, uint64_t, hold_dispatch, void *);
+#define wl_buffer_add_listener test_buffer_listener
+#define wl_surface_attach test_attach
+#define wl_surface_damage_buffer test_damage
+#define wp_presentation_feedback(...) test_feedback(__VA_ARGS__)
+#define wp_presentation_feedback_add_listener test_feedback_listener
+#define wl_surface_frame test_frame
+#define wl_callback_add_listener test_frame_listener
+#define wl_surface_commit test_commit
+#define hold_presented test_hold
+#endif
 #define wl_buffer_destroy test_destroy
 #define zwp_linux_buffer_params_v1_destroy test_params_destroy
 #define zwp_linux_dmabuf_v1_create_params test_params
@@ -55,6 +92,24 @@ static bool test_device(const char *sysfs, dev_t device) {
 #define main wl_panel_program
 #include "../wl-panel/wl-panel.c"
 #undef main
+
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+static void test_commit(struct wl_surface *surface) {
+    (void)surface;
+    struct feedback *fb=held_feedback;
+    assert(fb && fb->presented_ns);
+    *fb->presented_ns=100*(diagnostic_holds+1);
+    free(fb); held_feedback=NULL;
+}
+static void test_hold(unsigned generation, uint64_t presented, hold_dispatch dispatch, void *context) {
+    (void)dispatch; (void)context;
+    assert(generation==diagnostic_holds+1 && presented==100*generation);
+    struct fresh_slot *slot=held_slot;
+    assert(slot && slot->token==generation);
+    fresh_release(slot,slot->buffer); held_slot=NULL;
+    diagnostic_holds++;
+}
+#endif
 
 static void table(uint32_t format, uint64_t modifier) {
     struct { uint32_t format, padding; uint64_t modifier; } row = {format, 0, modifier};
@@ -126,6 +181,16 @@ int main(void) {
 
     FILE *journal=tmpfile(); assert(journal);
     gpu_open(journal,"test");
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+    int64_t presented[3]={-1,-1,-1}; rec_presented=presented;
+    main_panel.surface=(void *)&dummy;
+    for (unsigned generation=1;generation<=3;generation++) {
+        uint64_t submitted;
+        fresh_main_frame(generation,generation,true,&submitted);
+        assert(submitted && diagnostic_holds==generation && !fresh_inflight);
+    }
+    gpu_close(journal,3); fclose(journal);
+#else
     unsigned inflight=2;
     struct fresh_slot *first=calloc(1,sizeof *first), *second=calloc(1,sizeof *second);
     first->inflight=second->inflight=&inflight;
@@ -136,5 +201,6 @@ int main(void) {
     fresh_release(second,second->buffer); assert(inflight==1 && destroyed==1);
     fresh_release(first,first->buffer); assert(inflight==0 && destroyed==2);
     gpu_close(journal,2); fclose(journal);
+#endif
     puts("Wayland GPU feedback/release controls passed; no display/GPU");
 }

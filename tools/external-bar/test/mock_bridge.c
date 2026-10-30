@@ -46,3 +46,12 @@ int gpu_bar_bridge_close(GpuBarBridge **owner, char *error, size_t capacity) {
     assert(*owner && !(*owner)->slots[0] && !(*owner)->slots[1]);
     free(*owner); *owner=NULL; return 0;
 }
+
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+extern unsigned diagnostic_holds;
+int gpu_bar_bridge_render_colour(GpuBarBridge *owner, uint64_t generation, GpuBarFrame *out,
+                                char *error, size_t capacity) {
+    assert(generation == diagnostic_holds + 1 && generation <= 3);
+    return gpu_bar_bridge_render(owner,generation,out,error,capacity);
+}
+#endif

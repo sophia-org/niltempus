@@ -34,12 +34,24 @@ impl GpuBarBridge {
     }
 
     fn render(&mut self, generation: u64) -> Result<GpuBarFrame, String> {
+        self.render_scene(generation, gpu_scene::scene(WIDTH, HEIGHT, generation))
+    }
+
+    #[cfg(feature = "diagnostic-colour-hold")]
+    fn render_colour(&mut self, generation: u64) -> Result<GpuBarFrame, String> {
+        self.render_scene(
+            generation,
+            gpu_scene::colour_scene(WIDTH, HEIGHT, generation)?,
+        )
+    }
+
+    fn render_scene(
+        &mut self,
+        generation: u64,
+        mut scene: imaging::record::Scene,
+    ) -> Result<GpuBarFrame, String> {
         let (slot, token) = self.frames.prepare(generation)?;
-        let rendered = self.renderer.render_dma_buf(
-            &mut gpu_scene::scene(WIDTH, HEIGHT, generation),
-            WIDTH,
-            HEIGHT,
-        );
+        let rendered = self.renderer.render_dma_buf(&mut scene, WIDTH, HEIGHT);
         let frame = match rendered {
             Ok(frame) => frame,
             Err(error) => {

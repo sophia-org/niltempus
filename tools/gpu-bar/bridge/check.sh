@@ -3,6 +3,9 @@ set -eu
 : "${CARGO_TARGET_DIR:?run through cargo-slot niltempus}"
 bridge=tools/gpu-bar/bridge
 cargo fmt --manifest-path "$bridge/Cargo.toml" --check
+# Feature tests do not replace the default static library used by timed links.
+cargo test --manifest-path "$bridge/Cargo.toml" --features diagnostic-colour-hold --locked
+cargo clippy --manifest-path "$bridge/Cargo.toml" --features diagnostic-colour-hold --all-targets --locked -- -D warnings
 cargo test --manifest-path "$bridge/Cargo.toml" --locked
 cargo clippy --manifest-path "$bridge/Cargo.toml" --all-targets --locked -- -D warnings
 cargo build --manifest-path "$bridge/Cargo.toml" --lib --locked

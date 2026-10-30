@@ -11,6 +11,11 @@ int main(void) {
     GpuBarBridge *owner = NULL;
     assert(gpu_bar_bridge_open("/dev/null", "0000:03:00.0", &owner, error, sizeof error) == -1);
     assert(!owner && error[0] != '\0');
+#ifdef DIAGNOSTIC_COLOUR_HOLD
+    GpuBarFrame colour = {.fd=99,.token=99};
+    assert(gpu_bar_bridge_render_colour(NULL,1,&colour,error,sizeof error)==-1);
+    assert(colour.fd==-1 && colour.token==0);
+#endif
     GpuBarFrame frame = {.fd = 99, .token = 99};
     assert(gpu_bar_bridge_render(owner, 1, &frame, error, sizeof error) == -1);
     assert(frame.fd == -1 && frame.token == 0);

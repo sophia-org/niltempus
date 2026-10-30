@@ -43,6 +43,12 @@ class Receipts(unittest.TestCase):
             self.assertEqual(result["client_pid"], 1234)
             self.assertIn("no artifact/process", result["limits"])
 
+    def test_diagnostic_colour_header_cannot_qualify_as_timed(self):
+        for mode in q.TRANSPORTS:
+            with self.subTest(mode=mode), self.assertRaises(ValueError):
+                self.check(fixture(mode).replace('vello_shade_mod128_opaque_rgb',
+                                                  'diagnostic_colour_hold_121'), mode)
+
     def test_each_receipt_required_exact_and_unambiguous(self):
         for mode in q.TRANSPORTS:
             text = fixture(mode)

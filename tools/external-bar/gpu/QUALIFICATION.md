@@ -258,6 +258,81 @@ resolve the live capture incarnation, verify actual 119.880 Hz readback and
 prove authenticated observer delivery plus outer cleanup. External Wayland/X
 colour holds and capture normalization are still separate prerequisites.
 
+## External colour holds and normalization (device-free source)
+
+The separate `wl-panel-gpu-hold` and `x-panel-gpu-hold` targets take
+GPU_DIAGNOSTIC_BRIDGE, requiring a bridge built with `diagnostic-colour-hold`.
+Timed-source targets use GPU_BRIDGE and a separate default-feature artifact.
+Debug controls use this worktree's existing cargo pool slots 1 (default) and 2
+(diagnostic), with path/hash/symbol receipts. These are not release artifacts. Their C macro is DIAGNOSTIC_COLOUR_HOLD;
+ordinary clients cannot select it through a flag or environment variable.
+Only three frames, zero warmup, fresh exports, two buffers and the ordinary
+GPU/device/import restrictions are accepted. They additionally require a
+canonical `--hold-fd N` naming an inherited same-user Unix stream. The parent
+owns socketpair custody; SO_PEERCRED on this pair is not writer authentication.
+No new device/consumer grant is introduced. The diagnostic header's
+fill=diagnostic_colour_hold_121 is refused by the timed journal qualifier.
+
+After each exact presentation, READY names generation, declared pattern,
+presentation timestamp and a fresh random challenge. The parent checks the
+consumer pixels and sends the exact compact JSON ACK for this generation and
+challenge. A partial ACK cannot advance, and any extra/stale/foreign record or
+EOF refuses. There is no retry. Wayland continues prepare_read/flush/IN+OUT/
+read_events/dispatch_pending on its display fd while polling the control fd;
+X drains its existing event handler while polling X and control readiness.
+Neither path frees a buffer because of ACK: only the existing matched release
+events release exports. In X COPY, IdleNotify may free the client pixmap/export
+before ACK; XGetImage then observes the server screen-pixmap copy of generation
+g. It does not prove client-buffer retention. Wayland retains the attachment
+until replacement/detach (with actual release timing recorded separately).
+After the third ACK, Wayland detaches and drains;
+X drains matching IdleNotify. DONE is sent only after gpu_close verifies all
+three exports released. Existing XCB synchronous calls still depend on a
+responsive server; the native wrapper must impose its own process deadline.
+
+`colour_control.run` is the reusable parent sequence, not a native launcher.
+Its caller supplies the pinned client pidfd, a live client/compositor/output
+identity check, and a capture callback bounded to 60 seconds. It validates
+exact READY fields, increasing presentation timestamps, fresh challenges and
+the existing pixel oracle before ACK. The client enforces an 80-second hold;
+the caller must kill/reap on refusal and require clean client exit plus the
+exact release receipts after DONE. The callback must run a new capture into
+private attempt files without retries. Completion of this source API alone
+does not qualify the compositor, capture provenance or physical display.
+
+`gpu-normalize-png` uses installed libpng (1.6.59 on this host). It accepts only
+a bounded regular, non-symlink 1920x1080 noninterlaced RGB8/RGBA8 PNG. RGB gains
+opaque alpha; RGBA alpha is preserved. It applies no gamma/profile conversion,
+refuses tRNS, unknown chunks (including APNG), CRC errors, truncation and trailing
+bytes, and emits the exact RGBA PAM only after a complete decode. The niri
+screenshot command is still native work: `screenshot-screen --path ABS
+--show-pointer false --write-to-disk true` captures the focused screen. The
+native profile must leave DP-1 as the only enabled screen at scale 1 with no
+transform, pin the screenshot path, and the wrapper must
+bind this run's IPC endpoint/output and the fresh PNG before normalization.
+Its 1920x1080 dimensions alone do not identify DP-1.
+
+`gpu-capture-x` calls XGetImage on the sole screen's 1920x1080 depth-24 root.
+It requires ZPixmap/32-bit pixels and exact RGB masks. XGetPixel handles endian
+order and scanline padding; the writer supplies alpha 255 and emits RGBA PAM.
+This is composed-root capture, not producer readback or a scanout measurement.
+The native wrapper must require no compositing manager redirecting windows,
+pin DISPLAY/XAUTHORITY and X server process/output,
+run it in a dedicated private stdout pipe/file, require exit zero, and preserve
+that raw result. Failed or partial output is never an accepted capture.
+
+Fixtures use real local socketpairs and a fake event fd to check holds without
+opening a display/GPU. Diagnostic variants of the adapter tests call the shared
+Wayland fresh-submission path and X presentation path against mock exports and
+presentation callbacks. They assert hold g before render g+1; deleting either
+production barrier fails its fixture. They do not run a compositor or the full
+client main loop. The X fixture delivers IdleNotify before completion/hold. PNG fixtures exercise filters 0..4, RGB/RGBA, alpha,
+gamma metadata and corruption refusals; synthetic XImages cover both byte
+orders, padded scanlines and wrong masks. Real Wayland/X event dispatch, fresh
+consumer screenshots, GPU import, delayed release, authenticated Sophia
+capture and full PAM/VT cleanup remain native qualifications. The complete
+native controller/wrapper and source/build receipts remain the next gate.
+
 ## Refusal, lifetime and cleanup controls
 
 First qualify normal fresh import, completion and matching release on each stack.
