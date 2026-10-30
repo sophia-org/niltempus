@@ -420,6 +420,55 @@ its cleanup records owned children and escalation only. The attended package
 must still audit descendants, PAM/cgroup/VT restoration, real import refusal,
 delayed release and the Sophia authenticated capture route before qualification.
 
+## External protected-handoff staging (device-free)
+
+`handoff.py stage --recipe ABS --destination NEW_ABS --run NEW_SHORT_ABS`
+prepares one **unsealed** external arm. It does not invoke sudo, query seats,
+open devices or start a session. The exact CPU02 niri1 `ssh-run.py`,
+`vt_session.py`, `remote_user.py` and pin inventory are checked against frozen
+hashes before reuse. The PAM/VT program is byte-identical; no namespace entry,
+mount, device grant or authentication rule is added. Sophia's protected
+namespace/core/feature integration remains a separate prerequisite.
+
+The new command invokes only `run_colour_external.py` with its explicit recipe
+and fresh run directory. Wrapper/PAM/outer deadlines are 300/360/420 seconds,
+so the enclosing cleanup can outlive the inner deadline. An exclusive attempt
+record is created before getty is stopped; even a failed attempt cannot retry.
+Check-only also refuses a consumed attempt. The remote-user log describes an
+untimed diagnostic, not a CPU comparison. Output parents must exist; the run
+directory must be separate from the handoff directory and short enough for
+niri's Unix socket names.
+
+Staging deliberately creates no `MANIFEST.sha256`. The generated root entry
+requires exactly all nine staged input files in that manifest, then verifies
+their hashes and every external pin **before importing** the privileged control
+helper. A missing, empty or incomplete seal refuses. A future reviewed package
+must supply the seal together with signed release/link and dependency receipts;
+checksum validity alone does not establish release provenance or permission
+to launch. The staging helper is not a package sealer.
+
+The inherited system/helper hashes are retained, not silently refreshed on
+drift. Legacy CPU arm and artifact paths are excluded; the explicit diagnostic
+artifacts, current GPU Python helpers and configs are pinned instead. The
+inventory is not a new transitive dependency proof. XKB/xkbcomp/input-module
+closure and static-bridge link provenance still need the package's receipt.
+The original sealed CPU package remains immutable and is an offline template
+dependency; missing or changed template files refuse preparation.
+
+`handoff.py cleanup HANDOFF_DIRECTORY` reads completed receipts only. It requires
+successful PAM close/credential deletion/pam_end/TTY restoration, no residual
+occupants or sessions and no outer kills, plus the wrapper's matching client
+and server identities and clean local exits. It refuses a local refusal file,
+forced termination, unexpected server exit, missing evidence and bool-as-int
+status aliases. Its output is `handoff_cleanup_verified` with input hashes,
+not a device qualification. The controller must call this after the root
+handoff returns, including after failure to retain the cleanup outcome.
+
+Fixtures render the actual pinned templates but execute only the pre-import
+seal/pin checks and receipt predicates. They never run PAM, openvt, getty,
+elogind or a display. Actual attended launch, server shutdown calibration,
+protected Sophia capture and the device controls below remain unqualified.
+
 ## Refusal, lifetime and cleanup controls
 
 First qualify normal fresh import, completion and matching release on each stack.
