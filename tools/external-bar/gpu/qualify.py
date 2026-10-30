@@ -42,6 +42,14 @@ def uint(text):
 
 
 def qualify(text, transport, frames, warmup):
+    return _qualify(text, transport, frames, warmup, 'vello_shade_mod128_opaque_rgb')
+
+
+def qualify_colour(text, transport):
+    return _qualify(text, transport, 3, 0, 'diagnostic_colour_hold_121')
+
+
+def _qualify(text, transport, frames, warmup, fill):
     if (transport not in TRANSPORTS or type(frames) is not int or type(warmup) is not int
             or not 1 <= frames <= 1_000_000 or not 0 <= warmup <= 1_000_000):
         raise ValueError("invalid declared GPU workload")
@@ -58,7 +66,7 @@ def qualify(text, transport, frames, warmup):
                     "released": str(frames + warmup)},
     }
     header = fields(
-        f"arm={arm} width=1920 height=24 buffers=2 fill=vello_shade_mod128_opaque_rgb "
+        f"arm={arm} width=1920 height=24 buffers=2 fill={fill} "
         f"frames={frames} warmup={warmup} bulk=0 bulk_width=0 bulk_height=0 "
         "lifecycle=fresh workload=fresh tiles=0 interval_ms=0 damage=full idle_sec=0 "
         "clock=CLOCK_MONOTONIC_ns")

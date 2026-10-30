@@ -7,6 +7,9 @@ X_PKGS := x11 xext x11-xcb xcb xcb-present xcb-shm xcb-xfixes
 
 all: $(BUILD)/wl-panel $(BUILD)/x-panel $(BUILD)/fill-parity
 
+$(BUILD)/gpu-capture-x-test: test/gpu_capture_x.c gpu/capture_x.c gpu/x_pixels.h | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ $< $$(pkg-config --cflags --libs x11)
+
 $(BUILD):
 	mkdir -p $@
 

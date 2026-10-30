@@ -3,8 +3,9 @@
 This is the implementation contract for the next device gate, **not a launch
 recipe or a native pass**. `qualify.py` and `pixels.py` are device-free validators.
 `capture_sophia.py` implements one private Sophia capture per declared hold;
-its fixtures do not execute a Sophia session. Colour/hold producers, the parent
-READY/ACK driver, wrapper integration, releases and the native package remain.
+its fixtures do not execute a Sophia session. Colour/hold producers, parent
+READY/ACK drivers and local wrappers now have source controls. Protected
+handoff integration, release receipts and the native package remain unqualified.
 No existing CPU package or timed grey-strip binary may be replaced or reused as
 if it already implemented this contract.
 
@@ -19,7 +20,13 @@ All paths use PCI `0000:03:00.0`, renderD128. Bind the opened node's dev_t, sysf
 physical PCI and Vulkan adapter PCI. For niri, bind installed binary SHA256
 `5b8c21910f17ab1eaed6562bc54a09532c8f15dbd3abf563817158511acbe986`
 and `niri.kdl` SHA256
-`c2d0d6bc372046891c5126086906e8395cfd3a1a8562b1e5c6202ab10c2c7a5c`.
+`58948f4c081a5f29f45af0ebff91a71d072795912eef9a5f4b87c05ba972c976`.
+This diagnostic config adds `ignore-drm-device "/dev/dri/card1"` to the earlier
+`c2d0d6bc` config; earlier receipts remain unchanged. Installed-binary positive
+validation and an unknown-key negative control prove syntax only, not runtime
+device exclusion. Before launch the wrapper requires card0/renderD128 to map
+to 03:00.0 and card1/renderD129 to 16:00.0, with the expected character-device
+major/minors. A boot-order change refuses instead of selecting another GPU.
 Its source commit remains unknown. Require actual linux-dmabuf main and compatible
 tranche devices to resolve to that PCI; retain a render-device log if emitted.
 X's DRI3Open FD must resolve to it, with DRI3 >=1.2 and advertised LINEAR.
@@ -332,6 +339,86 @@ orders, padded scanlines and wrong masks. Real Wayland/X event dispatch, fresh
 consumer screenshots, GPU import, delayed release, authenticated Sophia
 capture and full PAM/VT cleanup remain native qualifications. The complete
 native controller/wrapper and source/build receipts remain the next gate.
+
+## External native wrapper contract
+
+`run_colour_external.py --recipe ABS --evidence NEW_ABS` is an explicit untimed
+entry point inside the existing attended, unprivileged PAM/text-VT handoff.
+It never enters another namespace or starts a CPU sampler. The outer handoff
+must retain the existing seat/VT ownership checks, process-tree cleanup and
+restoration receipts. Local child exits do not replace those gates.
+Use a short private evidence path: the wrapper refuses niri when its runtime
+path plus the 40-byte socket-name allowance exceeds 107 bytes. This is checked
+before creating the directory or launching anything.
+
+The exact recipe has `schema: 1`, `stack: "niri"|"xlibre"`, `display` (null for
+niri, an unoccupied integer 1..99 for X), and `pins`. Each pin uses the existing
+`{executable: ABS, sha256: LOWER_HEX}` shape, including the config and library.
+Both variants require `server`, `client`, `capture`, `output`, `config`, `bridge`;
+X additionally requires `xauth`. The niri `output` pin must equal `server`.
+`client` is the separate colour-hold executable. `capture` is gpu-normalize-png
+for niri and gpu-capture-x for X; `output` is the pinned xrandr binary for X.
+The config must match this source's niri.kdl or xorg.conf byte for byte. The
+X server must be the unprivileged installed prefix binary; its module directory
+is derived using the existing xlibre-25 prefix convention. The package must pin
+that module/config closure and bind the diagnostic static library to the client
+through signed release/link receipts; a library hash alone proves no link.
+X's package closure must also name xkbcomp, xkeyboard-config data and the
+libinput input module, or retain their explicit host-unpinned status. The local
+wrapper records that limit; it does not silently expand its six artifact pins
+into a claim about every Xorg dependency.
+
+The wrapper creates a private runtime and logs, opens/hashes each executable
+and executes that retained inode via `/proc/self/fd`, including short helpers.
+It pins the direct server/client by pidfd, starttime, user/namespaces and exe
+dev/inode. It finds listeners in that server's fd table and `/proc/net/unix`
+without a probe connection, checks listener ownership again around captures,
+and refuses server DRM FDs outside 0000:03:00.0. Discovery still has a local
+path-to-connect gap; the private runtime and repeated server ownership checks
+bound it, not a claim that paths are immutable capabilities.
+For X the filesystem listener must be unique in the network namespace; any
+abstract listener at the same display address must also belong to this server.
+Xtrans local connections can prefer that abstract address over the filesystem
+fallback. A second or foreign listener refuses rather than borrowing its pixels.
+The opened executable FD intentionally survives exec and may be inherited by
+descendants; fd audits must account for this regular-file descriptor. Startup
+uses a bounded kernel-listener-table recheck because bind precedes listen and
+listen emits no inotify event. X does not require /tmp/.X11-unix to exist before
+server startup. Niri's own server logging is separate from the helpers' quiet
+RUST_LOG=error environment.
+
+Niri validates the pinned config, then runs without `--session` or startup
+commands. The single-output readback requires DP-1 1920x1080 at 119880 mHz,
+scale 1, normal transform, origin 0/0, VRR false, all other outputs disabled.
+X gets a fresh private cookie and the pinned non-VRR/no-PageFlip/glamor config;
+one xrandr setting selects DP-1 and disables other outputs. Every readback
+requires the sole 1920x1080 primary at 0/0, identity transform and 119.88 Hz.
+Before/after capture readbacks use `--current --verbose` to avoid connector
+re-probing during a hold; only the initial `--query` probes outputs.
+The X refresh is rounded xrandr evidence; `vrr_capable` is not an enabled-state
+proof. No WM or compositor is launched. X capture also refuses an owner of
+`_NET_WM_CM_S0`; this is not proof against an unregistered redirector.
+
+Each READY causes output readback, a fresh consumer capture, pixel checking and
+another output readback before ACK. Niri uses an exact fresh screenshot path
+with pointer false. An inotify watch installed before the action requires
+CLOSE_WRITE or MOVED_TO for that file before decoding; create alone is not
+completion. The PNG hash is checked before and after normalization. Helper
+stdout and stderr are drained concurrently under byte/time bounds, and nonzero
+exit or stderr refuses. Niri config validation suppresses informational logs
+with RUST_LOG=error, not by dropping stderr. On helper failure its owned process
+group is killed before reaping the leader. No capture or failed run is retried.
+
+After DONE, the client must exit zero. The separate colour journal parser fixes
+3 frames, zero warmup and the diagnostic fill, retains all existing strict
+receipt/order/release checks, and joins its client PID and three presentation
+timestamps exactly to the pinned child and READYs. The normal journal parser
+still refuses colour headers. Successful local output is named
+`colour_source_path_completed`, not a device qualification or benchmark row.
+The controller requires a fresh evidence directory and saves refused attempts;
+its cleanup records owned children and escalation only. The attended package
+must still audit descendants, PAM/cgroup/VT restoration, real import refusal,
+delayed release and the Sophia authenticated capture route before qualification.
 
 ## Refusal, lifetime and cleanup controls
 

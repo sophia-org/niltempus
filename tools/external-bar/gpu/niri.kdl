@@ -1,6 +1,7 @@
 // Diagnostic configuration for the pinned 03:00.0 / renderD128 rig.
 debug {
     render-drm-device "/dev/dri/renderD128"
+    ignore-drm-device "/dev/dri/card1"
 }
 hotkey-overlay {
     skip-at-startup

@@ -8,6 +8,9 @@ int main(int argc, char **argv) {
     Display *display = XOpenDisplay(NULL);
     if (!display) refuse("display");
     if (ScreenCount(display) != 1) refuse("single screen required");
+    Atom manager = XInternAtom(display, "_NET_WM_CM_S0", True);
+    if (manager != None && XGetSelectionOwner(display, manager) != None)
+        refuse("compositing manager owns the screen");
     Window root = DefaultRootWindow(display);
     XWindowAttributes attrs;
     if (!XGetWindowAttributes(display, root, &attrs) || attrs.width != 1920 || attrs.height != 1080 || attrs.depth != 24)
