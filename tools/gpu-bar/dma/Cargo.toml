@@ -7,6 +7,19 @@ edition = "2024"
 rust-version = "1.96.1"
 license = "BSD-3-Clause"
 publish = false
+autobins = false
+
+[features]
+diagnostic-colour-hold = ["rustix/event", "rustix/fs", "rustix/net", "rustix/process"]
+
+[[bin]]
+name = "gpu-bar-dma"
+path = "src/main.rs"
+
+[[bin]]
+name = "gpu-bar-colour-hold"
+path = "src/colour_hold.rs"
+required-features = ["diagnostic-colour-hold"]
 
 [workspace]
 

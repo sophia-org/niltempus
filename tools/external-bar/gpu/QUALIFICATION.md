@@ -187,6 +187,77 @@ launch client on failure; Session owns observer retirement and the parent owns
 session cleanup. `result.json` means `capture_verified` under this contract,
 not native qualification or authorization for timed comparison rows.
 
+## Sophia parent hold channel (device-free source gate)
+
+`gpu-bar-colour-hold` is a separate binary requiring the
+`diagnostic-colour-hold` Cargo feature. It accepts only three fresh GPU DMA
+frames at 1920x24, with no profiling, reuse or timed hold. The shared scene
+renders patterns 1, 2, 1. Ordinary `gpu-bar-dma --serve` keeps the grey scene.
+A held frame has already been presented and the exact predecessor's explicit
+ResourceReleased has been consumed. The DMA source was released at image
+settlement: the oracle checks Sophia's imported copy, not continued scanout
+from the producer buffer.
+
+`hold_sophia.py` derives the sole shell listener owned by the pinned Session
+from `/proc/net/unix` and its fd table. The stderr announcement is a hint only.
+It opens the existing 0700 role directory, binds `hold.pending` through that
+dirfd, calls listen, then publishes `hold.sock` with renameat2 NOREPLACE.
+The peer watches CREATE/MOVED_TO and connects once. The parent pins the accepted
+peer with SO_PEERPIDFD, starttime and executable identity, and verifies the
+single-child peer -> bwrap -> Session chain. The inner peer checks only the
+controller UID; its namespace cannot establish the outer controller PID.
+
+Each READY carries the exact grant, output, candidate, presentation epoch and
+a fresh 128-bit challenge. The parent calls `capture_sophia.py` once and sends
+an exact generation/challenge ACK only after the helper verifies the capture
+and the before/after held-state checks still pass. Unexpected peer data, EOF,
+process exit, reused challenge, a second endpoint hint, changed grant or an
+explicit peer refusal ends the run. A failed peer may be restarted by Session;
+that is a refusal, never a new attempt. Three attempts equal three captures.
+The diagnostic profile must have exactly this one shell-content producer:
+the grant check includes status=outputs and all other shell-content records;
+another producer's different grant is a refusal, not a separately tracked arm.
+
+While waiting, the peer follows SDK 0706ea2's external event loop: poll_io,
+drain typed content, honor immediate readiness, poll session IN/OUT, image
+readiness and the hold/inotify descriptor, and bound the wait by wake_deadline
+and the hold deadline. Every content record during this phase is unexpected
+and refuses; none is silently discarded or deferred into the next present.
+There is no cloned 9P socket or sleeping hold. Peer JSON journals are already
+buffered as complete lines. Shared GPU stderr diagnostics and the endpoint
+hint/refusal are now formatted before a bounded write_all, rather than writing
+individual formatting fragments into Session's log.
+
+Generation domains are deliberately separate. READY.shell_output_generation
+is the shell ContentOutputId generation. The recipe's `output_generation` and
+the result's `capture_output_incarnation` are the native
+OutputCaptureFrameInfo incarnation. The head log exposes no native incarnation,
+so this is an explicit diagnostic input, not inferred from the shell generation
+or an earlier run. Session's capture receipt must match it; a mismatch refuses.
+The fixture deliberately uses shell generation 90 and native incarnation 1.
+The capture request and native presentation generation must advance independently
+across all three captures. No equality with shell presentation_epoch is assumed.
+
+`run_hold_sophia.py --recipe ABS --evidence NEW_ABS` is an untimed local wrapper,
+not a sealed native recipe. Its JSON has exactly schema=1, host/peer/supervisor
+(each executable+sha256), argv (starting session/run), and output_generation.
+It starts Session and the driver as siblings in the inherited namespaces,
+adds a fresh diagnostic capture directory, and retains bounded private logs.
+The driver unlinks its owned hold socket before atomically publishing
+captures_verified.json; the wrapper then stops Session and waits for the
+driver. Failure stops the driver first so endpoint cleanup precedes Session
+shutdown. SIGTERM follows the same cleanup path. Forced kills are recorded and
+refuse success. Local child exit is not PAM, VT, cgroup or device cleanup proof.
+
+The Python fixtures exercise real local Unix sockets, pidfds, process ancestry,
+listener publication/removal, three ACKs, refusal without ACK, and the wrapper's
+child shutdown. The Rust tests cover configuration, ACK matching and scene
+bounds. They do not open a GPU or exercise a protected metadata-shell peer.
+The forthcoming native recipe must pin the diagnostic feature/core/profile,
+resolve the live capture incarnation, verify actual 119.880 Hz readback and
+prove authenticated observer delivery plus outer cleanup. External Wayland/X
+colour holds and capture normalization are still separate prerequisites.
+
 ## Refusal, lifetime and cleanup controls
 
 First qualify normal fresh import, completion and matching release on each stack.

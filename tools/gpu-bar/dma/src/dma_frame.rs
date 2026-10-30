@@ -13,6 +13,8 @@ use std::time::Instant;
 pub(super) struct Backing {
     reuse: bool,
     retained: Option<DmaFrame>,
+    #[cfg(feature = "diagnostic-colour-hold")]
+    pub(super) colour_hold: bool,
 }
 
 impl Backing {
@@ -20,6 +22,8 @@ impl Backing {
         Self {
             reuse,
             retained: None,
+            #[cfg(feature = "diagnostic-colour-hold")]
+            colour_hold: false,
         }
     }
 
@@ -66,6 +70,8 @@ pub(super) fn dma_frame(
         // only descriptor duplicate went to that forgotten offer, so nothing
         // queued can send the buffer again.
         Some(previous) => unsafe { reuse_dma(previous, generation) }?,
+        #[cfg(feature = "diagnostic-colour-hold")]
+        None if backing.colour_hold => canvas::render_colour_dma(width, height, generation)?,
         None => canvas::render_dma(width, height, generation)?,
     };
     canvas::prepared(generation, resource.id, prepare_usec, clock_usec());

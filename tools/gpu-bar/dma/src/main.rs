@@ -31,6 +31,8 @@ mod dma_frame;
 mod producer;
 mod profile;
 use producer::Producer;
+#[cfg(feature = "diagnostic-colour-hold")]
+mod hold;
 mod ring_journal;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -438,6 +440,10 @@ fn emit_ring(event: ring_journal::Event<'_>) -> Result<()> {
 }
 
 fn run() -> Result<()> {
+    run_mode(false)
+}
+
+fn run_mode(diagnostic: bool) -> Result<()> {
     if std::env::args().skip(1).collect::<Vec<_>>() != ["--serve"] {
         return Err("expected --serve and explicit SOPHIA_SHELL_CONFIG".into());
     }
@@ -449,6 +455,15 @@ fn run() -> Result<()> {
     if text.len() > 4096 {
         return Err("configuration too large".into());
     }
+    let config = parse_config(&text)?;
+    #[cfg(feature = "diagnostic-colour-hold")]
+    if diagnostic {
+        hold::validate_config(&config)?;
+    }
+    #[cfg(not(feature = "diagnostic-colour-hold"))]
+    if diagnostic {
+        return Err("diagnostic peer requires diagnostic-colour-hold".into());
+    }
     let Config {
         source,
         producer,
@@ -458,7 +473,7 @@ fn run() -> Result<()> {
         frames,
         height,
         hold_msec: hold,
-    } = parse_config(&text)?;
+    } = config;
     let _ = SCHEMA.set(source.schema());
     let socket = std::env::var_os("SOPHIA_SHELL_9P_SOCKET").ok_or("missing file endpoint")?;
     let mut wire = Wire::connect(source)?;
@@ -470,14 +485,21 @@ fn run() -> Result<()> {
     }
     producer.open(limits.grant.connection_epoch, source, capture_profile)?;
     if capture_profile {
-        eprintln!(
+        canvas::diagnostic_line(format_args!(
             "gpu_bar_profile schema=1 source={} enabled=true",
             source.label()
-        );
+        ));
     }
     let mut backing = dma_frame::Backing::new(dma_reuse);
+    #[cfg(feature = "diagnostic-colour-hold")]
+    {
+        backing.colour_hold = diagnostic;
+    }
     if source == Source::DmaBuf {
-        eprintln!("gpu_bar_dma_mode schema=1 mode={}", backing.mode());
+        canvas::diagnostic_line(format_args!(
+            "gpu_bar_dma_mode schema=1 mode={}",
+            backing.mode()
+        ));
     }
     let ShellContentRecord::OutputFacts(facts) = wire.receive()? else {
         return Err("missing output facts".into());
@@ -535,6 +557,12 @@ fn run() -> Result<()> {
         wire.enable_image(&socket, &limits, Some((slots, length)))?;
     }
     wire.wait_ready()?;
+    #[cfg(feature = "diagnostic-colour-hold")]
+    let mut hold_control = if diagnostic {
+        Some(hold::Control::connect(&socket, &mut wire)?)
+    } else {
+        None
+    };
     let ready_usec = clock_usec();
     let mut ring_canvas = None;
     match source {
@@ -616,7 +644,7 @@ fn run() -> Result<()> {
                 facts.facts_generation,
             )?;
         }
-        present(
+        let presentation_epoch = present(
             &mut wire,
             grant,
             &allocation,
@@ -624,6 +652,18 @@ fn run() -> Result<()> {
             facts.facts_generation,
             generation,
         )?;
+        #[cfg(feature = "diagnostic-colour-hold")]
+        if let Some(control) = &mut hold_control {
+            control.presented(
+                &mut wire,
+                grant,
+                output.output,
+                generation,
+                presentation_epoch,
+            )?;
+        }
+        #[cfg(not(feature = "diagnostic-colour-hold"))]
+        let _ = presentation_epoch;
         if capture_profile && source == Source::DmaBuf && matches!(generation, 120 | 2120) {
             let snapshot =
                 canvas::with_gpu(|gpu| gpu.dma_timing().ok_or("DMA timing absent".into()))?;
@@ -640,21 +680,27 @@ fn run() -> Result<()> {
         offered: frames,
         completed: frames,
     })?;
+    #[cfg(feature = "diagnostic-colour-hold")]
+    if let Some(control) = &mut hold_control {
+        control.finish(&mut wire)?;
+    }
     if capture_profile && source == Source::DmaBuf {
         let record = if dma_reuse {
             profile::reuse_record
         } else {
             profile::record
         };
-        eprintln!(
+        canvas::diagnostic_line(format_args!(
             "{}",
             record(
                 timing_start.ok_or("missing timing start")?,
                 timing_end.ok_or("missing timing end")?
             )?
-        );
+        ));
     }
-    std::thread::sleep(Duration::from_millis(hold));
+    if !diagnostic {
+        std::thread::sleep(Duration::from_millis(hold));
+    }
     Ok(())
 }
 
@@ -747,7 +793,7 @@ fn present(
     output: ContentOutputId,
     facts_generation: u64,
     generation: u64,
-) -> Result<()> {
+) -> Result<u64> {
     let resource = resource_for_frame(generation);
     let demand_time = clock_usec();
     wire.send(
@@ -828,7 +874,7 @@ fn present(
     })?;
     wire.send(6, &records)?;
     let mut prepared = false;
-    loop {
+    let presentation_epoch = loop {
         let ShellContentRecord::CandidateOutcome(outcome) = wire.receive()? else {
             return Err("unexpected candidate response".into());
         };
@@ -865,8 +911,8 @@ fn present(
         if !prepared || outcome.presentation_epoch == 0 {
             return Err("presentation lacks preparation or epoch".into());
         }
-        break;
-    }
+        break outcome.presentation_epoch;
+    };
     // Keep the currently displayed resource until a successor is shown.
     if generation > 1 {
         let old = resource_for_frame(generation - 1);
@@ -884,7 +930,7 @@ fn present(
             return Err("wrong retired resource release".into());
         }
     }
-    Ok(())
+    Ok(presentation_epoch)
 }
 
 fn expect_status(
@@ -915,6 +961,17 @@ fn main() {
         let _ = emit(Event::Failed {
             error: &error.to_string(),
         });
+        std::process::exit(1);
+    }
+}
+
+#[cfg(feature = "diagnostic-colour-hold")]
+#[allow(dead_code)] // Called only by the separate colour-hold binary.
+pub(crate) fn diagnostic_main() {
+    if let Err(error) = run_mode(true) {
+        canvas::diagnostic_line(format_args!(
+            "gpu_colour_hold_refused schema=1 error={error:?}"
+        ));
         std::process::exit(1);
     }
 }

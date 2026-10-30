@@ -225,7 +225,7 @@ def watch(directory):
     if fd < 0:
         raise OSError(ctypes.get_errno(), 'inotify_init1')
     # Bind the already-open directory, not a path that could be replaced.
-    if libc.inotify_add_watch(fd, f'/proc/self/fd/{directory}'.encode(), 0x100 | 0x80 | 0x8 | 0x400 | 0x800) < 0:
+    if libc.inotify_add_watch(fd, f'/proc/self/fd/{directory}'.encode(), 0x100 | 0x80 | 0x8 | 0x2 | 0x400 | 0x800) < 0:
         os.close(fd)
         raise OSError(ctypes.get_errno(), 'inotify_add_watch')
     return fd

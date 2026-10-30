@@ -80,3 +80,18 @@ its span measures only the direct fill callback. It is not GPU evidence.
 Schema-7 journal records and settlement rules are unchanged. A new runner/package
 must pair the requested producer, config and observed receipt; old GPU-only
 postflight rules must not be relaxed silently. No benchmark result is implied.
+
+
+## Untimed colour/hold diagnostic
+
+The separate `gpu-bar-colour-hold` binary requires the
+`diagnostic-colour-hold` feature and a config with fresh `dma_buf`, GPU producer,
+frames=3, height=24 and hold_msec=0. Profiling and reuse are refused. It renders
+the shared 1920x24 patterns 1,2,1, completes each presentation and predecessor
+release, then waits for the parent capture/ACK challenge while servicing the
+full SDK session and image readiness contract. Any unexpected content record
+refuses. The ordinary binary still selects only the grey scene.
+
+See ../../external-bar/gpu/QUALIFICATION.md for the parent listener, process
+binding, capture delivery and cleanup contract. This binary is never a timed
+benchmark client; device-free tests are not native pixel or release evidence.
