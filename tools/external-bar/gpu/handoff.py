@@ -1,4 +1,4 @@
-"""Stage an unsealed external colour arm using the exercised CPU02 PAM handoff.
+"""Stage an unsealed colour arm using the exercised CPU02 PAM handoff.
 
 Staging never invokes sudo, a display server or the handoff. A reviewed package
 must supply MANIFEST.sha256 and release/link provenance before native execution.
@@ -58,15 +58,32 @@ def seed_files():
 
 
 def stage(recipe, destination, run):
+    return _stage(recipe, destination, run)
+
+
+def stage_sophia(directory, destination, run):
+    sophia = w.colour.load('sophia_recipe')
+    directory = Path(w.h.r.absolute(str(directory)))
+    recipe = sophia.verify(directory)
+    return _stage(recipe, destination, run, directory)
+
+
+def _stage(recipe, destination, run, sophia_directory=None):
     """Create only new files. Failed preparation is retained, never repaired."""
-    w.validate(recipe)
+    if sophia_directory is None:
+        w.validate(recipe)
+        artifacts = recipe['pins']
+        stack = recipe['stack']
+    else:
+        artifacts = load(sophia_directory/'inputs.json')['artifacts']
+        stack = 'sophia'
     destination = Path(w.h.r.absolute(str(destination)))
     run = Path(w.h.r.absolute(str(run)))
     if destination == run or destination in run.parents or run in destination.parents:
         raise ValueError('handoff and run directories must be separate')
     if destination.exists() or run.exists() or not run.parent.is_dir():
         raise ValueError('handoff/run must be fresh with an existing run parent')
-    if recipe['stack'] == 'niri' and len(os.fsencode(run/'runtime'))+40 > 107:
+    if stack == 'niri' and len(os.fsencode(run/'runtime'))+40 > 107:
         raise ValueError('short run path required for niri sockets')
     seed = seed_files()
     inherited = w.h.r.record(seed['ssh-pins.json'].encode())
@@ -79,11 +96,14 @@ def stage(recipe, destination, run):
     for path, digest in pins.items():
         if sha(path) != w.h.r.digest(digest):
             raise ValueError('inherited helper drift: '+path)
-    for pin in recipe['pins'].values():
+    for pin in artifacts.values():
         path, digest = pin['executable'], pin['sha256']
         if path in pins and pins[path] != digest:
             raise ValueError('artifact conflicts with inherited helper pin')
         pins[path] = digest
+    if sophia_directory is not None:
+        for name in ('inputs.json', 'core.kdl', 'desktop.kdl', 'peer.json', 'recipe.json'):
+            pins[str(sophia_directory/name)] = sha(sophia_directory/name)
     for path in HERE.glob('*.py'):
         if path.is_symlink():
             raise ValueError('source helper must not be a symlink')
@@ -112,12 +132,16 @@ def stage(recipe, destination, run):
     ssh = replace_once(ssh, 'time.monotonic()+240', 'time.monotonic()+420')
     ssh = replace_once(ssh, '    service = ',
         "    with (BASE / 'attempt.json').open('x') as attempt:\n"
-        "        json.dump({'schema': 1, 'kind': 'untimed_external_colour'}, attempt)\n"
+        f"        json.dump({{'schema': 1, 'kind': 'untimed_colour', 'stack': {stack!r}}}, attempt)\n"
         "        os.fchown(attempt.fileno(), 1000, 1000)\n    service = ")
     user = replace_once(seed['remote_user.py'], 'Starting pinned t339 matched GPU comparison',
                         'Starting pinned untimed GPU colour diagnostic')
     argv = [PYTHON, '-I', '-B', str(HERE/'run_colour_external.py'),
             '--recipe', str(destination/'recipe.json'), '--evidence', str(run)]
+    if sophia_directory is not None:
+        argv = [PYTHON, '-I', '-B', str(HERE/'sophia_recipe.py'), 'run',
+                '--directory', str(sophia_directory), '--evidence', str(run)]
+        recipe = dict(schema=1, stack='sophia', directory=str(sophia_directory), wrapper=recipe)
     files = {'ssh-run.py': ssh, 'vt_session.py': seed['vt_session.py'], 'remote_user.py': user,
              'run.sh': '#!/usr/bin/env bash\nset -euo pipefail\numask 077\n'
                        'export PATH=/usr/bin:/bin\nexec '+shlex.join(argv)+'\n',
@@ -131,12 +155,12 @@ def stage(recipe, destination, run):
         pins[str(destination/name)] = sha(destination/name)
     w.write(destination/'ssh-pins.json', pins)
     w.write(destination/'preparation.json', dict(schema=1, status='staged_unsealed',
-        seed=str(SEED), seed_sha256=SEED_HASHES, command=argv,
+        seed=str(SEED), seed_sha256=SEED_HASHES, command=argv, stack=stack,
         budgets_seconds=dict(wrapper=300, pam=360, outer=420),
         limits=['No launch or release/link qualification. MANIFEST.sha256 deliberately absent.',
                 'PAM/VT code unchanged; no namespace entry or grant added.',
                 'Inherited host hashes are checked, not repinned on drift; shared libraries/data remain a package closure responsibility.',
-                'External stacks only; Sophia protected namespace/feature/core integration remains separate.',
+                'Sophia configuration is explicit and pinned; authenticated protected execution remains unqualified.',
                 'Real import refusal and delayed release remain separate device controls.']))
     for path in destination.iterdir():
         path.chmod(0o600)
@@ -166,6 +190,38 @@ def qualify_cleanup(base):
         raise ValueError('local colour wrapper refused')
     result, local = load(run/'result.json'), load(run/'cleanup.json')
     recipe = load(base/'recipe.json')
+    extra = []
+    if recipe.get('stack') == 'sophia':
+        if (recipe.keys() != {'schema', 'stack', 'directory', 'wrapper'}
+            or type(recipe['schema']) is not int or recipe['schema'] != 1
+            or w.colour.load('sophia_recipe').verify(Path(recipe['directory'])) != recipe['wrapper']):
+            raise ValueError('Sophia handoff configuration changed')
+        if (result.get('status') != 'driver_completed'
+            or not zero(result.get('driver_exit')) or type(result.get('host_exit')) is not int
+            or result['host_exit'] not in (0, -signal.SIGTERM)
+            or local.get('driver_forced') is not False or local.get('host_forced') is not False
+            or type(local.get('driver_exit')) is not int or type(local.get('host_exit')) is not int
+            or local['driver_exit'] != result['driver_exit'] or local['host_exit'] != result['host_exit']
+            or result.get('host_argv') != [recipe['wrapper']['host']['executable'],
+                *recipe['wrapper']['argv'], f'--diagnostic-capture-directory={run/"captures"}']
+            or (run/'driver/refused.json').exists()):
+            raise ValueError('Sophia local cleanup refused')
+        extra = [run/'driver/result.json', run/'driver/captures_verified.json']
+        terminal, captures = map(load, extra)
+        if (terminal.get('status') != 'session_exited_after_captures'
+            or captures.get('status') != 'captures_verified'
+            or type(captures.get('records')) is not list or len(captures['records']) != 3):
+            raise ValueError('Sophia driver did not finish three captures')
+    else:
+        qualify_external_cleanup(recipe, result, local)
+    return dict(schema=1, status='handoff_cleanup_verified', stack=recipe['stack'],
+                input_sha256={str(p): sha(p) for p in
+                    [base/n for n in ('vt-session-result.json', 'remote-user-result.json', 'outer-cleanup.json',
+                                      'recipe.json', 'run-path.txt')] + [run/'result.json', run/'cleanup.json'] + extra},
+                limits='Cleanup receipts only; no native device/pixel/import qualification or performance claim.')
+
+
+def qualify_external_cleanup(recipe, result, local):
     if (result.get('status') != 'colour_source_path_completed'
         or result.get('stack') != recipe.get('stack')):
         raise ValueError('local colour wrapper did not complete')
@@ -181,11 +237,6 @@ def qualify_cleanup(base):
             or 'error' in row or type(row.get('rc')) is not int
             or row['rc'] not in ((0,) if i == 0 else (0, -signal.SIGTERM))):
             raise ValueError('local child cleanup refused')
-    return dict(schema=1, status='handoff_cleanup_verified', stack=result['stack'],
-                input_sha256={str(p): sha(p) for p in
-                    [base/n for n in ('vt-session-result.json', 'remote-user-result.json', 'outer-cleanup.json',
-                                      'recipe.json', 'run-path.txt')] + [run/'result.json', run/'cleanup.json']},
-                limits='Cleanup receipts only; no native device/pixel/import qualification or performance claim.')
 
 
 def main():
@@ -195,12 +246,18 @@ def main():
     prepare.add_argument('--recipe', type=Path, required=True)
     prepare.add_argument('--destination', type=Path, required=True)
     prepare.add_argument('--run', type=Path, required=True)
+    prepare = commands.add_parser('stage-sophia')
+    prepare.add_argument('--directory', type=Path, required=True)
+    prepare.add_argument('--destination', type=Path, required=True)
+    prepare.add_argument('--run', type=Path, required=True)
     check = commands.add_parser('cleanup')
     check.add_argument('directory', type=Path)
     args = parser.parse_args()
     os.umask(0o077)
     if args.action == 'stage':
         stage(load(args.recipe), args.destination, args.run)
+    elif args.action == 'stage-sophia':
+        stage_sophia(args.directory, args.destination, args.run)
     else:
         print(json.dumps(qualify_cleanup(args.directory), indent=2))
 

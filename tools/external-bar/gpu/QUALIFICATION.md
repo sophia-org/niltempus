@@ -420,15 +420,15 @@ its cleanup records owned children and escalation only. The attended package
 must still audit descendants, PAM/cgroup/VT restoration, real import refusal,
 delayed release and the Sophia authenticated capture route before qualification.
 
-## External protected-handoff staging (device-free)
+## Protected-handoff staging (device-free)
 
 `handoff.py stage --recipe ABS --destination NEW_ABS --run NEW_SHORT_ABS`
 prepares one **unsealed** external arm. It does not invoke sudo, query seats,
 open devices or start a session. The exact CPU02 niri1 `ssh-run.py`,
 `vt_session.py`, `remote_user.py` and pin inventory are checked against frozen
 hashes before reuse. The PAM/VT program is byte-identical; no namespace entry,
-mount, device grant or authentication rule is added. Sophia's protected
-namespace/core/feature integration remains a separate prerequisite.
+mount, device grant or authentication rule is added. Sophia uses the fixed
+configuration path below; authenticated protected execution remains unqualified.
 
 The new command invokes only `run_colour_external.py` with its explicit recipe
 and fresh run directory. Wrapper/PAM/outer deadlines are 300/360/420 seconds,
@@ -468,6 +468,60 @@ Fixtures render the actual pinned templates but execute only the pre-import
 seal/pin checks and receipt predicates. They never run PAM, openvt, getty,
 elogind or a display. Actual attended launch, server shutdown calibration,
 protected Sophia capture and the device controls below remain unqualified.
+
+## Fixed Sophia diagnostic recipe (device-free)
+
+`sophia_recipe.py prepare --inputs ABS --directory NEW_ABS` materializes the
+single-producer configuration. Inputs have exactly schema=1, a positive native
+`output_generation`, and `artifacts` pins for host, peer, supervisor (bwrap),
+wm, factotum and pam. Each pin is `{executable: ABS, sha256: LOWER_HEX}`.
+The native incarnation is a declared diagnostic expectation, not inferred
+from the shell generation. The capture controller still verifies it live.
+
+The schema-2 core has the trusted-host shell-timing catalog and exactly one
+developer-launch observer recipe, `capture`, limited to
+`pci-0000:03:00.0/DP-1`. It grants no writable path. The schema-1 desktop
+profile explicitly enables host-admin control, excludes GPU 16:00.0 and
+contains one GPU-direct bar. DP-1 is pinned to GPU 03:00.0, nominal 120 Hz
+and VRR off, with no inherited outputs. The peer config declares three fresh
+GPU DMA frames, height 24, hold 0 and profiling off; no reuse, W2 or other
+producer is enabled. DMA source-kinds are derived by Session's capture
+configuration, not invented as a profile key.
+
+`preflight --directory ABS --evidence NEW_ABS` invokes the exact pinned host's
+`--validate-session-args`, including the diagnostic capture-directory flag,
+with bounded output and a 15-second deadline. It requires the exact accepted
+argument count, empty stderr and no creation of the capture directory. All
+generated configuration bytes and artifact hashes are checked before either
+preflight or run. This parses the configuration; it does not prove live
+namespace admission, the peer's behaviour, or an actual output refresh rate.
+
+`handoff.py stage-sophia --directory ABS --destination NEW_ABS --run NEW_ABS`
+pins all five generated files and all six artifacts, then uses the same
+unsealed PAM/VT staging path. Its command is explicitly `sophia_recipe.py run`.
+That entry refuses root or a non-text-VT context, filters the environment to
+the PAM/session identity variables plus fixed PATH/locale and the native
+scanout opt-in, and installs interruption handlers so the existing sibling
+Session/driver wrapper can clean up. It does not use nsenter or move either
+sibling into another process's namespaces. The host limit is 280 seconds,
+inside the wrapper's 300 and PAM/outer 360/420-second bounds.
+
+Sophia cleanup qualification additionally requires the driver's terminal
+`session_exited_after_captures`, its three-capture terminal record, matching
+host argv, no refusal file, no forced exits, and host status 0 or SIGTERM plus
+driver status 0. These checks do not reclassify the capture records as native
+qualification or replace their pixel/custody audit.
+
+Package gates still require signed host build receipts proving
+`native-session,experimental-shell-capture,diagnostic-capture-delivery` and a
+separate feature-required colour peer release. Argument acceptance alone does
+not prove the capture feature closure. The available debug-host grammar
+control uses a non-launched stand-in peer and is not a release-ready recipe.
+Actual 119.880 Hz still needs the credential-bound output-environment receiver
+and its native readback; this entry does not enable that stream without a
+receiver or treat nominal 120000 as measured timing. Complete that binding,
+release/link provenance and the real import/refusal/lifetime controls before
+sealing a native qualification package.
 
 ## Refusal, lifetime and cleanup controls
 
