@@ -212,6 +212,22 @@ def qualify_cleanup(base):
             or captures.get('status') != 'captures_verified'
             or type(captures.get('records')) is not list or len(captures['records']) != 3):
             raise ValueError('Sophia driver did not finish three captures')
+        environment_path = run/'environment.json'
+        environment = load(environment_path)
+        raw_path, stderr_path = run/'environment.ndjson', run/'environment.stderr'
+        raw = w.read(raw_path, 3*65536)
+        if (result.get('environment_sha256') != sha(environment_path)
+                or environment.get('status') != 'startup_environment_verified'
+                or not zero(environment.get('receiver_exit')) or w.read(stderr_path, 4096)
+                or environment.get('input_sha256') != hashlib.sha256(raw).hexdigest()
+                or any(environment['host'].get(k) != v for k, v in recipe['wrapper']['host'].items())
+                or any(environment['receiver'].get(k) != v for k, v in recipe['wrapper']['environment_receiver'].items())):
+            raise ValueError('Sophia environment evidence differs from the executed recipe')
+        parsed = w.colour.load('sophia_environment').qualify(raw, environment['host'],
+            environment['start_usec'], environment['end_usec'])
+        if any(environment.get(k) != v for k, v in parsed.items()):
+            raise ValueError('Sophia environment reduction changed')
+        extra += [environment_path, raw_path, stderr_path]
     else:
         qualify_external_cleanup(recipe, result, local)
     return dict(schema=1, status='handoff_cleanup_verified', stack=recipe['stack'],

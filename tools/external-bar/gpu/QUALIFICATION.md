@@ -474,7 +474,7 @@ protected Sophia capture and the device controls below remain unqualified.
 `sophia_recipe.py prepare --inputs ABS --directory NEW_ABS` materializes the
 single-producer configuration. Inputs have exactly schema=1, a positive native
 `output_generation`, and `artifacts` pins for host, peer, supervisor (bwrap),
-wm, factotum and pam. Each pin is `{executable: ABS, sha256: LOWER_HEX}`.
+wm, factotum, pam and environment_receiver (xtask). Each pin is `{executable: ABS, sha256: LOWER_HEX}`.
 The native incarnation is a declared diagnostic expectation, not inferred
 from the shell generation. The capture controller still verifies it live.
 
@@ -497,7 +497,7 @@ preflight or run. This parses the configuration; it does not prove live
 namespace admission, the peer's behaviour, or an actual output refresh rate.
 
 `handoff.py stage-sophia --directory ABS --destination NEW_ABS --run NEW_ABS`
-pins all five generated files and all six artifacts, then uses the same
+pins all five generated files and all seven artifacts, then uses the same
 unsealed PAM/VT staging path. Its command is explicitly `sophia_recipe.py run`.
 That entry refuses root or a non-text-VT context, filters the environment to
 the PAM/session identity variables plus fixed PATH/locale and the native
@@ -517,11 +517,45 @@ Package gates still require signed host build receipts proving
 separate feature-required colour peer release. Argument acceptance alone does
 not prove the capture feature closure. The available debug-host grammar
 control uses a non-launched stand-in peer and is not a release-ready recipe.
-Actual 119.880 Hz still needs the credential-bound output-environment receiver
-and its native readback; this entry does not enable that stream without a
-receiver or treat nominal 120000 as measured timing. Complete that binding,
-release/link provenance and the real import/refusal/lifetime controls before
-sealing a native qualification package.
+Actual 119.880 Hz has a startup-only authenticated source gate. The fixed
+argv includes `--output-environment-readback`; the wrapper supplies exactly
+`SOPHIA_OUTPUT_ENVIRONMENT_ARM=1` and its private socket destination. Preflight
+supplies the same opt-ins with an uncreated socket path and must create neither
+that socket nor the capture directory.
+
+The separately pinned xtask runs `shell-timing receive-environment SOCKET 15000
+--ready`. The acknowledgement follows socket binding and SO_PASSCRED setup;
+path existence alone is not readiness. The original receiver still checks
+kernel credentials, exactly one transferred live TGID pidfd, truncation and
+its sticky failure/count limits. The optional acknowledgement changes no old
+invocation. stdout/stderr are bounded private files, never Session's log.
+
+Session is spawned only after receiver readiness. The hold driver then runs
+concurrently: GL identity may depend on rendering the first frame. A 15-second
+startup collection window must finish with exit 0, empty stderr and exactly
+one output plus one renderer record. Missing, duplicate, malformed or extra
+records refuse. The wrapper pins the live Session PID/starttime/executable
+and namespaces around collection, requires credentials for that host, checks
+sender and receiver timestamps inside its live interval, and joins both rows
+on the same output/card/readback timestamp. This is not per-hold hardware
+readback. A slow startup with no complete pair refuses, without extending the
+window or retrying.
+
+The exact row is output 1/card0/DP-1, 1920x1080, nominal 120000 but programmed
+timing 119880 mHz, scale 1000 and VRR off; the renderer must be amdgpu with
+canonical, nonempty GL identity and no software renderer marker. The existing
+DRM layout check binds card0/renderD128 to PCI 0000:03:00.0. All three capture
+READY output IDs must equal the observed output. Native capture incarnation
+remains independently verified by the capture controller, not inferred from
+the readback's output ID or the shell generation. Saved cleanup checks bind
+the environment reduction and original receiver stream by hash to the recipe.
+They do not turn a synthetic fixture into native evidence.
+
+No authenticated native environment/capture result exists yet. Preserve the
+receiver's separate signed release receipt and the host feature closure. Real
+import/refusal/lifetime controls remain before an attended sealed GPU package;
+CPU direct-fill design/adoption now takes priority over further GPU work.
+
 
 ## Refusal, lifetime and cleanup controls
 

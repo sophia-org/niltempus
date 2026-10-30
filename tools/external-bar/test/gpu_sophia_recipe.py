@@ -23,6 +23,7 @@ def load(name, path):
 s = load('sophia_recipe_test', ROOT/'gpu/sophia_recipe.py')
 h = load('handoff_test', ROOT/'gpu/handoff.py')
 hf = load('handoff_fixture', ROOT/'test/gpu_handoff.py')
+ef = load('environment_fixture', ROOT/'test/gpu_sophia_environment.py')
 
 
 class SophiaRecipe(unittest.TestCase):
@@ -91,21 +92,21 @@ class SophiaRecipe(unittest.TestCase):
             self.assertEqual(argv[-1], '--validate-session-args')
             self.assertEqual(argv[-2], f'--diagnostic-capture-directory={evidence/"uncreated-captures"}')
             self.assertEqual(pin, self.pin)
-            self.assertEqual([k for k in env if k.startswith('SOPHIA_')], ['SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE'])
-            return b'sophia_live_session_args schema=1 status=accepted arguments=13\n'
+            self.assertEqual([k for k in env if k.startswith('SOPHIA_')], ['SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE', 'SOPHIA_OUTPUT_ENVIRONMENT_ARM', 'SOPHIA_OUTPUT_ENVIRONMENT_SOCKET'])
+            return b'sophia_live_session_args schema=1 status=accepted arguments=14\n'
         with patch.object(s.external,'command',side_effect=command): s.preflight(self.directory,evidence)
         self.assertFalse((evidence/'uncreated-captures').exists())
         self.assertEqual(json.loads((evidence/'result.json').read_text())['status'],'arguments_accepted')
 
     def test_preflight_refuses_partial_extra_or_wrong_count_and_side_effect(self):
         for i,value in enumerate((b'',b'accepted\n',b'sophia_live_session_args schema=1 status=accepted arguments=12\n',
-            b'sophia_live_session_args schema=1 status=accepted arguments=13\nextra\n')):
+            b'sophia_live_session_args schema=1 status=accepted arguments=14\nextra\n')):
             with patch.object(s.external,'command',return_value=value):
                 with self.assertRaises(ValueError): s.preflight(self.directory,self.root/f'bad-{i}')
         evidence=self.root/'side-effect'
         def created(*_a,**_kw):
             (evidence/'uncreated-captures').mkdir()
-            return b'sophia_live_session_args schema=1 status=accepted arguments=13\n'
+            return b'sophia_live_session_args schema=1 status=accepted arguments=14\n'
         with patch.object(s.external,'command',side_effect=created):
             with self.assertRaises(ValueError): s.preflight(self.directory,evidence)
 
@@ -161,9 +162,21 @@ class SophiaRecipe(unittest.TestCase):
             values={run/'result.json':result,run/'cleanup.json':local,
                     run/'driver/result.json':dict(schema=1,status='session_exited_after_captures'),
                     run/'driver/captures_verified.json':dict(schema=1,status='captures_verified',records=[{}, {}, {}])}
+            raw=ef.data()
+            environment=dict(schema=1,status='startup_environment_verified',receiver_exit=0,
+                host=dict(self.pin,pid=123,starttime=1),
+                receiver=dict(self.recipe['environment_receiver'],pid=124,starttime=2),
+                start_usec=100,end_usec=200,input_sha256=hashlib.sha256(raw).hexdigest(),
+                **ef.e.qualify(raw,dict(pid=123),100,200))
+            values[run/'environment.json']=environment
+            (run/'environment.ndjson').write_bytes(raw)
+            (run/'environment.stderr').write_bytes(b'')
+            result['environment_sha256']=hashlib.sha256(json.dumps(environment).encode()).hexdigest()
             for path,value in values.items():path.write_text(json.dumps(value))
             self.assertEqual(h.qualify_cleanup(base)['stack'],'sophia')
             cases=[(run/'result.json',lambda v:v.update(host_exit=1)),
+                   (run/'result.json',lambda v:v.update(environment_sha256='0'*64)),
+                   (run/'environment.json',lambda v:v.update(receiver_exit=1)),
                    (run/'result.json',lambda v:v.update(driver_exit=False)),
                    (run/'result.json',lambda v:v.update(host_argv=[])),
                    (run/'cleanup.json',lambda v:v.update(host_forced=True)),

@@ -63,6 +63,72 @@ fn send_with_fd(
 }
 
 static SERIAL: AtomicU64 = AtomicU64::new(0);
+
+#[test]
+fn ready_cli_publishes_after_binding_and_preserves_ancillary_refusal() {
+    use std::{io::BufRead, process::Stdio, sync::mpsc};
+    for valid in [true, false] {
+        let fixture = Fixture::new();
+        let mut child = ChildGuard(
+            Command::new(env!("CARGO_BIN_EXE_xtask"))
+                .args(["shell-timing", "receive-environment"])
+                .arg(fixture.socket())
+                .args(["300", "--ready"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let stdout = child.0.stdout.take().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let mut reader = std::io::BufReader::new(stdout);
+            let mut ready = String::new();
+            reader.read_line(&mut ready).unwrap();
+            tx.send(ready).unwrap();
+            let mut rest = String::new();
+            reader.read_to_string(&mut rest).unwrap();
+            rest
+        });
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(3)).unwrap(),
+            "{\"schema\":1,\"status\":\"ready\"}\n"
+        );
+        let sender = UnixDatagram::unbound().unwrap();
+        let record = b"sophia_shell_environment_output schema=1";
+        if valid {
+            send_record(&sender, &fixture.socket(), record);
+        } else {
+            sender.send_to(record, fixture.socket()).unwrap();
+        }
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let status = loop {
+            if let Some(status) = child.0.try_wait().unwrap() {
+                break status;
+            }
+            assert!(Instant::now() < deadline, "receiver did not terminate");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(status.success(), valid);
+        let rest = reader.join().unwrap();
+        if valid {
+            let receipt: xtask::shell_timing_environment_socket::EnvironmentReceipt =
+                serde_json::from_str(&rest).unwrap();
+            receipt
+                .require_host(
+                    std::process::id(),
+                    rustix::process::getuid().as_raw(),
+                    rustix::process::getgid().as_raw(),
+                )
+                .unwrap();
+            assert_eq!(receipt.record.as_bytes(), record);
+        } else {
+            assert!(rest.is_empty());
+        }
+        assert!(!fixture.socket().exists());
+    }
+}
+
 struct Fixture(PathBuf);
 impl Fixture {
     fn new() -> Self {

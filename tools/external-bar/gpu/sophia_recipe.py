@@ -19,7 +19,7 @@ spec.loader.exec_module(wrapper)
 spec = importlib.util.spec_from_file_location('native_colour', HERE/'run_colour_external.py')
 external = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(external)
-ARTIFACTS = {'host', 'peer', 'supervisor', 'wm', 'factotum', 'pam'}
+ARTIFACTS = {'host', 'peer', 'supervisor', 'wm', 'factotum', 'pam', 'environment_receiver'}
 CORE = '''/- kdl-version 2
 schema 2
 session {
@@ -87,10 +87,12 @@ def materialize(inputs, directory):
     validate(inputs)
     a = inputs['artifacts']
     argv = ['session', 'run', '--session-mode=normal', '--native-scanout', '--display=:94',
+            '--output-environment-readback',
             '--input-seat=seat0', '--max-runtime-ms=280000', f'--config={directory/"core.kdl"}',
             f'--desktop-profile={directory/"desktop.kdl"}', '--wm-process='+a['wm']['executable'],
             '--factotum-agent='+a['factotum']['executable'], '--factotum-pam-helper='+a['pam']['executable']]
     recipe = dict(schema=1, host=a['host'], peer=a['peer'], supervisor=a['supervisor'],
+                  environment_receiver=a['environment_receiver'],
                   output_generation=inputs['output_generation'], argv=argv)
     wrapper.validate(recipe)
     return {'core.kdl': CORE, 'desktop.kdl': profile(a['peer']['executable'], directory/'peer.json'),
@@ -136,10 +138,12 @@ def preflight(directory, evidence):
     capture = evidence/'uncreated-captures'
     argv = [recipe['host']['executable'], *recipe['argv'],
             f'--diagnostic-capture-directory={capture}', '--validate-session-args']
-    output = external.command(argv, recipe['host'], environment(), evidence/'arguments', 15,
+    env = dict(environment(), SOPHIA_OUTPUT_ENVIRONMENT_ARM='1',
+               SOPHIA_OUTPUT_ENVIRONMENT_SOCKET=str(evidence/'uncreated-environment.sock'))
+    output = external.command(argv, recipe['host'], env, evidence/'arguments', 15,
                               limit=4096)
     accepted = f'sophia_live_session_args schema=1 status=accepted arguments={len(recipe["argv"])+1}\n'.encode()
-    if capture.exists() or output != accepted:
+    if capture.exists() or (evidence/'uncreated-environment.sock').exists() or output != accepted:
         raise ValueError('argument preflight did not return exact acceptance without capture creation')
     external.write(evidence/'result.json', dict(schema=1, status='arguments_accepted', argv=argv,
         host=recipe['host'], input_sha256={n:hashlib.sha256((directory/n).read_bytes()).hexdigest()

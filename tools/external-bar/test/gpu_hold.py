@@ -224,9 +224,9 @@ class Hold(unittest.TestCase):
             os.close(notification)
             os.close(directory)
 
-    def test_wrapper_stops_owned_host_after_atomic_terminal(self):
+    def wrapper_case(self, output):
         recipe=dict(schema=1,host=self.pin,peer=self.pin,supervisor=self.pin,
-                    argv=['session','run'],output_generation=1)
+                    argv=['session','run','--output-environment-readback'],output_generation=1,environment_receiver=self.pin)
         real=subprocess.Popen
         children=[]
         fake_driver=r'''
@@ -235,23 +235,42 @@ from pathlib import Path
 root=Path(sys.argv[1]); expected=json.loads((root/'expected.json').read_text())
 fd=os.pidfd_open(expected['session']['pid'])
 d=root/'driver'; d.mkdir(mode=0o700)
-p=d/'captures_verified.partial'; p.write_text(json.dumps(dict(status='captures_verified',records=[1,2,3])))
+p=d/'captures_verified.partial'; p.write_text(json.dumps(dict(status='captures_verified',records=[dict(ready=dict(output=int(sys.argv[2]))) for _ in range(3)])))
 p.rename(d/'captures_verified.json')
 assert select.select([fd],[],[],5)[0]
 '''
         def popen(argv,**kwargs):
             if len(children)==0:
+                self.assertEqual(kwargs['env']['SOPHIA_OUTPUT_ENVIRONMENT_ARM'],'1')
+                self.assertEqual(kwargs['env']['SOPHIA_OUTPUT_ENVIRONMENT_SOCKET'],str(self.f.root/'wrapper/environment.sock'))
                 command=[sys.executable,'-I','-B','-c','import signal; signal.pause()']
             else:
-                command=[sys.executable,'-I','-B','-c',fake_driver,str(self.f.root/'wrapper')]
+                command=[sys.executable,'-I','-B','-c',fake_driver,str(self.f.root/'wrapper'),str(output)]
             child=real(command,**kwargs); children.append(child); return child
-        with patch.object(w.subprocess,'Popen',side_effect=popen):
-            result=w.run(recipe,self.f.root/'wrapper')
-        self.assertEqual(result['status'],'driver_completed')
-        self.assertEqual(result['host_exit'],-signal.SIGTERM)
+        def collector(_pin, root):
+            from types import SimpleNamespace
+            def finish(_host, _start):
+                self.assertEqual(len(children),2, 'hold driver must run before waiting for GL identity')
+                (root/'environment.json').write_text('{}')
+                return dict(output=dict(output='1'))
+            return SimpleNamespace(socket=root/'environment.sock', finish=finish, close=lambda:None)
+        with patch.object(w.subprocess,'Popen',side_effect=popen), patch.object(w,'environment_collector',side_effect=collector):
+            if output == 1:
+                result=w.run(recipe,self.f.root/'wrapper')
+                self.assertEqual(result['status'],'driver_completed')
+                self.assertEqual(result['host_exit'],-signal.SIGTERM)
+            else:
+                with self.assertRaisesRegex(ValueError,'different outputs'):
+                    w.run(recipe,self.f.root/'wrapper')
         self.assertTrue(all(child.poll() is not None for child in children))
         with self.assertRaises(FileExistsError): w.run(recipe,self.f.root/'wrapper')
-        self.assertFalse((self.f.root/'wrapper/refused.json').exists())
+        self.assertEqual((self.f.root/'wrapper/refused.json').exists(), output != 1)
 
+
+    def test_wrapper_stops_owned_host_after_atomic_terminal(self):
+        self.wrapper_case(1)
+
+    def test_wrapper_refuses_capture_of_another_readback_output(self):
+        self.wrapper_case(2)
 
 if __name__=='__main__': unittest.main()

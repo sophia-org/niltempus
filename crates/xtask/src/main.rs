@@ -39,7 +39,7 @@ const USAGE: &str = "usage:
   xtask shell-timing report-cpu-profile DIR
   xtask shell-timing cpu-worker DURATION_MS
   xtask shell-timing bind-processes REQUEST_JSON
-  xtask shell-timing receive-environment SOCKET_PATH DURATION_MS
+  xtask shell-timing receive-environment SOCKET_PATH DURATION_MS [--ready]
   xtask shell-timing prepare-native REQUEST_JSON NEW_PLAN
   xtask shell-timing run-native PLAN_JSON PLAN_SHA256 NEW_RUN_DIR
   xtask shell-timing join HOST_LOG CLIENT_JSON MODE_MILLIHZ EXPECTED_OFFERS

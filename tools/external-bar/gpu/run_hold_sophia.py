@@ -4,6 +4,7 @@ This is not a sealed native recipe. A package must supply reviewed host argv,
 profile, feature/build pins, actual device qualification and outer PAM cleanup.
 """
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -20,11 +21,11 @@ spec.loader.exec_module(h)
 
 
 def validate(value):
-    if (type(value) is not dict or value.keys() != {'schema', 'host', 'argv', 'peer', 'supervisor', 'output_generation'}
+    if (type(value) is not dict or value.keys() != {'schema', 'host', 'argv', 'peer', 'supervisor', 'output_generation', 'environment_receiver'}
             or type(value['schema']) is not int or value['schema'] != 1):
         raise ValueError('invalid wrapper recipe')
     h.r.uint(value['output_generation'], True)
-    for name in ('host', 'peer', 'supervisor'):
+    for name in ('host', 'peer', 'supervisor', 'environment_receiver'):
         h.pin_artifact(value[name])
     argv = value['argv']
     if (type(argv) is not list or argv[:2] != ['session', 'run'] or len(argv) > 64
@@ -32,6 +33,16 @@ def validate(value):
                    or any(ord(ch) < 32 or ord(ch) == 127 for ch in arg) for arg in argv)
             or any(arg.split('=')[0] == '--diagnostic-capture-directory' for arg in argv)):
         raise ValueError('wrapper requires bounded session run argv without a capture destination')
+    if argv.count('--output-environment-readback') != 1:
+        raise ValueError('wrapper requires authenticated environment readback')
+
+
+def environment_collector(pin, root):
+    # Loaded at call time: the external wrapper shares this module's stop().
+    spec = importlib.util.spec_from_file_location('sophia_environment', Path(__file__).with_name('sophia_environment.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.Collector(pin, root)
 
 
 def stop(child):
@@ -50,17 +61,24 @@ def stop(child):
 def run(recipe, root):
     validate(recipe)
     root.mkdir(mode=0o700)
+    deadline = time.monotonic() + 300
     session_log = root / 'session.log'
     host = driver = None
     host_forced = False
     host_fd = driver_fd = directory = notification = None
     files = []
+    collector = None
     try:
+        collector = environment_collector(recipe['environment_receiver'], root)
         log = session_log.open('xb')
         files.append(log)
         command = [recipe['host']['executable'], *recipe['argv'],
                    f'--diagnostic-capture-directory={root / "captures"}']
-        host = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+        env = dict(os.environ, SOPHIA_OUTPUT_ENVIRONMENT_ARM='1',
+                   SOPHIA_OUTPUT_ENVIRONMENT_SOCKET=str(collector.socket))
+        started_usec = time.monotonic_ns()//1000
+        host = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                                env=env, start_new_session=True)
         host_fd = os.pidfd_open(host.pid)
         expected = {'schema': 1, 'session': dict(recipe['host'], pid=host.pid, starttime=h.c.snapshot(host.pid)),
                     'session_log': str(session_log), 'delivery_directory': str(root / 'captures'),
@@ -75,9 +93,11 @@ def run(recipe, root):
                                    '--expected', str(path), '--evidence', str(root / 'driver')],
                                   stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, start_new_session=True)
         driver_fd = os.pidfd_open(driver.pid)
+        # GL identity may need the first rendered frame. Let the hold driver
+        # service the peer while startup readback completes; both must pass.
+        environment = collector.finish(expected['session'], started_usec)
         # Watch the driver's directory once created; outer watch catches creation.
         driver_directory = driver_notification = None
-        deadline = time.monotonic() + 300
         try:
             while True:
                 if (root / 'driver').exists() and driver_directory is None:
@@ -90,6 +110,9 @@ def run(recipe, root):
                         terminal = h.r.record(file.read(65537))
                     if terminal['status'] != 'captures_verified' or len(terminal['records']) != 3:
                         raise ValueError('invalid driver terminal result')
+                    if any(record['ready']['output'] != int(environment['output']['output'])
+                           for record in terminal['records']):
+                        raise ValueError('captures and environment name different outputs')
                     break
                 if session_log.stat().st_size > h.c.LIMIT or any(p.stat().st_size > 4096 for p in (root / 'driver.stdout', root / 'driver.stderr')):
                     raise ValueError('wrapper log bound exceeded')
@@ -112,6 +135,7 @@ def run(recipe, root):
             raise ValueError('driver did not observe clean handoff to Session exit')
         result = {'schema': 1, 'status': 'driver_completed', 'host_exit': host.returncode,
                   'driver_exit': driver.returncode, 'host_argv': command,
+                  'environment_sha256': hashlib.sha256((root/'environment.json').read_bytes()).hexdigest(),
                   'limits': 'Local child exit only; full PAM/cgroup/device cleanup is a separate native gate.'}
         (root / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
         return result
@@ -125,6 +149,8 @@ def run(recipe, root):
         if driver is not None and driver.poll() is None:
             driver_forced = stop(driver)
         host_forced = stop(host) or host_forced
+        if collector is not None:
+            collector.close()
         (root / 'cleanup.json').write_text(json.dumps({'schema': 1,
             'driver_forced': driver_forced, 'host_forced': host_forced,
             'driver_exit': None if driver is None else driver.returncode,

@@ -94,8 +94,15 @@ pub fn receive_environment(arguments: &[String]) -> Result<Vec<String>, String> 
         io::Write,
         time::{Duration, Instant},
     };
+    let (arguments, ready) = match arguments.split_last() {
+        Some((flag, rest)) if flag == "--ready" => (rest, true),
+        _ => (arguments, false),
+    };
     let [path, duration] = arguments else {
-        return Err("usage: xtask shell-timing receive-environment SOCKET_PATH DURATION_MS".into());
+        return Err(
+            "usage: xtask shell-timing receive-environment SOCKET_PATH DURATION_MS [--ready]"
+                .into(),
+        );
     };
     let millis: u64 = duration
         .parse()
@@ -104,6 +111,11 @@ pub fn receive_environment(arguments: &[String]) -> Result<Vec<String>, String> 
         return Err("environment duration must be 1..=180000 ms".into());
     }
     let mut receiver = EnvironmentReceiver::bind(std::path::Path::new(path))?;
+    if ready {
+        // Publication follows SO_PASSCRED setup; pathname creation alone races it.
+        println!("{{\"schema\":1,\"status\":\"ready\"}}");
+        std::io::stdout().flush().map_err(|e| e.to_string())?;
+    }
     let until = Instant::now() + Duration::from_millis(millis);
     while Instant::now() < until {
         while Instant::now() < until {
