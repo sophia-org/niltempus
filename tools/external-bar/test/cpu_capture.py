@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import time
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -67,16 +68,21 @@ class Controller(unittest.TestCase):
         self.prefix = f'sophia_developer_launch schema=1 status=enabled admission=host-admin socket={self.f.endpoint}\n'.encode()
         self.f.log.write_bytes(self.prefix+static_log(self.checksum))
 
-    def publish(self, change=None, stderr=b''):
+    def publish(self, change=None, stderr=b'', generation=3):
         receipt = dict(schema=1,status='delivered',binding='launch_custody_not_per_message',
-                       launch_generation=1,transaction=1,connector=c.r.CONNECTOR,namespace=6,
+                       launch_generation=generation,transaction=1,connector=c.r.CONNECTOR,namespace=6,
                        peer_pid=100,peer_starttime=900,exe_dev=self.f.session.identity[0],
                        exe_ino=self.f.session.identity[1],request=1,output=7,output_generation=1,
                        presentation_generation=123,width=1920,height=1080,
                        pam_sha256=hashlib.sha256(self.pam).hexdigest())
         receipt.update(change or {})
-        for suffix,data in [('pam',self.pam),('stderr',stderr),('json',json.dumps(receipt).encode())]:
-            gpu.write(self.f.delivery/f'capture-1.{suffix}',data)
+        gpu.write(self.f.delivery/f'capture-{generation}.stderr',stderr)
+        for suffix,data in [('pam',self.pam),('json',json.dumps(receipt).encode())]:
+            target = self.f.delivery/f'capture-{generation}.{suffix}'
+            partial = self.f.delivery/f'capture-{generation}.{suffix}.partial'
+            gpu.write(partial,data)
+            self.assertFalse(target.exists())
+            partial.rename(target)
 
     def capture(self, launch, seconds=2):
         with patch.object(c.c,'launch',side_effect=launch) as call:
@@ -92,10 +98,88 @@ class Controller(unittest.TestCase):
     def test_one_static_capture_and_separate_generation_domains(self):
         result = self.capture(lambda *args:self.publish())
         self.assertEqual(result['status'],'static_capture_verified')
+        self.assertEqual(result['capture']['receipt']['launch_generation'],3)
         self.assertEqual(result['scene']['candidate']['presentation_epoch'],'4')
         self.assertEqual(result['capture']['receipt']['presentation_generation'],123)
         self.assertEqual(result['capture']['pixels']['produced_fnv64'],self.checksum)
         self.assertEqual((self.f.evidence/'before.log').read_bytes(),(self.f.evidence/'after.log').read_bytes())
+
+    def test_global_launch_generation_can_exceed_capture_budget(self):
+        result = self.capture(lambda *args:self.publish(generation=41))
+        self.assertEqual(result['capture']['receipt']['launch_generation'],41)
+
+    def test_delivery_after_empty_inventory_wakes_through_inotify(self):
+        empty = threading.Event()
+        actual = c.r.inventory
+        inventories = 0
+        def inventory(directory):
+            nonlocal inventories
+            inventories += 1
+            groups = actual(directory)
+            if inventories > 1 and not groups:
+                empty.set()
+            return groups
+        def publish():
+            if empty.wait(2):
+                self.publish()
+        worker = threading.Thread(target=publish)
+        with patch.object(c.r,'inventory',side_effect=inventory):
+            try:
+                result = self.capture(lambda *args:worker.start())
+            finally:
+                worker.join(3)
+        self.assertFalse(worker.is_alive())
+        self.assertTrue(empty.is_set())
+        self.assertEqual(result['capture']['receipt']['launch_generation'],3)
+
+    def test_two_capture_groups_refuse(self):
+        def publish(*args):
+            self.publish()
+            gpu.write(self.f.delivery/'capture-41.stderr',b'')
+        with self.assertRaisesRegex(ValueError,'unexpected capture attempt'):
+            self.capture(publish)
+
+    def test_filename_and_receipt_generation_must_match(self):
+        with self.assertRaisesRegex(ValueError,'identity mismatch'):
+            self.capture(lambda *args:self.publish(dict(launch_generation=41)))
+
+    def test_refused_group_refuses(self):
+        with self.assertRaisesRegex(ValueError,'private capture refused'):
+            self.capture(lambda *args:gpu.write(self.f.delivery/'capture-41.refused',b'refused'))
+
+    def test_terminal_partial_refuses(self):
+        def publish(*args):
+            self.publish()
+            gpu.write(self.f.delivery/'capture-3.pam.partial',b'')
+        with self.assertRaisesRegex(ValueError,'delivery is incomplete or refused'):
+            self.capture(publish)
+
+    def test_first_observed_generation_cannot_change_or_disappear(self):
+        select = c.select.select
+        def wake(read, write, error, timeout):
+            return ([read[0]],[],[]) if len(read) == 2 else select(read,write,error,timeout)
+        for changed in [{41:{'stderr'}}, {}, {3:{'stderr'},41:{'stderr'}}]:
+            with self.subTest(changed=changed), patch.object(c.r,'inventory',side_effect=[
+                    {}, {3:{'stderr'}}, changed, AssertionError('should have refused')]), patch.object(c.select,'select',side_effect=wake):
+                with self.assertRaisesRegex(ValueError,'unexpected capture attempt'):
+                    self.capture(lambda *args:None)
+
+    def test_final_inventory_still_has_one_complete_group(self):
+        def publish(*args):
+            self.publish()
+        actual = c.r.inventory
+        calls = 0
+        def inventory(directory):
+            nonlocal calls
+            calls += 1
+            groups = actual(directory)
+            # Initial, watch-loop, verifier before/after reads, then final controller recheck.
+            if calls == 5:
+                groups[41] = {'stderr'}
+            return groups
+        with patch.object(c.r,'inventory',side_effect=inventory):
+            with self.assertRaisesRegex(ValueError,'concurrent capture attempt'):
+                self.capture(publish)
 
     def test_repeated_draws_do_not_invent_a_second_candidate(self):
         def drawn(*args):

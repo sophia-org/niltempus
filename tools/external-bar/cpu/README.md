@@ -28,7 +28,10 @@ launch stdout/stderr, and one CLI call. Success requires a complete delivered
 receipt, empty stderr, hash-bound PAM and no refusal/partial files. It checks
 Session's capture-server join through that receipt; socketpair credentials do
 not authenticate the writer. Transaction 1 is only a format check. A fresh
-single-attempt directory joins this launch to its result.
+single-attempt directory joins this launch to its result. The sole `capture-N`
+group uses Session's global launch generation, which may exceed the three-capture
+budget; it is not an attempt ordinal. Pin it when first observed and require the
+terminal receipt to name the same generation.
 
 The portal PAM is already tightly packed, top-down RGBA8. No PNG decoder,
 vertical flip or de-striding is involved. `pixels.py` checks the exact full-frame

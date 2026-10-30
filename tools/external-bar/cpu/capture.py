@@ -39,16 +39,20 @@ def capture(expected, session, directory, deadline, evidence):
                 '--', session.executable, 'capture', str(output), '--diagnostic-stream']
         c.launch(argv, session, min(deadline, time.monotonic()+c.LAUNCH_TIMEOUT), evidence)
         deadline = min(deadline, time.monotonic()+c.RECEIPT_TIMEOUT)
+        generation = None
         while True:
             session.check()
             groups = r.inventory(directory)
-            if groups and set(groups) != {1}:
+            # Filenames use Session's global launch generation, not the capture count.
+            if generation is None and len(groups) == 1:
+                generation = next(iter(groups))
+            if (groups and set(groups) != {generation}) or (generation is not None and not groups):
                 raise ValueError('unexpected capture attempt')
-            if 'refused' in groups.get(1, set()):
+            if 'refused' in groups.get(generation, set()):
                 raise ValueError('private capture refused')
-            if 'json' in groups.get(1, set()):
+            if 'json' in groups.get(generation, set()):
                 checksum = held['candidate']['checksum']
-                result = r.verify_delivery(directory, 1,
+                result = r.verify_delivery(directory, generation,
                     dict(output=output, output_generation=expected['output_generation']),
                     session.identity, lambda pam: pixels.check(pam, checksum))
                 after, after_identity = c.log_bytes(expected['session_log'])
@@ -56,7 +60,7 @@ def capture(expected, session, directory, deadline, evidence):
                     raise ValueError('Session log replaced or truncated')
                 if static.snapshot(after, expected['arm']) != held:
                     raise ValueError('static scene changed during capture')
-                if r.inventory(directory) != {1: {'pam', 'json', 'stderr'}}:
+                if r.inventory(directory) != {generation: {'pam', 'json', 'stderr'}}:
                     raise ValueError('concurrent capture attempt')
                 current = os.stat(endpoint, follow_symlinks=False)
                 if (current.st_dev, current.st_ino) != endpoint_identity:
