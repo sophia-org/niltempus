@@ -132,6 +132,11 @@ def held(log, expected, output):
 
 
 def verify(directory, generation, expected, executable, pixel_check):
+    return verify_delivery(directory, generation, expected, executable,
+                           lambda pam: pixel_check(pam, expected['hold']['pattern']))
+
+
+def verify_delivery(directory, generation, expected, executable, pixel_check):
     names = inventory(directory).get(generation)
     if names != {'pam', 'json', 'stderr'}:
         raise ValueError('delivery is incomplete or refused')
@@ -156,7 +161,7 @@ def verify(directory, generation, expected, executable, pixel_check):
     pam = read_at(directory, prefix + '.pam', 1920 * 1080 * 4 + 256)
     if hashlib.sha256(pam).hexdigest() != digest(receipt['pam_sha256']):
         raise ValueError('PAM hash mismatch')
-    pixels = pixel_check(pam, expected['hold']['pattern'])
+    pixels = pixel_check(pam)
     # Recheck terminal state after the larger PAM read and pixel oracle.
     if inventory(directory).get(generation) != names or read_at(directory, prefix + '.json', 4096) != data:
         raise ValueError('terminal receipt changed')
