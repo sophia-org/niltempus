@@ -79,6 +79,22 @@ class Handoff(unittest.TestCase):
         self.assertEqual(command[4:], ['--recipe', str(self.base/'recipe.json'), '--evidence', str(self.run)])
         self.assertNotIn('cpuwin', (self.base/'run.sh').read_text())
 
+    def test_control_artifacts_are_in_the_privileged_preimport_pin_gate(self):
+        controls = {}
+        for kind in ('delay', 'invalid'):
+            path = self.root/kind
+            path.write_text(kind)
+            controls[kind] = dict(executable=str(path), sha256=h.sha(path))
+        self.stage(recipe=dict(self.recipe, controls=controls))
+        self.seal()
+        self.gate()
+        pins = json.loads((self.base/'ssh-pins.json').read_text())
+        for pin in controls.values():
+            self.assertEqual(pins[pin['executable']], pin['sha256'])
+        (self.root/'delay').write_text('changed')
+        with self.assertRaisesRegex(RuntimeError, 'Pinned handoff input changed'):
+            self.gate()
+
     def test_seal_refuses_absent_empty_missing_duplicate_or_changed_inputs(self):
         self.stage()
         with self.assertRaises(FileNotFoundError): self.gate()

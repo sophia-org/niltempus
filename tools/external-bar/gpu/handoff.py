@@ -72,7 +72,7 @@ def _stage(recipe, destination, run, sophia_directory=None):
     """Create only new files. Failed preparation is retained, never repaired."""
     if sophia_directory is None:
         w.validate(recipe)
-        artifacts = recipe['pins']
+        artifacts = recipe['pins'] | recipe.get('controls', {})
         stack = recipe['stack']
     else:
         artifacts = load(sophia_directory/'inputs.json')['artifacts']
@@ -230,11 +230,45 @@ def qualify_cleanup(base):
         extra += [environment_path, raw_path, stderr_path]
     else:
         qualify_external_cleanup(recipe, result, local)
+        extra += qualify_external_controls(recipe, result, run)
     return dict(schema=1, status='handoff_cleanup_verified', stack=recipe['stack'],
                 input_sha256={str(p): sha(p) for p in
                     [base/n for n in ('vt-session-result.json', 'remote-user-result.json', 'outer-cleanup.json',
                                       'recipe.json', 'run-path.txt')] + [run/'result.json', run/'cleanup.json'] + extra},
                 limits='Cleanup receipts only; no native device/pixel/import qualification or performance claim.')
+
+
+def qualify_external_controls(recipe, result, run):
+    rows = result.get('controls', [])
+    if 'controls' not in recipe:
+        if rows:
+            raise ValueError('undeclared native controls')
+        return []
+    if (type(rows) is not list or any(type(row) is not dict for row in rows)
+            or [row.get('kind') for row in rows] != ['delay', 'invalid']):
+        raise ValueError('missing or reordered native controls')
+    transport = 'wayland' if recipe['stack'] == 'niri' else 'x11'
+    pids = {result['client']['pid'], result['server']['pid']}
+    extra = []
+    for row in rows:
+        kind = row['kind']; root = run/kind
+        identity = load(root/'identity.json')
+        cleanup = load(root/'cleanup.json')
+        pid = identity['pid']
+        if (load(root/'result.json') != row or row['client'] != identity
+                or any(identity.get(k) != v for k,v in recipe['controls'][kind].items())
+                or type(pid) is not int or pid <= 0 or pid in pids
+                or type(cleanup.get('rc')) is not int
+                or cleanup != dict(pid=pid, rc=row['returncode'], forced=False)):
+            raise ValueError('native control custody or cleanup differs')
+        pids.add(pid)
+        proof, receipt = w.control_proof(root, kind, transport, pid, cleanup['rc'])
+        if row['proof'] != proof or row['journal'] != receipt:
+            raise ValueError('native control reduction changed')
+        extra += [root/name for name in ('identity.json', 'cleanup.json', 'result.json', 'stdout', 'stderr')]
+        if kind == 'delay':
+            extra.append(root/'journal.tsv')
+    return extra
 
 
 def qualify_external_cleanup(recipe, result, local):

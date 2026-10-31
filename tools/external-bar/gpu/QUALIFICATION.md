@@ -602,6 +602,19 @@ refuse duplicate injections rather than treating a restart as another attempt.
 Native wrapper integration remains required before sealing the complete
 qualification package.
 
+The external colour wrapper accepts an explicit `controls` map with `delay`
+and `invalid` artifact pins. These must have distinct paths and hashes from
+each other and from the colour client. After successful colour capture/drain,
+it runs one delay client, then one invalid client against the same bound
+compositor. No control is retried. Each gets its own journal, stdout/stderr,
+PID/starttime/executable binding and cleanup record. The compositor, DRM device,
+listener and output are rechecked around the controls. Delay requires exit 0,
+the three delay records and a complete one-frame journal; invalid requires
+exit 42 and the matching injection/refusal records. The handoff pins both new
+artifacts before privilege transitions and rechecks their saved results during
+cleanup reduction. Omitting `controls` retains the colour-only wrapper and is
+not a complete qualification. Sophia control wrapper integration is still pending.
+
 On success, stop submissions, detach the last Wayland buffer and drain exact
 release events; X drains matching IdleNotify; Sophia drains its source/resource
 lifecycles. Clean bridge close requires no retained frames or poison. Record

@@ -1,6 +1,7 @@
 """Untimed native colour wrapper. Run only inside the attended PAM/VT handoff.
 
-Owns one compositor and one colour client; no sampler, retries or fallback.
+Owns one compositor, a colour client and any declared one-shot controls;
+no sampler, retries or fallback.
 Package/source/build pins and outer seat/cgroup cleanup are separate gates.
 """
 import argparse
@@ -50,7 +51,8 @@ def read(path, limit):
 
 
 def validate(recipe):
-    if (type(recipe) is not dict or recipe.keys() != {'schema', 'stack', 'pins', 'display'}
+    if (type(recipe) is not dict or recipe.keys() not in (
+            {'schema', 'stack', 'pins', 'display'}, {'schema', 'stack', 'pins', 'display', 'controls'})
             or type(recipe['schema']) is not int or recipe['schema'] != 1
             or recipe['stack'] not in ('niri', 'xlibre') or type(recipe['pins']) is not dict):
         raise ValueError('external recipe fields')
@@ -69,6 +71,99 @@ def validate(recipe):
     expected = hashlib.sha256(Path(__file__).with_name(config).read_bytes()).hexdigest()
     if recipe['pins']['config']['sha256'] != expected:
         raise ValueError('unreviewed native output/device configuration')
+    if 'controls' in recipe:
+        controls = recipe['controls']
+        if type(controls) is not dict or controls.keys() != {'delay', 'invalid'}:
+            raise ValueError('exact delay and invalid clients required')
+        clients = [recipe['pins']['client'], *controls.values()]
+        for pin in clients:
+            h.pin_artifact(pin)
+        if (len({pin['executable'] for pin in clients}) != 3
+                or len({pin['sha256'] for pin in clients}) != 3):
+            raise ValueError('colour and control clients must be distinct')
+
+
+def run_control(recipe, kind, root, env, guard, output):
+    """One fresh diagnostic child on the already bound server; never retry."""
+    if kind not in ('delay', 'invalid'):
+        raise ValueError('unknown native control')
+    pin = recipe['controls'][kind]
+    stack = recipe['stack']
+    transport = 'wayland' if stack == 'niri' else 'x11'
+    root.mkdir(mode=0o700)
+    before = output(kind+'-output-before')
+    path = root/'journal.tsv'
+    args = ([str(path)] if stack == 'niri' else ['--journal', str(path)])
+    args += ['--frames', '1', '--warmup', '0', '--buffers', '2', '--lifecycle', 'fresh', '--workload', 'fresh']
+    if stack == 'niri':
+        args += ['--output', 'DP-1']
+    argv = [pin['executable'], *args]
+    child = bound = None
+    forced = False
+    with (root/'stdout').open('xb') as stdout, (root/'stderr').open('xb') as stderr:
+        try:
+            guard()
+            child = spawn(pin, argv, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr,
+                          env=env, start_new_session=True)
+            identity = dict(pin, pid=child.pid, starttime=h.c.snapshot(child.pid))
+            bound = h.c.Session(identity)
+            write(root/'identity.json', identity)
+            until = time.monotonic()+30
+            while True:
+                guard()
+                for log in (root/'stdout', root/'stderr', path):
+                    if log.exists() and log.stat().st_size > 1024*1024:
+                        raise ValueError('native control output limit')
+                left = until-time.monotonic()
+                if left <= 0:
+                    raise ValueError('native control deadline')
+                if select.select([bound.fd], [], [], min(left, .1))[0]:
+                    break
+                try:
+                    bound.check()
+                except (OSError, ValueError):
+                    # A normal exit can race the last identity read.
+                    if not select.select([bound.fd], [], [], 0)[0]:
+                        raise
+            rc = child.wait(timeout=2)
+            if rc != (0 if kind == 'delay' else 42):
+                raise ValueError('native control exit status differs')
+            proof, receipt = control_proof(root, kind, transport, child.pid, rc)
+            guard()
+            if before != output(kind+'-output-after'):
+                raise ValueError('native control output changed')
+            result = dict(schema=1, kind=kind, client=identity, argv=argv, returncode=rc,
+                          proof=proof, journal=receipt, output=before,
+                          limits='Untimed local control; outer process/VT cleanup required.')
+        finally:
+            if child is not None:
+                forced = stop(child)
+                write(root/'cleanup.json', dict(pid=child.pid, rc=child.returncode, forced=forced))
+            if bound is not None:
+                bound.close()
+    if forced:
+        raise ValueError('native control forced cleanup')
+    write(root/'result.json', result)
+    return result
+
+
+def control_proof(root, kind, transport, pid, rc):
+    if type(rc) is not int or rc != (0 if kind == 'delay' else 42):
+        raise ValueError('native control exit status differs')
+    if read(root/'stdout', 1024*1024):
+        raise ValueError('unexpected native control stdout')
+    trace = read(root/'stderr', 1024*1024).decode()
+    if kind == 'delay':
+        proof = journal.qualify_release_delay(trace, transport)
+        receipt = journal.qualify_delay(read(root/'journal.tsv', 1024*1024).decode(), transport)
+        if receipt['client_pid'] != pid:
+            raise ValueError('release-delay journal PID differs')
+    elif kind == 'invalid':
+        proof = journal.qualify_import_refusal(trace, transport, rc)
+        receipt = None
+    else:
+        raise ValueError('unknown native control')
+    return proof, receipt
 
 
 def child_limits():
@@ -347,23 +442,26 @@ def run(recipe, root):
         client_pin = dict(pins['client'], pid=client.pid, starttime=h.c.snapshot(client.pid))
         bound_client = h.c.Session(client_pin); identities.append(bound_client)
 
-        def identity():
+        def server_identity():
             if time.monotonic() >= deadline:
                 raise ValueError('outer colour deadline')
-            bound_server.check(); bound_client.check()
+            bound_server.check()
             drm_layout()
             if endpoints(bound_server, stack, runtime, recipe['display']) != endpoint:
                 raise ValueError('compositor endpoint changed')
             device_check(bound_server)
+
+        def identity():
+            server_identity(); bound_client.check()
 
         def quiet():
             identity()
             if select.select([control], [], [], 0)[0]:
                 raise ValueError('client advanced/exited during capture')
 
-        def output(label):
+        def output(label, check=quiet):
             args = ['msg', '--json', 'outputs'] if stack == 'niri' else ['--current', '--verbose']
-            text = command([pins['output']['executable'], *args], pins['output'], env, root/label, 10, quiet).decode()
+            text = command([pins['output']['executable'], *args], pins['output'], env, root/label, 10, check).decode()
             facts = (outputs.niri if stack == 'niri' else outputs.xlibre)(text)
             write(root/(label+'-qualified.json'), facts)
             return facts
@@ -406,9 +504,14 @@ def run(recipe, root):
         if receipt['client_pid'] != client.pid or times != [row['ready']['presented_ns'] for row in sequence['records']]:
             raise ValueError('client journal identity/presentation differs from held generations')
         bound_server.check()
+        controls = []
+        if 'controls' in recipe:
+            for kind in ('delay', 'invalid'):
+                controls.append(run_control(recipe, kind, root/kind, env, server_identity,
+                                            lambda label: output(label, server_identity)))
         result = dict(schema=1, status='colour_source_path_completed', stack=stack, server=server_pin, client=client_pin,
                       server_argv=argv, client_argv=[pins['client']['executable'], *args], endpoint=endpoint,
-                      sequence=sequence, journal=receipt,
+                      sequence=sequence, journal=receipt, controls=controls,
                       expected_inherited_fd='Each spawned executable retains its opened regular-file exec FD; descendants may inherit it.',
                       host_unpinned_inputs=(['Xorg xkbcomp, xkeyboard-config data and libinput input module; package closure must bind these or retain this limit.'] if stack == 'xlibre' else []),
                       limits='Untimed local process/capture evidence; requires package build closure, outer PAM/VT cleanup and separate real import-refusal/delayed-release controls. X manager selection check is not a proof against an unregistered redirector.')

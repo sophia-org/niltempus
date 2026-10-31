@@ -223,7 +223,7 @@ class NativeColour(unittest.TestCase):
             names.append(path)
             with self.assertRaisesRegex(ValueError, 'replaced'): w.endpoints(Server(), 'xlibre', self.root, 99)
 
-    def test_wrapper_sequence_with_fixture_processes_and_private_captures(self, bad_journal=False, stack='niri', crash_server=False):
+    def test_wrapper_sequence_with_fixture_processes_and_private_captures(self, bad_journal=False, stack='niri', crash_server=False, controls=False, refuse_control=False):
         # Real subprocesses, sockets, pidfds, inotify, pipe drains and cleanup;
         # compositor/device behavior and capture pixels are explicit stand-ins.
         pixels = load('pixel_fixture', ROOT/'test/gpu_pixels.py')
@@ -235,6 +235,12 @@ class NativeColour(unittest.TestCase):
         pins['config'] = pin(config)
         if stack == 'xlibre': pins['xauth'] = self.python
         recipe = dict(schema=1, stack=stack, pins=pins, display=None if stack == 'niri' else 99)
+        if controls:
+            recipe['controls'] = {}
+            for kind in ('delay', 'invalid'):
+                path = self.root/kind
+                path.write_text(kind); path.chmod(0o600)
+                recipe['controls'][kind] = pin(path)
         transport = 'wayland' if stack == 'niri' else 'x11'
         source = w.journal.TRANSPORTS[transport][2]
         text = receipts.fixture(transport).replace('vello_shade_mod128_opaque_rgb', 'diagnostic_colour_hold_121').replace('frames=2 warmup=1', 'frames=3 warmup=0')
@@ -313,7 +319,18 @@ s.sendall(b'{{"schema":1,"status":"done","generation":3}}\\n')
         def opened(path, *args, **kwargs):
             self.assertNotEqual(str(path), '/tmp/.X11-unix')
             return original_open(path, *args, **kwargs)
-        with patch.object(w, 'spawn', side_effect=fixture_spawn), patch.object(w.os, 'ttyname', return_value='/dev/tty4'), patch.object(w, 'device_check', return_value=['fixture-only']), patch.object(w, 'drm_layout', return_value={'fixture': True}), patch.object(w, 'endpoints', side_effect=fixture_endpoints), patch.object(w.os, 'open', side_effect=opened):
+        controlled = []
+        def control(recipe, kind, destination, env, guard, output):
+            # Child plumbing is tested by gpu_native_controls; this pins its
+            # placement after all three captures and before server teardown.
+            self.assertEqual(len(list(root.glob('output-*-qualified.json'))), 6)
+            self.assertTrue((root/'journal.tsv').exists())
+            guard()
+            controlled.append(kind)
+            if refuse_control:
+                raise ValueError('control refused')
+            return dict(kind=kind)
+        with patch.object(w, 'spawn', side_effect=fixture_spawn), patch.object(w.os, 'ttyname', return_value='/dev/tty4'), patch.object(w, 'device_check', return_value=['fixture-only']), patch.object(w, 'drm_layout', return_value={'fixture': True}), patch.object(w, 'endpoints', side_effect=fixture_endpoints), patch.object(w.os, 'open', side_effect=opened), patch.object(w, 'run_control', side_effect=control):
             if bad_journal:
                 with self.assertRaisesRegex(ValueError, 'presentation differs'):
                     w.run(recipe, root)
@@ -325,7 +342,16 @@ s.sendall(b'{{"schema":1,"status":"done","generation":3}}\\n')
                 self.assertFalse((root/'result.json').exists())
                 self.assertTrue((root/'cleanup.json').exists())
                 return
+            if refuse_control:
+                with self.assertRaisesRegex(ValueError, 'control refused'):
+                    w.run(recipe, root)
+                self.assertEqual(controlled, ['delay'])
+                self.assertFalse((root/'result.json').exists())
+                self.assertFalse(any(row['forced'] for row in json.loads((root/'cleanup.json').read_text())['children']))
+                return
             result = w.run(recipe, root)
+        self.assertEqual(controlled, ['delay', 'invalid'] if controls else [])
+        self.assertEqual(result['controls'], [dict(kind=kind) for kind in controlled])
         self.assertEqual(result['status'], 'colour_source_path_completed')
         self.assertEqual(len(result['sequence']['records']), 3)
         self.assertEqual(result['journal']['client_pid'], result['client']['pid'])
@@ -343,6 +369,12 @@ s.sendall(b'{{"schema":1,"status":"done","generation":3}}\\n')
 
     def test_wrapper_refuses_server_crash_after_client_done(self):
         self.test_wrapper_sequence_with_fixture_processes_and_private_captures(crash_server=True)
+
+    def test_declared_controls_follow_captures_on_the_same_server(self):
+        self.test_wrapper_sequence_with_fixture_processes_and_private_captures(controls=True)
+
+    def test_first_control_refusal_stops_without_second_attempt(self):
+        self.test_wrapper_sequence_with_fixture_processes_and_private_captures(controls=True, refuse_control=True)
 
 
 if __name__ == '__main__':
