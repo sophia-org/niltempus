@@ -87,3 +87,54 @@ python3 -I -B tools/external-bar/test/cpu_pixels.py
 python3 -I -B tools/external-bar/test/cpu_capture.py
 python3 -I -B tools/external-bar/test/gpu_capture.py
 ```
+
+## Fixed region-update phases
+
+`sequence_capture.py` uses the same private delivery and executable/namespace
+checks for the separately named `lom-cpu-regions-full` and `lom-cpu-regions`
+entries. Its declaration fixes `arm` to `full-24`, `regions-24`, `full-512` or
+`regions-512`, and `group` to 0, 1 or 2. Groups designate phases [0,1,2], [3,4,5]
+and [6,7,8] respectively; there is no arbitrary phase list or retry. The caller
+starts it after the first phase is Presented and retains Session through all
+nine phases and shutdown, including when this group's captures finish earlier.
+
+The held a56 host consumes at most three attempts per Session, including failed
+ones. Full nine-phase coverage therefore needs twelve predeclared Sessions:
+three groups for both roles at both heights. Every Session executes the same
+nine embedded fixture phases. The package must bind the same executable per
+role and byte-identical panel/theme inputs across groups, and audit all nine
+candidate/phase records and their upload predictions in every final log.
+
+`sequence.py` requires the fixture header before any candidate, exact phase
+order, schema-2 unavailable checksums, the predicted region counters and host
+Prepared/Presented joins. Both log brackets must identify the same designated
+Presented phase; a next installation during capture refuses. Before/after logs,
+their hashes, wall-clock capture brackets and the private delivery receipt are
+saved per phase. Prior receipts/PAMs remain immutable across the three captures.
+The receipt's presentation generation is the native output frame identity;
+Lom's presentation epoch is the shell-candidate domain. They are not equated.
+
+The controller budget is nine 10-second holds plus 30 seconds of slack (120
+seconds); each capture still must fit entirely inside its designated hold.
+This budget does not extend the Session's 120-second lifetime. The package must
+start the controller promptly after observing phase 0 and record that observation
+and controller start on the monotonic clock. The phase line is untimestamped, so
+this records observation delay, not the exact time since Presented. A late or
+straddling capture refuses without retry. Saved checksum/opaque static runs took
+0.98–1.07 seconds from controller-declaration write to delivery JSON and 1.01–1.48
+seconds through verification. The narrower launch-log-to-delivery spans were
+0.36–0.45 seconds, but those logs are saved after launch readiness. These are
+descriptive filesystem-mtime spans, not exact syscall timings or future latency
+guarantees.
+
+The capture is the visible primary-head composition excluding Session's pointer
+sprite (a56 `docs/portal-client-files.md`, image-extent/occlusion/cursor contract).
+Only rows [0,height) are compared. The package must compare actual full/region
+strip bytes at every phase, reject equality for adjacent phases within each
+group, and require equality for phases 4 and 6 (the same model, tiled versus full
+fallback). Any mismatch is a finding, never a reason to repeat a run. No producer
+checksum, production-entry capture or performance conclusion is supplied.
+
+```sh
+python3 -I -B -W error tools/external-bar/test/region_capture.py
+```

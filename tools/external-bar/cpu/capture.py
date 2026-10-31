@@ -27,12 +27,31 @@ static = load('static_lom', HERE / 'static.py')
 
 
 def capture(expected, session, directory, deadline, evidence):
+    result = capture_held(expected, session, directory, deadline, evidence,
+                          lambda log: static.snapshot(log, expected['arm']), [])
+    result['status'] = 'static_capture_verified'
+    return result
+
+
+def capture_held(expected, session, directory, deadline, evidence, snapshot, previous):
     before, log_identity = c.log_bytes(expected['session_log'])
-    held = static.snapshot(before, expected['arm'])
+    held = snapshot(before)
     output = static.positive(held['head']['output'])
     endpoint, endpoint_identity = c.launch_socket(before, session)
-    if r.inventory(directory):
-        raise ValueError('capture directory must be unused')
+    prior = {item['receipt']['launch_generation']: {'pam', 'json', 'stderr'} for item in previous}
+    if r.inventory(directory) != prior:
+        raise ValueError('capture directory differs from prior deliveries' if previous
+                         else 'capture directory must be unused')
+    def check_previous():
+        for item in previous:
+            generation = item['receipt']['launch_generation']
+            if (hashlib.sha256(r.read_at(directory, f'capture-{generation}.json', 4096)).hexdigest()
+                    != item['receipt_sha256']
+                    or hashlib.sha256(r.read_at(directory, f'capture-{generation}.pam', 1920*1080*4+256)).hexdigest()
+                    != item['receipt']['pam_sha256']
+                    or r.read_at(directory, f'capture-{generation}.stderr', 0) != b''):
+                raise ValueError('prior delivery changed')
+    check_previous()
     notification = c.watch(directory)
     try:
         argv = [session.executable, 'launch', '--socket', endpoint, '--recipe', 'capture',
@@ -44,15 +63,21 @@ def capture(expected, session, directory, deadline, evidence):
             session.check()
             groups = r.inventory(directory)
             # Filenames use Session's global launch generation, not the capture count.
-            if generation is None and len(groups) == 1:
-                generation = next(iter(groups))
-            if (groups and set(groups) != {generation}) or (generation is not None and not groups):
+            if any(groups.get(key) != value for key, value in prior.items()):
+                raise ValueError('prior delivery changed')
+            fresh = groups.keys() - prior.keys()
+            if generation is None and len(fresh) == 1:
+                generation = next(iter(fresh))
+                if generation <= max(prior, default=0):
+                    raise ValueError('stale capture attempt')
+            if (fresh and fresh != {generation}) or (generation is not None and not fresh):
                 raise ValueError('unexpected capture attempt')
             if 'refused' in groups.get(generation, set()):
                 raise ValueError('private capture refused')
             if 'json' in groups.get(generation, set()):
                 checksum = held['candidate']['checksum']
-                height, hashed = static.ARMS[expected['arm']]
+                height = int(held['candidate']['height'])
+                hashed = held['candidate']['schema'] == '1'
                 result = r.verify_delivery(directory, generation,
                     dict(output=output, output_generation=expected['output_generation']),
                     session.identity, lambda pam: pixels.check(pam, checksum, height) if hashed
@@ -60,10 +85,12 @@ def capture(expected, session, directory, deadline, evidence):
                 after, after_identity = c.log_bytes(expected['session_log'])
                 if after_identity != log_identity or not after.startswith(before):
                     raise ValueError('Session log replaced or truncated')
-                if static.snapshot(after, expected['arm']) != held:
+                if snapshot(after) != held:
                     raise ValueError('static scene changed during capture')
-                if r.inventory(directory) != {generation: {'pam', 'json', 'stderr'}}:
+                if r.inventory(directory) != {**prior, generation: {'pam', 'json', 'stderr'}}:
                     raise ValueError('concurrent capture attempt')
+                check_previous()
+                r.advance(previous[-1]['receipt'] if previous else None, result['receipt'])
                 current = os.stat(endpoint, follow_symlinks=False)
                 if (current.st_dev, current.st_ino) != endpoint_identity:
                     raise ValueError('launch endpoint changed')
@@ -71,18 +98,18 @@ def capture(expected, session, directory, deadline, evidence):
                 for name, data in [('before.log', before), ('after.log', after)]:
                     with (evidence / name).open('xb') as stream:
                         stream.write(data)
-                return dict(schema=1, status='static_capture_verified', arm=expected['arm'],
+                return dict(schema=1, status='held_capture_verified', arm=expected['arm'],
                     capture=result, scene=held,
                     before_sha256=hashlib.sha256(before).hexdigest(),
                     after_sha256=hashlib.sha256(after).hexdigest(),
                     session=dict(pid=session.pid, starttime=session.starttime,
                                  namespaces=c.namespace_ids(session.pid)),
-                    join='One exclusive directory attempt; transaction 1 is a format check. '
-                         'Same unique shell candidate brackets capture; capture frame and '
+                    join='One serialized new private delivery; transaction 1 is a format check. '
+                         'Same held shell candidate brackets capture; capture frame and '
                          'shell presentation epoch are separate domains.',
                     limits='Launch custody only, not per-writer authentication; log joins '
                            'are consistency evidence. No PNG normalization or vertical flip. '
-                           'Full-run postflight must also refuse later scene changes.')
+                           'Full-run postflight must validate the declared scene sequence.')
             remaining = deadline-time.monotonic()
             if remaining <= 0 or not select.select([notification, session.fd], [], [], max(0, remaining))[0]:
                 raise ValueError('capture terminal receipt deadline')
