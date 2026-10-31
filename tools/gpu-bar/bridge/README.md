@@ -30,10 +30,11 @@ or dangling C pointers. Consumer release remains the transport adapter's duty.
 Run from the repository root, serialized with other benchmark builds:
 
 ```
-CARGO_BUILD_JOBS=2 cargo-slot niltempus sh tools/gpu-bar/bridge/check.sh
+CARGO_BUILD_JOBS=2 cargo-slot niltempus sh tools/gpu-bar/bridge/tests/check.sh
 ```
 
-Checks cover fake sysfs identities (including both rig GPUs), exact token custody,
+This build-only check lives under `tests/`; native runners consume prepared
+artifacts and never invoke it. Checks cover fake sysfs identities (including both rig GPUs), exact token custody,
 capacity, failure state, bounded C errors, and panic abort. The linked C test
 checks the actual ABI and refusal calls without opening a GPU. They do not prove
 successful Vulkan construction, buffer pixels/layout, import, consumer release,
