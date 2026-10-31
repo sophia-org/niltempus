@@ -33,6 +33,8 @@ mod profile;
 use producer::Producer;
 #[cfg(feature = "diagnostic-colour-hold")]
 mod hold;
+#[cfg(feature = "diagnostic-import-refusal")]
+mod invalid_import;
 mod ring_journal;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -440,10 +442,18 @@ fn emit_ring(event: ring_journal::Event<'_>) -> Result<()> {
 }
 
 fn run() -> Result<()> {
-    run_mode(false)
+    run_mode(Diagnostic::None)
 }
 
-fn run_mode(diagnostic: bool) -> Result<()> {
+enum Diagnostic {
+    None,
+    #[cfg(feature = "diagnostic-colour-hold")]
+    ColourHold,
+    #[cfg(feature = "diagnostic-import-refusal")]
+    ImportRefusal,
+}
+
+fn run_mode(mode: Diagnostic) -> Result<()> {
     if std::env::args().skip(1).collect::<Vec<_>>() != ["--serve"] {
         return Err("expected --serve and explicit SOPHIA_SHELL_CONFIG".into());
     }
@@ -456,14 +466,17 @@ fn run_mode(diagnostic: bool) -> Result<()> {
         return Err("configuration too large".into());
     }
     let config = parse_config(&text)?;
+    match mode {
+        Diagnostic::None => {}
+        #[cfg(feature = "diagnostic-colour-hold")]
+        Diagnostic::ColourHold => hold::validate_config(&config)?,
+        #[cfg(feature = "diagnostic-import-refusal")]
+        Diagnostic::ImportRefusal => invalid_import::validate_config(&config)?,
+    }
     #[cfg(feature = "diagnostic-colour-hold")]
-    if diagnostic {
-        hold::validate_config(&config)?;
-    }
+    let diagnostic = matches!(mode, Diagnostic::ColourHold);
     #[cfg(not(feature = "diagnostic-colour-hold"))]
-    if diagnostic {
-        return Err("diagnostic peer requires diagnostic-colour-hold".into());
-    }
+    let diagnostic = false;
     let Config {
         source,
         producer,
@@ -491,6 +504,10 @@ fn run_mode(diagnostic: bool) -> Result<()> {
         ));
     }
     let mut backing = dma_frame::Backing::new(dma_reuse);
+    #[cfg(feature = "diagnostic-import-refusal")]
+    {
+        backing.invalid_import = matches!(mode, Diagnostic::ImportRefusal);
+    }
     #[cfg(feature = "diagnostic-colour-hold")]
     {
         backing.colour_hold = diagnostic;
@@ -968,9 +985,20 @@ fn main() {
 #[cfg(feature = "diagnostic-colour-hold")]
 #[allow(dead_code)] // Called only by the separate colour-hold binary.
 pub(crate) fn diagnostic_main() {
-    if let Err(error) = run_mode(true) {
+    if let Err(error) = run_mode(Diagnostic::ColourHold) {
         canvas::diagnostic_line(format_args!(
             "gpu_colour_hold_refused schema=1 error={error:?}"
+        ));
+        std::process::exit(1);
+    }
+}
+
+#[cfg(feature = "diagnostic-import-refusal")]
+#[allow(dead_code)] // Called only by the separate import-refusal binary.
+pub(crate) fn invalid_import_main() {
+    if let Err(error) = run_mode(Diagnostic::ImportRefusal) {
+        canvas::diagnostic_line(format_args!(
+            "gpu_invalid_import_failed schema=1 error={error:?}"
         ));
         std::process::exit(1);
     }

@@ -586,8 +586,21 @@ binds that status to the unique, ordered injection/refusal records and token.
 These self-reported records still need the wrapper's real process, consumer,
 artifact and cleanup proofs. The device-free tests use mock exports and
 synthetic protocol errors; they do not prove a native consumer refusal.
-The Sophia equivalent, native wrapper integration and delayed-event control
-remain required before sealing the complete qualification package.
+Sophia's separate `gpu-bar-invalid-import` binary requires the
+`diagnostic-import-refusal` feature and the same one-frame, height24, fresh DMA
+recipe, with no hold/profiling/reuse. It keeps the completed export in
+`ManuallyDrop`, substitutes the same sealed memfd at `image_begin_dma_buf`, and
+never releases or forgets the real export. Local SDK refusal does not qualify.
+Only a Session ResourceStatus for the exact grant and resource, status 3 with
+Malformed or RendererFailed reason and zero admitted bytes/ordinal, emits the
+expected refusal and exits 42. Its marker includes the offer and grant/resource
+identities. Malformed is remote protocol rejection, not proof of an attempted
+GPU import; the reason must remain visible in the package result. The Session
+may restart failed peers, so the wrapper must stop on the first outcome and
+refuse duplicate injections rather than treating a restart as another attempt.
+
+Native wrapper integration and the delayed-event control remain required before
+sealing the complete qualification package.
 
 On success, stop submissions, detach the last Wayland buffer and drain exact
 release events; X drains matching IdleNotify; Sophia drains its source/resource

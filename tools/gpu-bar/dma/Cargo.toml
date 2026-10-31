@@ -11,6 +11,7 @@ autobins = false
 
 [features]
 diagnostic-colour-hold = ["rustix/event", "rustix/fs", "rustix/net", "rustix/process"]
+diagnostic-import-refusal = ["rustix/fs"]
 
 [[bin]]
 name = "gpu-bar-dma"
@@ -20,6 +21,11 @@ path = "src/main.rs"
 name = "gpu-bar-colour-hold"
 path = "src/colour_hold.rs"
 required-features = ["diagnostic-colour-hold"]
+
+[[bin]]
+name = "gpu-bar-invalid-import"
+path = "src/import_refusal.rs"
+required-features = ["diagnostic-import-refusal"]
 
 [workspace]
 

@@ -15,6 +15,8 @@ pub(super) struct Backing {
     retained: Option<DmaFrame>,
     #[cfg(feature = "diagnostic-colour-hold")]
     pub(super) colour_hold: bool,
+    #[cfg(feature = "diagnostic-import-refusal")]
+    pub(super) invalid_import: bool,
 }
 
 impl Backing {
@@ -24,6 +26,8 @@ impl Backing {
             retained: None,
             #[cfg(feature = "diagnostic-colour-hold")]
             colour_hold: false,
+            #[cfg(feature = "diagnostic-import-refusal")]
+            invalid_import: false,
         }
     }
 
@@ -109,6 +113,10 @@ pub(super) fn dma_frame(
         modifier: 0,
     };
     let source_bytes = frame.source_bytes();
+    #[cfg(feature = "diagnostic-import-refusal")]
+    if backing.invalid_import {
+        return super::invalid_import::offer(wire, frame, metadata, grant, resource);
+    }
     let begun = wire.client.image_begin_dma_buf(
         metadata,
         frame.dup_fd()?,
