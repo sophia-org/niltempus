@@ -12,6 +12,7 @@ autobins = false
 [features]
 diagnostic-colour-hold = ["rustix/event", "rustix/fs", "rustix/net", "rustix/process"]
 diagnostic-import-refusal = ["rustix/fs"]
+diagnostic-release-delay = []
 
 [[bin]]
 name = "gpu-bar-dma"
@@ -26,6 +27,11 @@ required-features = ["diagnostic-colour-hold"]
 name = "gpu-bar-invalid-import"
 path = "src/import_refusal.rs"
 required-features = ["diagnostic-import-refusal"]
+
+[[bin]]
+name = "gpu-bar-release-delay"
+path = "src/delayed_release.rs"
+required-features = ["diagnostic-release-delay"]
 
 [workspace]
 

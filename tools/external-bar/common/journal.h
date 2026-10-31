@@ -82,6 +82,8 @@ static inline void journal_header(FILE *j, const char *arm, unsigned width,
             arm, width, height, buffers,
 #if defined(DIAGNOSTIC_COLOUR_HOLD)
             "diagnostic_colour_hold_121",
+#elif defined(DIAGNOSTIC_RELEASE_DELAY)
+            "diagnostic_release_delay_100ms",
 #elif defined(MATCHED_GPU)
             "vello_shade_mod128_opaque_rgb", /* fill_start precedes render/export, not CPU fill. */
 #else

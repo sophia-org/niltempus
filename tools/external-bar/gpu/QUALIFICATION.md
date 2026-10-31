@@ -599,16 +599,35 @@ GPU import; the reason must remain visible in the package result. The Session
 may restart failed peers, so the wrapper must stop on the first outcome and
 refuse duplicate injections rather than treating a restart as another attempt.
 
-Native wrapper integration and the delayed-event control remain required before
-sealing the complete qualification package.
+Native wrapper integration remains required before sealing the complete
+qualification package.
 
 On success, stop submissions, detach the last Wayland buffer and drain exact
 release events; X drains matching IdleNotify; Sophia drains its source/resource
 lifecycles. Clean bridge close requires no retained frames or poison. Record
 actual delay and ownership rather than requiring identical retention across
 stacks: X COPY may release before completion, Wayland may retain its displayed
-buffer, and Sophia releases the source after capture. A diagnostic event-delivery
-delay must still end at the real matching event; time alone cannot free a frame.
+buffer, and Sophia releases the source after capture. Time alone cannot free a frame.
+
+The separate `wl-panel-gpu-delay`, `x-panel-gpu-delay` and
+`gpu-bar-release-delay` entries delay **applying an already matched release** by
+100 ms before freeing the export. They do not delay GPU execution, receipt of
+the event or consumer ownership. External callers first validate the real
+wl_buffer.release or IdleNotify; Sophia first requires exact Accepted and
+capture-complete settlement. Only then does the one-frame, zero-warmup control
+record held/resume/released with a stable token (or offer/grant/resource).
+Clock regression, a wait longer than five seconds or any identity error refuses
+without intentionally freeing the export. Device-free Drop/mock-bridge checks
+observe the actual free boundary; native event and process custody remain gates.
+
+External journals use `fill=diagnostic_release_delay_100ms`, which the ordinary
+and colour qualifiers refuse. `qualify_delay` checks the one-frame completion
+and clean bridge drain; `qualify_release_delay` separately checks the exact
+three-record identity and elapsed-time trace. Sophia requires the separate
+`diagnostic-release-delay` feature and emits
+`gpu_release_delay_mode schema=1 frames=1 delay_usec=100000 timed=0`; a timed
+package must refuse this marker and artifact. These are untimed lifetime
+controls, not performance samples or proof of delayed consumer release.
 
 Device-free controls precede native launch: corrupt each receipt/binding; swap
 channels and patterns; reject stale ACK/release and mismatched token; exercise

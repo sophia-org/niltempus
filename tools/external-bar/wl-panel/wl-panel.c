@@ -497,6 +497,9 @@ int main(int argc, char **argv) {
 #ifdef DIAGNOSTIC_INVALID_IMPORT
     gpu_invalid_config(opt_frames, opt_warmup);
 #endif
+#ifdef DIAGNOSTIC_RELEASE_DELAY
+    gpu_delay_config(opt_frames, opt_warmup);
+#endif
     display = wl_display_connect(NULL);
     if (!display)
         die("no Wayland display");

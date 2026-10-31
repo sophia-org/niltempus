@@ -35,6 +35,8 @@ use producer::Producer;
 mod hold;
 #[cfg(feature = "diagnostic-import-refusal")]
 mod invalid_import;
+#[cfg(feature = "diagnostic-release-delay")]
+mod release_delay;
 mod ring_journal;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -451,6 +453,8 @@ enum Diagnostic {
     ColourHold,
     #[cfg(feature = "diagnostic-import-refusal")]
     ImportRefusal,
+    #[cfg(feature = "diagnostic-release-delay")]
+    ReleaseDelay,
 }
 
 fn run_mode(mode: Diagnostic) -> Result<()> {
@@ -472,6 +476,14 @@ fn run_mode(mode: Diagnostic) -> Result<()> {
         Diagnostic::ColourHold => hold::validate_config(&config)?,
         #[cfg(feature = "diagnostic-import-refusal")]
         Diagnostic::ImportRefusal => invalid_import::validate_config(&config)?,
+        #[cfg(feature = "diagnostic-release-delay")]
+        Diagnostic::ReleaseDelay => release_delay::validate_config(&config)?,
+    }
+    #[cfg(feature = "diagnostic-release-delay")]
+    if matches!(mode, Diagnostic::ReleaseDelay) {
+        canvas::diagnostic_line(format_args!(
+            "gpu_release_delay_mode schema=1 frames=1 delay_usec=100000 timed=0"
+        ));
     }
     #[cfg(feature = "diagnostic-colour-hold")]
     let diagnostic = matches!(mode, Diagnostic::ColourHold);
@@ -504,6 +516,10 @@ fn run_mode(mode: Diagnostic) -> Result<()> {
         ));
     }
     let mut backing = dma_frame::Backing::new(dma_reuse);
+    #[cfg(feature = "diagnostic-release-delay")]
+    {
+        backing.release_delay = matches!(mode, Diagnostic::ReleaseDelay);
+    }
     #[cfg(feature = "diagnostic-import-refusal")]
     {
         backing.invalid_import = matches!(mode, Diagnostic::ImportRefusal);
@@ -999,6 +1015,17 @@ pub(crate) fn invalid_import_main() {
     if let Err(error) = run_mode(Diagnostic::ImportRefusal) {
         canvas::diagnostic_line(format_args!(
             "gpu_invalid_import_failed schema=1 error={error:?}"
+        ));
+        std::process::exit(1);
+    }
+}
+
+#[cfg(feature = "diagnostic-release-delay")]
+#[allow(dead_code)] // Called only by the separate release-delay binary.
+pub(crate) fn release_delay_main() {
+    if let Err(error) = run_mode(Diagnostic::ReleaseDelay) {
+        canvas::diagnostic_line(format_args!(
+            "gpu_release_delay_failed schema=1 error={error:?}"
         ));
         std::process::exit(1);
     }

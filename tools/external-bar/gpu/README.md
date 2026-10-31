@@ -36,6 +36,15 @@ then run `python3 -I -B -W error tools/external-bar/test/gpu_invalid.py` for
 device-free FD-custody, error-identity and local-refusal controls. The native
 wrapper integration is still pending; the targets alone are not launch approval.
 
+`wl-panel-gpu-delay` and `x-panel-gpu-delay` are separate one-frame controls
+that wait 100 ms after a matching release event before freeing the export.
+Build them with `GPU_DIAGNOSTIC_BRIDGE`, plus `gpu-wl-delay-test` and
+`gpu-x-delay-test`, then run `python3 -I -B -W error test/gpu_delay.py` from
+`tools/external-bar`. The mock tests observe the free boundary. This is delayed
+application of release, not delayed GPU execution or consumer ownership.
+The diagnostic journal is refused by the timed qualifier. Sophia has the same
+control in `gpu-bar-release-delay` with feature `diagnostic-release-delay`.
+
 Wayland binds linux-dmabuf **v4**, requests surface feedback and requires the main
 device and a tranche advertising XR24/LINEAR to resolve to the pinned PCI device.
 DRM primary/render node aliases are resolved through sysfs, not compared as

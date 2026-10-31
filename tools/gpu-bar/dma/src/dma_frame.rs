@@ -17,6 +17,8 @@ pub(super) struct Backing {
     pub(super) colour_hold: bool,
     #[cfg(feature = "diagnostic-import-refusal")]
     pub(super) invalid_import: bool,
+    #[cfg(feature = "diagnostic-release-delay")]
+    pub(super) release_delay: bool,
 }
 
 impl Backing {
@@ -28,6 +30,8 @@ impl Backing {
             colour_hold: false,
             #[cfg(feature = "diagnostic-import-refusal")]
             invalid_import: false,
+            #[cfg(feature = "diagnostic-release-delay")]
+            release_delay: false,
         }
     }
 
@@ -150,6 +154,13 @@ pub(super) fn dma_frame(
     if backing.reuse {
         backing.retained = Some(frame);
     } else {
+        #[cfg(feature = "diagnostic-release-delay")]
+        if backing.release_delay {
+            super::release_delay::release(frame, grant, resource, offer)?;
+        } else {
+            drop(frame);
+        }
+        #[cfg(not(feature = "diagnostic-release-delay"))]
         drop(frame);
     }
     emit(Event::UploadAccepted {

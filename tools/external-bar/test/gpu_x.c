@@ -148,6 +148,21 @@ static void refusal(unsigned which) {
     assert(WIFEXITED(status) && WEXITSTATUS(status)==2);
 }
 int main(void) {
+#ifdef DIAGNOSTIC_RELEASE_DELAY
+    FILE *delayed_journal = tmpfile(); assert(delayed_journal);
+    gpu_delay_config(1, 0); gpu_open(delayed_journal, "fixture");
+    struct back delayed_back = {0};
+    struct ctx delayed_ctx = {.win=9, .present_opcode=73, .present_eid=77,
+        .nbacks=1, .backs=&delayed_back};
+    gpu_x_paint(&delayed_ctx, &delayed_back, 1);
+    delayed_back.serial=1; delayed_back.busy=1;
+    uint64_t start = mono_ns();
+    handle(&delayed_ctx, (xcb_generic_event_t *)&idle);
+    assert(mono_ns() - start >= 100000000ull && !delayed_back.token && !delayed_back.busy && freed == 1);
+    gpu_close(delayed_journal, 1); fclose(delayed_journal);
+    puts("X delayed matching-release control passed; synthetic event, no display/GPU");
+    return 0;
+#endif
 #ifdef DIAGNOSTIC_INVALID_IMPORT
     for (invalid_case = 0; invalid_case < 6; invalid_case++) {
         pid_t child = fork(); assert(child >= 0);

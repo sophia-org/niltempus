@@ -405,6 +405,9 @@ int main(int argc, char **argv) {
 #ifdef DIAGNOSTIC_INVALID_IMPORT
     gpu_invalid_config((unsigned)frames, (unsigned)warmup);
 #endif
+#ifdef DIAGNOSTIC_RELEASE_DELAY
+    gpu_delay_config((unsigned)frames, (unsigned)warmup);
+#endif
     struct ctx c = {0};
     c.fresh_lifecycle = !strcmp(lifecycle, "fresh");
     c.bursty = wl == W_BURSTY;

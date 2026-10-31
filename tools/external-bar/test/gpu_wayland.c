@@ -172,6 +172,21 @@ static void refusal(unsigned which) {
     assert(WIFEXITED(status) && WEXITSTATUS(status)==2);
 }
 int main(void) {
+#ifdef DIAGNOSTIC_RELEASE_DELAY
+    FILE *delayed_journal = tmpfile(); assert(delayed_journal);
+    gpu_delay_config(1, 0); gpu_open(delayed_journal, "fixture");
+    dma_feedback.ready = true;
+    unsigned held = 1;
+    struct fresh_slot *slot = calloc(1, sizeof *slot); assert(slot);
+    slot->inflight = &held;
+    slot->buffer = gpu_wayland_buffer(1, &slot->token, &slot->params);
+    uint64_t start = mono_ns();
+    fresh_release(slot, slot->buffer);
+    assert(mono_ns() - start >= 100000000ull && !held && destroyed == 1);
+    gpu_close(delayed_journal, 1); fclose(delayed_journal);
+    puts("Wayland delayed matching-release control passed; synthetic event, no display/GPU");
+    return 0;
+#endif
 #ifdef DIAGNOSTIC_INVALID_IMPORT
     for (invalid_case = 0; invalid_case < 5; invalid_case++) {
         pid_t child = fork(); assert(child >= 0);

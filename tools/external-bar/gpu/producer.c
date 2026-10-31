@@ -9,9 +9,40 @@
 #ifdef DIAGNOSTIC_INVALID_IMPORT
 #include "invalid_import.h"
 #endif
+#ifdef DIAGNOSTIC_RELEASE_DELAY
+#include <errno.h>
+#include <time.h>
+#endif
 
 static GpuBarBridge *owner;
 static uint64_t rendered, released;
+
+#ifdef DIAGNOSTIC_RELEASE_DELAY
+void gpu_delay_config(unsigned frames, unsigned warmup) {
+    if (frames != 1 || warmup != 0)
+        gpu_die("release-delay diagnostic requires one frame and no warmup");
+}
+static uint64_t delay_now(void) {
+    struct timespec t;
+    if (clock_gettime(CLOCK_MONOTONIC, &t)) gpu_die("release-delay clock failed");
+    return (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec;
+}
+static void delay_record(const char *phase, uint64_t token, uint64_t now) {
+    fprintf(stderr, "gpu_release_delay schema=1 phase=%s token=%llu monotonic_ns=%llu\n",
+            phase, (unsigned long long)token, (unsigned long long)now);
+}
+static void delay_release(uint64_t token) {
+    if (!token || rendered != 1 || released) gpu_die("release-delay export count differs");
+    uint64_t start = delay_now(), until = start + 100000000ull;
+    delay_record("held", token, start);
+    struct timespec end = {(time_t)(until / 1000000000ull), (long)(until % 1000000000ull)};
+    int rc;
+    do { rc = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &end, NULL); } while (rc == EINTR);
+    uint64_t now = delay_now();
+    if (rc || now < until || now - start > 5000000000ull) gpu_die("release-delay wait failed");
+    delay_record("resume", token, now);
+}
+#endif
 
 void gpu_die(const char *message) {
     fprintf(stderr, "matched-gpu: %s\n", message);
@@ -75,9 +106,16 @@ void gpu_release(uint64_t token) {
 #ifdef DIAGNOSTIC_INVALID_IMPORT
     gpu_die("invalid-import diagnostic must never release the real export");
 #endif
+#ifdef DIAGNOSTIC_RELEASE_DELAY
+    // The caller already validated the real consumer event. Delay applying it.
+    delay_release(token);
+#endif
     char error[512];
     if (gpu_bar_bridge_release(owner, token, error, sizeof error)) gpu_die(error);
     released++;
+#ifdef DIAGNOSTIC_RELEASE_DELAY
+    delay_record("released", token, delay_now());
+#endif
 }
 
 void gpu_close(FILE *journal, uint64_t expected) {

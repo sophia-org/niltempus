@@ -49,6 +49,50 @@ def qualify_colour(text, transport):
     return _qualify(text, transport, 3, 0, 'diagnostic_colour_hold_121')
 
 
+def qualify_delay(text, transport):
+    return _qualify(text, transport, 1, 0, 'diagnostic_release_delay_100ms')
+
+
+def qualify_release_delay(text, transport):
+    """Three application-boundary records; caller separately binds the real event and process."""
+    if transport not in (*TRANSPORTS, 'sophia'):
+        raise ValueError('unknown release-delay transport')
+    if not text.isascii() or not text.endswith('\n'):
+        raise ValueError('truncated release-delay trace')
+    lines = text.splitlines()
+    if len(lines) != 3:
+        raise ValueError('missing or extra release-delay records')
+    sophia = transport == 'sophia'
+    clock = 'monotonic_usec' if sophia else 'monotonic_ns'
+    identity = ({'offer', 'connection_epoch', 'content_grant_epoch', 'resource', 'generation'}
+                if sophia else {'token'})
+    rows = []
+    for phase, line in zip(('held', 'resume', 'released'), lines, strict=True):
+        prefix = 'gpu_release_delay '
+        if not line.startswith(prefix):
+            raise ValueError('foreign release-delay record')
+        row = fields(line[len(prefix):])
+        if (row.keys() != identity | {'schema', 'phase', clock}
+                or row['schema'] != '1' or row['phase'] != phase):
+            raise ValueError('release-delay shape or order differs')
+        for key in identity | {clock}:
+            if not uint(row[key]):
+                raise ValueError('zero release-delay identity or clock')
+        if sophia and (row['resource'] != '1' or row['generation'] != '1'):
+            raise ValueError('release-delay resource differs')
+        rows.append(row)
+    if any(row[key] != rows[0][key] for row in rows for key in identity):
+        raise ValueError('release-delay identity changed')
+    held, resume, released = [uint(row[clock]) for row in rows]
+    units = 1_000_000 if sophia else 1_000_000_000
+    if not units // 10 <= resume - held <= 5 * units or released < resume:
+        raise ValueError('release-delay duration or clock order differs')
+    return dict(status='release_application_delayed', transport=transport,
+                identity={key: uint(rows[0][key]) for key in sorted(identity)},
+                clock=clock, held=held, resume=resume, released=released,
+                limits='Already matched release event; no claim about consumer hold duration.')
+
+
 def qualify_import_refusal(stderr, transport, returncode):
     """Request-bound error evidence only; artifact/consumer custody is external."""
     if transport not in TRANSPORTS or type(returncode) is not int or returncode != 42:

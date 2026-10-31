@@ -6,6 +6,14 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#ifdef DIAGNOSTIC_RELEASE_DELAY
+#include <time.h>
+static uint64_t rendered_ns;
+static uint64_t test_now(void) {
+    struct timespec t; assert(!clock_gettime(CLOCK_MONOTONIC, &t));
+    return (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec;
+}
+#endif
 struct GpuBarBridge { uint64_t generation, slots[2]; };
 int gpu_bar_bridge_open(const char *node, const char *pci, GpuBarBridge **out,
                         char *error, size_t capacity) {
@@ -32,11 +40,17 @@ int gpu_bar_bridge_render(GpuBarBridge *owner, uint64_t generation, GpuBarFrame 
     assert(fd >= 0 && ftruncate(fd, 1920 * 24 * 4) == 0);
     *out = (GpuBarFrame){.token=generation, .generation=generation, .fd=fd,
         .width=1920, .height=24, .stride=1920*4, .source_bytes=1920*24*4, .format=0x34325258};
+#ifdef DIAGNOSTIC_RELEASE_DELAY
+    rendered_ns = test_now();
+#endif
     return 0;
 }
 int gpu_bar_bridge_release(GpuBarBridge *owner, uint64_t token, char *error, size_t capacity) {
     (void)error; (void)capacity;
     for (unsigned i=0; i<2; i++) if (owner->slots[i] == token && token) {
+#ifdef DIAGNOSTIC_RELEASE_DELAY
+        assert(test_now() - rendered_ns >= 100000000ull);
+#endif
         owner->slots[i]=0; return 0;
     }
     abort();
