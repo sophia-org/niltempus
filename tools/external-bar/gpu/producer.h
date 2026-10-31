@@ -6,6 +6,9 @@
 #include "gpu_bar_bridge.h"
 #define GPU_XR24 0x34325258u
 #define GPU_PCI "0000:03:00.0"
+#if defined(DIAGNOSTIC_INVALID_IMPORT) && defined(DIAGNOSTIC_COLOUR_HOLD)
+#error "Import refusal and colour capture are separate diagnostic clients"
+#endif
 void gpu_die(const char *message);
 bool gpu_device_matches_at(const char *sysfs, dev_t device);
 bool gpu_frame_valid(const GpuBarFrame *frame, uint64_t generation);

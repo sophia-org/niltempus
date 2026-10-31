@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include <assert.h>
+#include <errno.h>
 #include <string.h>
 #include <fcntl.h>
 #include <sys/sysmacros.h>
@@ -44,6 +45,20 @@ static bool test_device(const char *sysfs, dev_t device) {
     assert(!strcmp(sysfs, "/sys"));
     return major(device)==226 && (minor(device)==0 || minor(device)==128);
 }
+#ifdef DIAGNOSTIC_INVALID_IMPORT
+static unsigned invalid_case;
+static uint32_t test_proxy_id(struct wl_proxy *proxy) { assert(proxy); return 73; }
+static int test_roundtrip(struct wl_display *d) { (void)d; return invalid_case == 1 ? 0 : -1; }
+static int test_display_error(struct wl_display *d) { (void)d; return invalid_case == 2 ? EIO : EPROTO; }
+static uint32_t test_protocol_error(struct wl_display *d, const struct wl_interface **i, uint32_t *id) {
+    (void)d; *i = invalid_case == 3 ? &wl_surface_interface : &zwp_linux_buffer_params_v1_interface;
+    *id = invalid_case == 4 ? 74 : 73; return 7;
+}
+#define wl_proxy_get_id test_proxy_id
+#define wl_display_roundtrip test_roundtrip
+#define wl_display_get_error test_display_error
+#define wl_display_get_protocol_error test_protocol_error
+#endif
 #ifdef DIAGNOSTIC_COLOUR_HOLD
 #include "../wl-panel/gen/presentation-time.h"
 #include "../gpu/hold.h"
@@ -157,6 +172,22 @@ static void refusal(unsigned which) {
     assert(WIFEXITED(status) && WEXITSTATUS(status)==2);
 }
 int main(void) {
+#ifdef DIAGNOSTIC_INVALID_IMPORT
+    for (invalid_case = 0; invalid_case < 5; invalid_case++) {
+        pid_t child = fork(); assert(child >= 0);
+        if (!child) {
+            FILE *j = tmpfile(); assert(j); gpu_open(j, "fixture");
+            dma_feedback.ready = true;
+            uint64_t token; struct zwp_linux_buffer_params_v1 *params;
+            gpu_wayland_buffer(1, &token, &params);
+            _exit(99);
+        }
+        int status; assert(waitpid(child, &status, 0) == child);
+        assert(WIFEXITED(status) && WEXITSTATUS(status) == (invalid_case ? 2 : 42));
+    }
+    puts("Wayland invalid-import identity controls passed; synthetic errors, no display/GPU");
+    return 0;
+#endif
     /* Exercise the installed dispatch timeout without a compositor or GPU. */
     int sockets[2]; assert(!socketpair(AF_UNIX,SOCK_STREAM,0,sockets));
     struct wl_display *empty=wl_display_connect_to_fd(sockets[0]); assert(empty);

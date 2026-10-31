@@ -3,6 +3,9 @@
 #include <sys/stat.h>
 #include <xcb/dri3.h>
 #include "producer.h"
+#ifdef DIAGNOSTIC_INVALID_IMPORT
+#include "invalid_import.h"
+#endif
 
 static void gpu_x_open(struct ctx *c, FILE *journal) {
     Visual *visual = DefaultVisual(c->dpy, DefaultScreen(c->dpy));
@@ -47,9 +50,23 @@ static void gpu_x_paint(struct ctx *c, struct back *b, uint64_t generation) {
     GpuBarFrame frame = gpu_render(generation);
     b->pixmap = xcb_generate_id(c->conn);
     b->token = frame.token;
+#ifdef DIAGNOSTIC_INVALID_IMPORT
+    xcb_void_cookie_t request = xcb_dri3_pixmap_from_buffers_checked(c->conn,
+        b->pixmap, c->win, 1, frame.width, frame.height, frame.stride,
+        (uint32_t)frame.offset, 0, 0, 0, 0, 0, 0, 24, 32, frame.modifier, &frame.fd);
+    xcb_generic_error_t *error = xcb_request_check(c->conn, request);
+    const xcb_query_extension_reply_t *extension = xcb_get_extension_data(c->conn, &xcb_dri3_id);
+    if (error && extension && error->major_code == extension->major_opcode &&
+        error->minor_code == XCB_DRI3_PIXMAP_FROM_BUFFERS &&
+        error->full_sequence == request.sequence)
+        gpu_invalid_refused("x11", error->error_code, error->major_code,
+                            error->minor_code, b->pixmap);
+    gpu_die("invalid import did not produce its matching DRI3 request error");
+#else
     /* xcb owns/closes the passed FD. Asynchronous errors are fatal in handle(). */
     xcb_dri3_pixmap_from_buffers(c->conn, b->pixmap, c->win, 1, frame.width, frame.height,
         frame.stride, (uint32_t)frame.offset, 0, 0, 0, 0, 0, 0, 24, 32, frame.modifier, &frame.fd);
+#endif
 }
 
 static void gpu_x_idle(struct ctx *c, xcb_present_idle_notify_event_t *event) {

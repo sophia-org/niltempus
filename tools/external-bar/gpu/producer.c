@@ -6,6 +6,9 @@
 #include <string.h>
 #include <sys/sysmacros.h>
 #include <unistd.h>
+#ifdef DIAGNOSTIC_INVALID_IMPORT
+#include "invalid_import.h"
+#endif
 
 static GpuBarBridge *owner;
 static uint64_t rendered, released;
@@ -62,10 +65,16 @@ GpuBarFrame gpu_render(uint64_t generation) {
         flags < 0 || !(flags & FD_CLOEXEC) || size < 0 || (uint64_t)size != frame.source_bytes)
         gpu_die("exported frame layout, descriptor or backing size differs");
     rendered++;
+#ifdef DIAGNOSTIC_INVALID_IMPORT
+    gpu_invalid_substitute(&frame);
+#endif
     return frame;
 }
 
 void gpu_release(uint64_t token) {
+#ifdef DIAGNOSTIC_INVALID_IMPORT
+    gpu_die("invalid-import diagnostic must never release the real export");
+#endif
     char error[512];
     if (gpu_bar_bridge_release(owner, token, error, sizeof error)) gpu_die(error);
     released++;

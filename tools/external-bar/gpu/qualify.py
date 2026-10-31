@@ -49,6 +49,41 @@ def qualify_colour(text, transport):
     return _qualify(text, transport, 3, 0, 'diagnostic_colour_hold_121')
 
 
+def qualify_import_refusal(stderr, transport, returncode):
+    """Request-bound error evidence only; artifact/consumer custody is external."""
+    if transport not in TRANSPORTS or type(returncode) is not int or returncode != 42:
+        raise ValueError('not an expected consumer import refusal')
+    if not stderr.endswith('\n') or '\x00' in stderr:
+        raise ValueError('truncated or malformed import refusal')
+    rows = [line for line in stderr.splitlines() if 'gpu_invalid_import' in line]
+    if len(rows) != 2:
+        raise ValueError('missing or duplicate import refusal records')
+    prefixes = ('gpu_invalid_import ', 'gpu_invalid_import_refused ')
+    if any(not line.startswith(prefix) for line, prefix in zip(rows, prefixes)):
+        raise ValueError('misordered import refusal records')
+    injected, refused = [fields(line[len(prefix):]) for line, prefix in zip(rows, prefixes)]
+    if (injected.keys() != {'schema', 'status', 'generation', 'token', 'bytes'}
+            or injected['schema'] != '1' or injected['status'] != 'injected'
+            or injected['generation'] != '1' or not uint(injected['token'])
+            or not 1920*24*4 <= uint(injected['bytes']) <= 2**63-1):
+        raise ValueError('invalid injection record')
+    if (refused.keys() != {'schema', 'transport', 'token', 'code', 'major', 'minor', 'object', 'released'}
+            or refused['schema'] != '1' or refused['transport'] != transport
+            or refused['token'] != injected['token'] or refused['released'] != '0'):
+        raise ValueError('import refusal identity differs')
+    values = {key: uint(refused[key]) for key in ('code', 'major', 'minor', 'object')}
+    if any(value > 2**32-1 for value in values.values()) or not values['object']:
+        raise ValueError('invalid protocol error fields')
+    if transport == 'wayland':
+        if values['major'] or values['minor']:
+            raise ValueError('foreign Wayland error fields')
+    elif not (1 <= values['code'] <= 255 and 128 <= values['major'] <= 255 and values['minor'] == 7):
+        raise ValueError('not a DRI3 PixmapFromBuffers error')
+    return dict(status='consumer_import_refused', transport=transport,
+                token=uint(injected['token']), bytes=uint(injected['bytes']), error=values,
+                release='none_process_exit')
+
+
 def _qualify(text, transport, frames, warmup, fill):
     if (transport not in TRANSPORTS or type(frames) is not int or type(warmup) is not int
             or not 1 <= frames <= 1_000_000 or not 0 <= warmup <= 1_000_000):

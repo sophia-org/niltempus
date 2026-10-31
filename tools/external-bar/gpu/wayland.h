@@ -1,6 +1,9 @@
 /* Included only by wl-panel-gpu; no SHM fallback or explicit-sync path. */
 #include "linux-dmabuf.h"
 #include "producer.h"
+#ifdef DIAGNOSTIC_INVALID_IMPORT
+#include "invalid_import.h"
+#endif
 
 static struct zwp_linux_dmabuf_v1 *dmabuf;
 static uint32_t dmabuf_global;
@@ -151,6 +154,17 @@ static struct wl_buffer *gpu_wayland_buffer(uint64_t generation, uint64_t *token
     struct wl_buffer *buffer = zwp_linux_buffer_params_v1_create_immed(
         params, frame.width, frame.height, frame.format, 0);
     if (!buffer) die("dmabuf wl_buffer creation failed");
+#ifdef DIAGNOSTIC_INVALID_IMPORT
+    uint32_t expected = wl_proxy_get_id((struct wl_proxy *)params);
+    if (wl_display_roundtrip(display) < 0 && wl_display_get_error(display) == EPROTO) {
+        const struct wl_interface *interface = NULL;
+        uint32_t object = 0;
+        uint32_t code = wl_display_get_protocol_error(display, &interface, &object);
+        if (interface == &zwp_linux_buffer_params_v1_interface && object == expected)
+            gpu_invalid_refused("wayland", code, 0, 0, object);
+    }
+    gpu_die("invalid import did not produce its matching Wayland protocol error");
+#endif
     *retained = params; /* Keep failure listener through consumer release. */
     *token = frame.token;
     return buffer;

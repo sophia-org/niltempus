@@ -28,6 +28,14 @@ approval. No benchmark harness or qualification package is provided here.
 
 ## Import and ownership
 
+`wl-panel-gpu-invalid` and `x-panel-gpu-invalid` are separate one-frame import
+refusal diagnostics, never timed or colour-capture clients. Build them with
+`GPU_DIAGNOSTIC_BRIDGE` pointing to the pinned library. Build the
+`gpu-invalid-import-test`, `gpu-wl-invalid-test` and `gpu-x-invalid-test` targets,
+then run `python3 -I -B -W error tools/external-bar/test/gpu_invalid.py` for
+device-free FD-custody, error-identity and local-refusal controls. The native
+wrapper integration is still pending; the targets alone are not launch approval.
+
 Wayland binds linux-dmabuf **v4**, requests surface feedback and requires the main
 device and a tranche advertising XR24/LINEAR to resolve to the pinned PCI device.
 DRM primary/render node aliases are resolved through sysfs, not compared as

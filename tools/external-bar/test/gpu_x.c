@@ -23,6 +23,33 @@ xcb_void_cookie_t xcb_dri3_pixmap_from_buffers(xcb_connection_t *c, xcb_pixmap_t
 xcb_void_cookie_t xcb_free_pixmap(xcb_connection_t *c, xcb_pixmap_t pixmap) {
     (void)c; assert(pixmap); freed++; return (xcb_void_cookie_t){0};
 }
+#ifdef DIAGNOSTIC_INVALID_IMPORT
+static unsigned invalid_case;
+xcb_void_cookie_t xcb_dri3_pixmap_from_buffers_checked(xcb_connection_t *c, xcb_pixmap_t pixmap,
+    xcb_window_t win, uint8_t count, uint16_t w, uint16_t h, uint32_t stride, uint32_t offset,
+    uint32_t s1, uint32_t o1, uint32_t s2, uint32_t o2, uint32_t s3, uint32_t o3,
+    uint8_t depth, uint8_t bpp, uint64_t modifier, const int32_t *fds) {
+    xcb_dri3_pixmap_from_buffers(c, pixmap, win, count, w, h, stride, offset,
+        s1, o1, s2, o2, s3, o3, depth, bpp, modifier, fds);
+    return (xcb_void_cookie_t){.sequence=100};
+}
+xcb_generic_error_t *xcb_request_check(xcb_connection_t *c, xcb_void_cookie_t request) {
+    (void)c; assert(request.sequence == 100);
+    static xcb_generic_error_t e;
+    e = (xcb_generic_error_t){.error_code=2, .major_code=145,
+        .minor_code=XCB_DRI3_PIXMAP_FROM_BUFFERS, .full_sequence=100};
+    if (invalid_case == 1) return NULL;
+    if (invalid_case == 2) e.major_code++;
+    if (invalid_case == 3) e.minor_code++;
+    if (invalid_case == 4) e.full_sequence++;
+    return &e;
+}
+const xcb_query_extension_reply_t *xcb_get_extension_data(xcb_connection_t *c, xcb_extension_t *e) {
+    (void)c; assert(e == &xcb_dri3_id);
+    static const xcb_query_extension_reply_t reply = {.present=1, .major_opcode=145};
+    return invalid_case == 5 ? NULL : &reply;
+}
+#endif
 #ifdef DIAGNOSTIC_COLOUR_HOLD
 #include <xcb/present.h>
 #include "../gpu/hold.h"
@@ -121,6 +148,21 @@ static void refusal(unsigned which) {
     assert(WIFEXITED(status) && WEXITSTATUS(status)==2);
 }
 int main(void) {
+#ifdef DIAGNOSTIC_INVALID_IMPORT
+    for (invalid_case = 0; invalid_case < 6; invalid_case++) {
+        pid_t child = fork(); assert(child >= 0);
+        if (!child) {
+            FILE *j = tmpfile(); assert(j); gpu_open(j, "fixture");
+            struct back b = {0}; struct ctx c = {.win=9};
+            gpu_x_paint(&c, &b, 1);
+            _exit(99);
+        }
+        int status; assert(waitpid(child, &status, 0) == child);
+        assert(WIFEXITED(status) && WEXITSTATUS(status) == (invalid_case ? 2 : 42));
+    }
+    puts("X invalid-import identity controls passed; synthetic errors, no display/GPU");
+    return 0;
+#endif
     for (unsigned i=0;i<12;i++) refusal(i);
     FILE *j=tmpfile(); assert(j); gpu_open(j,"test");
     struct back backs[2]={0};

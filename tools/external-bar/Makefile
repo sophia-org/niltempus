@@ -74,6 +74,21 @@ gpu-check: $(BUILD)/gpu-producer-test $(BUILD)/gpu-wl-test $(BUILD)/gpu-x-test
 	$(BUILD)/gpu-x-test
 .PHONY: all gpu gpu-check
 
+# Import refusal uses the grey producer, but cannot be used as a timed client.
+INVALID := gpu/invalid_import.c gpu/invalid_import.h
+$(BUILD)/gpu-invalid-import-test: test/gpu_invalid_import.c test/mock_bridge.c $(GPU_COMMON) $(INVALID) | $(BUILD)
+	$(CC) $(CFLAGS) -DDIAGNOSTIC_INVALID_IMPORT $(GPU_INC) -o $@ $< test/mock_bridge.c gpu/producer.c
+$(BUILD)/wl-panel-gpu-invalid: wl-panel/wl-panel.c wl-panel/output.h gpu/wayland.h $(GPU_COMMON) $(COMMON) $(INVALID) $(WL_GEN) $(BUILD)/linux-dmabuf.c $(BUILD)/linux-dmabuf.h $(GPU_DIAGNOSTIC_BRIDGE) | $(BUILD)
+	test -f "$(GPU_DIAGNOSTIC_BRIDGE)"
+	$(CC) $(CFLAGS) -std=c11 -DMATCHED_GPU -DDIAGNOSTIC_INVALID_IMPORT $(GPU_INC) -Icommon -o $@ $< common/fill.c gpu/producer.c gpu/invalid_import.c $(WL_GEN) $(BUILD)/linux-dmabuf.c $$(pkg-config --cflags --libs wayland-client) "$(GPU_DIAGNOSTIC_BRIDGE)" $(GPU_LIBS)
+$(BUILD)/x-panel-gpu-invalid: x-panel/x-panel.c gpu/x11.h $(GPU_COMMON) $(COMMON) $(INVALID) $(GPU_DIAGNOSTIC_BRIDGE) | $(BUILD)
+	test -f "$(GPU_DIAGNOSTIC_BRIDGE)"
+	$(CC) $(CFLAGS) -DMATCHED_GPU -DDIAGNOSTIC_INVALID_IMPORT $(GPU_INC) -o $@ $< common/fill.c gpu/producer.c gpu/invalid_import.c $$(pkg-config --cflags --libs $(X_PKGS) xcb-dri3) "$(GPU_DIAGNOSTIC_BRIDGE)" $(GPU_LIBS)
+$(BUILD)/gpu-wl-invalid-test: test/gpu_wayland.c test/mock_bridge.c wl-panel/wl-panel.c gpu/wayland.h $(GPU_COMMON) $(COMMON) $(INVALID) $(WL_GEN) $(BUILD)/linux-dmabuf.c $(BUILD)/linux-dmabuf.h | $(BUILD)
+	$(CC) $(CFLAGS) -std=c11 -DDIAGNOSTIC_INVALID_IMPORT $(GPU_INC) -Icommon -o $@ $< test/mock_bridge.c common/fill.c gpu/producer.c gpu/invalid_import.c $(WL_GEN) $(BUILD)/linux-dmabuf.c $$(pkg-config --cflags --libs wayland-client)
+$(BUILD)/gpu-x-invalid-test: test/gpu_x.c test/mock_bridge.c x-panel/x-panel.c gpu/x11.h $(GPU_COMMON) $(COMMON) $(INVALID) | $(BUILD)
+	$(CC) $(CFLAGS) -DDIAGNOSTIC_INVALID_IMPORT $(GPU_INC) -o $@ $< test/mock_bridge.c common/fill.c gpu/producer.c gpu/invalid_import.c $$(pkg-config --cflags --libs $(X_PKGS) xcb-dri3)
+
 # Separate diagnostic clients; never replace the timed or frozen CPU binaries.
 HOLD := gpu/hold.c gpu/hold.h
 $(BUILD)/wl-panel-gpu-hold: wl-panel/wl-panel.c wl-panel/output.h gpu/wayland.h $(GPU_COMMON) $(COMMON) $(HOLD) $(WL_GEN) $(BUILD)/linux-dmabuf.c $(BUILD)/linux-dmabuf.h $(GPU_DIAGNOSTIC_BRIDGE) | $(BUILD)

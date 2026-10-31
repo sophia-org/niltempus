@@ -553,8 +553,9 @@ They do not turn a synthetic fixture into native evidence.
 
 No authenticated native environment/capture result exists yet. Preserve the
 receiver's separate signed release receipt and the host feature closure. Real
-import/refusal/lifetime controls remain before an attended sealed GPU package;
-CPU direct-fill design/adoption now takes priority over further GPU work.
+import/refusal/lifetime controls remain before an attended sealed GPU package.
+The bounded CPU dirty-update closeout is now merged; this untimed qualification
+is the next gate, with all earlier releases and evidence held.
 
 
 ## Refusal, lifetime and cleanup controls
@@ -566,6 +567,27 @@ place of the export FD). The consumer must report an actual import/protocol erro
 with no fallback. A local layout refusal or a timeout is not evidence of a real
 consumer refusal. Preserve the real export until the failing process exits;
 never issue an invented release or continue the failed instance.
+
+The separate `wl-panel-gpu-invalid` and `x-panel-gpu-invalid` targets implement
+the external injection. They require one frame, zero warmup and the existing
+fixed GPU recipe. After the normal grey render/export and layout checks, they
+retain the real descriptor and bridge frame and send a size-sealed non-DMA
+memfd of the same backing length, without changing the plane metadata. They
+never submit a second frame or release the real export. Wayland uses the same
+`create_immed`, then a diagnostic round trip and requires the error's interface
+and object id to name those params. X uses the checked form of the same
+PixmapFromBuffers request and requires its exact sequence, extension opcode
+and request opcode. An unexpected acceptance, local failure or timeout fails
+the control. No invalid buffer is deliberately presented.
+
+Only a matching consumer error emits `gpu_invalid_import_refused` and exits
+42; other failures retain the ordinary error exit. `qualify_import_refusal`
+binds that status to the unique, ordered injection/refusal records and token.
+These self-reported records still need the wrapper's real process, consumer,
+artifact and cleanup proofs. The device-free tests use mock exports and
+synthetic protocol errors; they do not prove a native consumer refusal.
+The Sophia equivalent, native wrapper integration and delayed-event control
+remain required before sealing the complete qualification package.
 
 On success, stop submissions, detach the last Wayland buffer and drain exact
 release events; X drains matching IdleNotify; Sophia drains its source/resource
