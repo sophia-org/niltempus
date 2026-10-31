@@ -12,6 +12,13 @@ PREPARED = PRESENTED - {'presentation_epoch', 'connection_epoch', 'content_grant
 STARTUP = {arm: 'lom_renderer schema=1 renderer=vello-cpu source=owned-ring-' + source +
            ' gpu=not-used diagnostic=cpu-reference'
            for arm, source in [('direct', 'fill'), ('copy', 'copy')]}
+ARMS = {arm: (24, True) for arm in STARTUP}
+for height in (24, 512):
+    for policy in ('on', 'off'):
+        arm = f'hash-{policy}-{height}'
+        ARMS[arm] = (height, policy == 'on')
+        STARTUP[arm] = STARTUP['direct'] if policy == 'on' else (
+            'lom_renderer schema=1 renderer=vello-cpu source=owned-ring-fill gpu=not-used')
 
 
 def rows(text, tag):
@@ -39,7 +46,8 @@ def positive(value):
 
 def snapshot(log, arm):
     if arm not in STARTUP:
-        raise ValueError('expected direct or copy arm')
+        raise ValueError('expected a declared static arm')
+    height, hashed = ARMS[arm]
     text = log.decode('utf-8')
     if [line for line in text.splitlines() if 'lom_renderer' in line] != [STARTUP[arm]]:
         raise ValueError('wrong diagnostic renderer')
@@ -47,6 +55,9 @@ def snapshot(log, arm):
         raise ValueError('wrong Lom transport')
     if 'lom_gpu_admission' in text or 'sophia_shell_work_stats' in text:
         raise ValueError('GPU admission or instrumentation present')
+    if any(rows(text, tag) for tag in ('lom_cadence', 'lom_cadence_sample',
+                                      'lom_cadence_final', 'lom_checksum_policy')):
+        raise ValueError('cadence instrumentation in static capture')
     components = rows(text, 'sophia_shell_component')
     if components != [dict(schema='1', status='negotiated', slot='0', role='bar',
                            connection_epoch='1', content_grant_epoch='1', revision='10',
@@ -66,10 +77,12 @@ def snapshot(log, arm):
     if len(candidates) != 1 or candidates[0].keys() != CANDIDATE:
         raise ValueError('expected exactly one Lom candidate')
     candidate = candidates[0]
-    if (any(candidate[k] != v for k,v in dict(schema='1', status='presented',
+    if (any(candidate[k] != v for k,v in dict(schema='1' if hashed else '2', status='presented',
             connection_epoch='1', content_grant_epoch='1', output=head['output'],
-            candidate_generation='1', width='1920', height='24', bytes='184320', raster_source='rendered').items())
-            or re.fullmatch('[0-9a-f]{16}', candidate['checksum']) is None):
+            candidate_generation='1', width='1920', height=str(height), bytes=str(1920*height*4),
+            raster_source='rendered').items())
+            or (re.fullmatch('[0-9a-f]{16}', candidate['checksum']) is None if hashed
+                else candidate['checksum'] != 'unavailable')):
         raise ValueError('wrong opaque static candidate')
     positive(candidate['presentation_epoch'])
     positive(candidate['indicator_generation'])
@@ -87,6 +100,9 @@ def snapshot(log, arm):
             raise ValueError('noncanonical owner record')
         if row['output'] != candidate['output'] or row['candidate_generation'] != '1':
             raise ValueError('owner candidate mismatch')
+        if (row['resident_bytes'] != candidate['bytes'] or row['backing_bytes'] != candidate['bytes']
+                or row['staging_bytes'] != '0' or row['retiring_bytes'] != '0'):
+            raise ValueError('owner allocation differs from static strip')
     if any(host[2][k] != candidate[k] for k in ['connection_epoch','content_grant_epoch','presentation_epoch']):
         raise ValueError('owner/client presentation mismatch')
     indicators = rows(text, 'sophia_shell_indicator_state')
@@ -105,7 +121,7 @@ def snapshot(log, arm):
             raise ValueError('unexpected sampling diagnostic prefix')
         sampling.extend(rows(tag + record, tag))
     common = dict(status='active', requested='exact_nearest', effective='exact_nearest',
-                  alpha_mode='premultiplied', source='1920x24', target='1920x24')
+                  alpha_mode='premultiplied', source=f'1920x{height}', target=f'1920x{height}')
     contract = dict(common, schema='3', output=head['output'], head=head['head'], frame='1920x1080')
     if not sampling:
         raise ValueError('missing exact-nearest sampling evidence')

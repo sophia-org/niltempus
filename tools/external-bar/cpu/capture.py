@@ -52,9 +52,11 @@ def capture(expected, session, directory, deadline, evidence):
                 raise ValueError('private capture refused')
             if 'json' in groups.get(generation, set()):
                 checksum = held['candidate']['checksum']
+                height, hashed = static.ARMS[expected['arm']]
                 result = r.verify_delivery(directory, generation,
                     dict(output=output, output_generation=expected['output_generation']),
-                    session.identity, lambda pam: pixels.check(pam, checksum))
+                    session.identity, lambda pam: pixels.check(pam, checksum, height) if hashed
+                    else pixels.capture_strip(pam, height))
                 after, after_identity = c.log_bytes(expected['session_log'])
                 if after_identity != log_identity or not after.startswith(before):
                     raise ValueError('Session log replaced or truncated')

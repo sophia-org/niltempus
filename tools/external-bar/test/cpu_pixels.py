@@ -66,6 +66,41 @@ class Pixels(unittest.TestCase):
         data[-1] = 1
         self.assertEqual(p.check(data, self.checksum)['bar_bgra_sha256'], hashlib.sha256(self.bgra).hexdigest())
 
+    def test_capture_without_checksum_never_claims_a_producer_match(self):
+        result = p.capture_strip(self.pam)
+        self.assertEqual(result['status'], 'opaque_strip_captured')
+        self.assertIsNone(result['produced_fnv64'])
+        self.assertEqual(result['bar_bgra_sha256'], hashlib.sha256(self.bgra).hexdigest())
+        with self.assertRaisesRegex(ValueError, 'canonical'):
+            p.check(self.pam, None)
+        for height in [0, 25, 1080, True, '24']:
+            with self.subTest(height=height), self.assertRaisesRegex(ValueError, 'strip height'):
+                p.capture_strip(self.pam, height)
+
+    def test_large_strip_checks_every_pixel_and_excludes_the_rest(self):
+        rgba = b''.join(bytes((y & 255, x & 255, (y+37) & 255, 255))
+                        for y in range(512) for x in range(p.WIDTH))
+        bgra = b''.join(bytes(((y+37) & 255, x & 255, y & 255, 255))
+                        for y in range(512) for x in range(p.WIDTH))
+        pam = p.HEADER + rgba + bytes(p.WIDTH*(p.HEIGHT-512)*4)
+        checksum = p.fnv64(bgra)
+        self.assertEqual(p.strip(pam, 512), bgra)
+        result = p.check(pam, checksum, 512)
+        self.assertEqual(result['checked_pixels'], 983040)
+        self.assertEqual(result['bar_bgra_sha256'], hashlib.sha256(bgra).hexdigest())
+        for pixel in [24*p.WIDTH, 511*p.WIDTH+959, 512*p.WIDTH-1]:
+            changed = bytearray(pam)
+            changed[len(p.HEADER)+pixel*4] ^= 1
+            with self.subTest(pixel=pixel), self.assertRaisesRegex(ValueError, 'differs from Lom'):
+                p.check(changed, checksum, 512)
+        changed = bytearray(pam)
+        changed[len(p.HEADER)+len(rgba)-1] = 254
+        with self.assertRaisesRegex(ValueError, 'opaque'):
+            p.capture_strip(changed, 512)
+        changed = bytearray(pam)
+        changed[len(p.HEADER)+len(rgba)] ^= 1
+        self.assertEqual(p.strip(changed, 512), bgra)
+
 
 if __name__ == '__main__':
     unittest.main()

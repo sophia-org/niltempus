@@ -26,7 +26,9 @@ def line(tag, **row):
     return tag+' '+' '.join(f'{k}={v}' for k,v in row.items())+'\n'
 
 
-def static_log(checksum, arm='direct'):
+def static_log(checksum, arm='direct', height=24):
+    hashed = not arm.startswith('hash-off-')
+    size = 1920 * height * 4
     text = line('sophia_live_native_head', schema=2,status='ready',output=7,head=9,connector='DP-1',
                 connector_id=93,mode='1920x1080',refresh_millihz=60000,mirrored='false')
     text += line('sophia_shell_component',schema=1,status='negotiated',slot=0,role='bar',connection_epoch=1,
@@ -39,15 +41,15 @@ def static_log(checksum, arm='direct'):
                  connection_epoch=1,content_grant_epoch=1)
     for status in ['prepared','presented']:
         row = dict(schema=1,status=status,output=7,candidate_generation=1,staging_bytes=0,
-                   resident_bytes=184320,retiring_bytes=0,backing_bytes=184320)
+                   resident_bytes=size,retiring_bytes=0,backing_bytes=size)
         if status == 'presented':
             row.update(presentation_epoch=4,connection_epoch=1,content_grant_epoch=1)
         text += line('sophia_live_shell_content',**row)
-    text += line('lom_panel_candidate',schema=1,status='presented',connection_epoch=1,content_grant_epoch=1,
+    text += line('lom_panel_candidate',schema=1 if hashed else 2,status='presented',connection_epoch=1,content_grant_epoch=1,
                  output=7,candidate_generation=1,presentation_epoch=4,indicator_generation=2,width=1920,
-                 height=24,bytes=184320,checksum=checksum,raster_source='rendered')
+                 height=height,bytes=size,checksum=checksum if hashed else 'unavailable',raster_source='rendered')
     common = dict(status='active',requested='exact_nearest',effective='exact_nearest',
-                  alpha_mode='premultiplied',source='1920x24',target='1920x24')
+                  alpha_mode='premultiplied',source=f'1920x{height}',target=f'1920x{height}')
     prefix = '2026-10-30T12:00:00.123Z  INFO sophia_renderer_native_egl::gl: '
     text += prefix+line('sophia_native_composition_sampling',schema=3,output=7,head=9,
                         scene_generation=1,frame='1920x1080',**common)
@@ -204,6 +206,70 @@ class Controller(unittest.TestCase):
         self.expected['arm']='copy'
         self.f.log.write_bytes(self.prefix+static_log(self.checksum,'copy'))
         self.assertEqual(self.capture(lambda *args:self.publish())['arm'],'copy')
+
+    def test_checksum_policy_capture_at_both_heights(self):
+        for height in (24, 512):
+            for policy in ('on', 'off'):
+                with self.subTest(height=height, policy=policy):
+                    case = Controller()
+                    case.setUp()
+                    self.addCleanup(case.doCleanups)
+                    arm = f'hash-{policy}-{height}'
+                    case.expected['arm'] = arm
+                    checksum = c.pixels.fnv64(c.pixels.strip(case.pam, height))
+                    case.f.log.write_bytes(case.prefix+static_log(checksum, arm, height))
+                    result = case.capture(lambda *args:case.publish(), seconds=5)
+                    pixels = result['capture']['pixels']
+                    self.assertEqual(pixels['region'], [0, 0, 1920, height])
+                    self.assertEqual(pixels['checked_pixels'], 1920*height)
+                    self.assertEqual(pixels['captured_bgra_fnv64'], checksum)
+                    if policy == 'off':
+                        self.assertEqual(pixels['status'], 'opaque_strip_captured')
+                        self.assertIsNone(pixels['produced_fnv64'])
+                        self.assertEqual(result['scene']['candidate']['checksum'], 'unavailable')
+                    else:
+                        self.assertEqual(pixels['status'], 'opaque_strip_checksum_match')
+                        self.assertEqual(pixels['produced_fnv64'], checksum)
+
+    def test_static_policy_does_not_accept_another_schema_or_height(self):
+        for height in (24, 512):
+            for policy in ('on', 'off'):
+                arm = f'hash-{policy}-{height}'
+                data = static_log(self.checksum, arm, height)
+                schema = b'1' if policy == 'on' else b'2'
+                wrong_schema = b'2' if policy == 'on' else b'1'
+                mutations = [
+                    (data.replace(b'lom_panel_candidate schema='+schema,
+                                  b'lom_panel_candidate schema='+wrong_schema), 'opaque static candidate'),
+                    (data.replace(b'checksum='+self.checksum.encode() if policy == 'on' else b'checksum=unavailable',
+                                  b'checksum=unavailable' if policy == 'on' else b'checksum='+self.checksum.encode()),
+                     'opaque static candidate'),
+                    (data.replace(f'height={height} bytes='.encode(), b'height=64 bytes='), 'opaque static candidate'),
+                    (data.replace(f'source=1920x{height}'.encode(), b'source=1920x64'), 'sampling path'),
+                    (data+b'lom_cadence schema=1 mode=redirty-after-presented quota=2120 diagnostic=cpu-reference\n',
+                     'cadence instrumentation'),
+                ]
+                for changed, message in mutations:
+                    with self.subTest(arm=arm, message=message), self.assertRaisesRegex(ValueError, message):
+                        c.static.snapshot(changed, arm)
+                wrong = f'hash-{"off" if policy == "on" else "on"}-{height}'
+                with self.subTest(arm=arm), self.assertRaisesRegex(ValueError, 'wrong diagnostic renderer'):
+                    c.static.snapshot(data, wrong)
+
+    def test_static_owner_allocation_matches_the_whole_strip(self):
+        for height in (24, 512):
+            arm = f'hash-off-{height}'
+            data = static_log(self.checksum, arm, height)
+            for phase in ('prepared', 'presented'):
+                for field in ('resident_bytes', 'backing_bytes', 'staging_bytes', 'retiring_bytes'):
+                    rows = data.decode().splitlines(keepends=True)
+                    for index, row in enumerate(rows):
+                        if row.startswith('sophia_live_shell_content schema=1 status='+phase+' '):
+                            old = 1920*height*4 if field in ('resident_bytes', 'backing_bytes') else 0
+                            rows[index] = row.replace(f'{field}={old}', f'{field}={old+1}')
+                    with self.subTest(height=height, phase=phase, field=field):
+                        with self.assertRaisesRegex(ValueError, 'owner allocation differs'):
+                            c.static.snapshot(''.join(rows).encode(), arm)
 
     def test_snapshot_mutations_refuse(self):
         data=static_log(self.checksum)
