@@ -64,6 +64,7 @@ pub(super) fn offer(
     metadata: ProducerMetadata,
     grant: ContentGrant,
     resource: ContentResourceId,
+    control: &mut super::hold::Control,
 ) -> Result<()> {
     // Even errors leave the real export allocated until this diagnostic exits.
     let frame = ManuallyDrop::new(frame);
@@ -92,6 +93,8 @@ pub(super) fn offer(
         status.status,
         status.reason
     ));
+    // Keep the export and peer alive until Session shutdown; no restart race.
+    control.finish_one_shot(wire)?;
     std::process::exit(42);
 }
 

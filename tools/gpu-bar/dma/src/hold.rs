@@ -110,13 +110,37 @@ fn ack(line: &[u8], generation: u64, nonce: &str) -> Result<()> {
     Ok(())
 }
 
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum OneShot {
+    Invalid,
+    Delay,
+}
+
+#[derive(Serialize)]
+struct ControlReady<'a> {
+    schema: u8,
+    status: &'static str,
+    kind: OneShot,
+    connection_epoch: u64,
+    content_grant_epoch: u64,
+    output: u64,
+    shell_output_generation: u64,
+    nonce: &'a str,
+}
+
 pub(super) struct Control {
     socket: UnixStream,
     next: u64,
+    one_shot: Option<OneShot>,
 }
 
 impl Control {
     pub(super) fn connect(shell: &std::ffi::OsStr, wire: &mut Wire) -> Result<Self> {
+        Self::connect_named(shell, wire, "gpu_colour_hold")
+    }
+
+    fn connect_named(shell: &std::ffi::OsStr, wire: &mut Wire, tag: &str) -> Result<Self> {
         let shell = Path::new(shell);
         let parent = shell.parent().ok_or("shell endpoint lacks parent")?;
         let endpoint = parent.join("hold.sock");
@@ -131,7 +155,7 @@ impl Control {
         )?;
         // Hint only. Parent independently finds Session's listener and derives hold.sock.
         super::canvas::diagnostic_line(format_args!(
-            "gpu_colour_hold schema=1 status=endpoint_hint shell_socket={}",
+            "{tag} schema=1 status=endpoint_hint shell_socket={}",
             shell.display()
         ));
         let deadline = Instant::now() + CONNECT;
@@ -160,7 +184,64 @@ impl Control {
             return Err("hold controller UID differs".into());
         }
         socket.set_nonblocking(true)?;
-        Ok(Self { socket, next: 1 })
+        Ok(Self {
+            socket,
+            next: 1,
+            one_shot: None,
+        })
+    }
+
+    pub(super) fn one_shot(
+        shell: &std::ffi::OsStr,
+        wire: &mut Wire,
+        kind: OneShot,
+        grant: ContentGrant,
+        output: ContentOutputId,
+    ) -> Result<Self> {
+        let mut control = Self::connect_named(shell, wire, "gpu_control")?;
+        control.one_shot = Some(kind);
+        let mut random = [0; 16];
+        std::fs::File::open("/dev/urandom")?.read_exact(&mut random)?;
+        let nonce: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+        let ready = ControlReady {
+            schema: 1,
+            status: "control_ready",
+            kind,
+            connection_epoch: grant.connection_epoch,
+            content_grant_epoch: grant.content_grant_epoch,
+            output: output.id,
+            shell_output_generation: output.generation,
+            nonce: &nonce,
+        };
+        let deadline = Instant::now() + CONNECT;
+        let mut bytes = serde_json::to_vec(&ready)?;
+        bytes.push(b'\n');
+        control.send(wire, &bytes, deadline)?;
+        control.wait_ack(wire, 1, &nonce, deadline)?;
+        Ok(control)
+    }
+
+    pub(super) fn finish_one_shot(&mut self, wire: &mut Wire) -> Result<()> {
+        let kind = self.one_shot.ok_or("not a one-shot controller")?;
+        if self.next != 2 {
+            return Err("one-shot control not armed or already complete".into());
+        }
+        #[derive(Serialize)]
+        struct Done {
+            schema: u8,
+            status: &'static str,
+            kind: OneShot,
+        }
+        let mut bytes = serde_json::to_vec(&Done {
+            schema: 1,
+            status: "control_done",
+            kind,
+        })?;
+        bytes.push(b'\n');
+        self.next = 3;
+        let deadline = Instant::now() + CONNECT;
+        self.send(wire, &bytes, deadline)?;
+        self.wait_shutdown(wire, deadline)
     }
 
     fn send(&mut self, wire: &mut Wire, bytes: &[u8], deadline: Instant) -> Result<()> {
@@ -217,6 +298,16 @@ impl Control {
         let mut bytes = serde_json::to_vec(&ready)?;
         bytes.push(b'\n');
         self.send(wire, &bytes, deadline)?;
+        self.wait_ack(wire, generation, &nonce, deadline)
+    }
+
+    fn wait_ack(
+        &mut self,
+        wire: &mut Wire,
+        generation: u64,
+        nonce: &str,
+        deadline: Instant,
+    ) -> Result<()> {
         let mut line = Vec::new();
         loop {
             if Instant::now() >= deadline {
@@ -239,7 +330,7 @@ impl Control {
                         if end + 1 != line.len() {
                             return Err("extra ACK bytes".into());
                         }
-                        ack(&line[..end], generation, &nonce)?;
+                        ack(&line[..end], generation, nonce)?;
                         self.next += 1;
                         return Ok(());
                     }
@@ -265,6 +356,10 @@ impl Control {
             b"{\"schema\":1,\"status\":\"done\",\"generation\":3}\n",
             deadline,
         )?;
+        self.wait_shutdown(wire, deadline)
+    }
+
+    fn wait_shutdown(&mut self, wire: &mut Wire, deadline: Instant) -> Result<()> {
         // Stay connected and service transport until the parent stops Session.
         // No fourth frame, timed sleep, synthetic resource release or restart request.
         loop {

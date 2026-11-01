@@ -593,14 +593,17 @@ recipe, with no hold/profiling/reuse. It keeps the completed export in
 never releases or forgets the real export. Local SDK refusal does not qualify.
 Only a Session ResourceStatus for the exact grant and resource, status 3 with
 Malformed or RendererFailed reason and zero admitted bytes/ordinal, emits the
-expected refusal and exits 42. Its marker includes the offer and grant/resource
+expected refusal. Its marker includes the offer and grant/resource
 identities. Malformed is remote protocol rejection, not proof of an attempted
 GPU import; the reason must remain visible in the package result. The Session
-may restart failed peers, so the wrapper must stop on the first outcome and
-refuse duplicate injections rather than treating a restart as another attempt.
+may restart failed peers immediately, so the diagnostic now keeps the export
+and peer alive on its authenticated control channel until Session shuts down.
+It then requests exit 42; the wrapper does not independently observe that peer
+exit code and makes no exit-code qualification claim. The matched remote status,
+live peer binding and retained export are the refusal proof. Duplicate hints,
+injections or results refuse instead of becoming another attempt.
 
-Native wrapper integration remains required before sealing the complete
-qualification package.
+The wrappers remain device-free source qualifications until the attended gate.
 
 The external colour wrapper accepts an explicit `controls` map with `delay`
 and `invalid` artifact pins. These must have distinct paths and hashes from
@@ -613,7 +616,27 @@ the three delay records and a complete one-frame journal; invalid requires
 exit 42 and the matching injection/refusal records. The handoff pins both new
 artifacts before privilege transitions and rechecks their saved results during
 cleanup reduction. Omitting `controls` retains the colour-only wrapper and is
-not a complete qualification. Sophia control wrapper integration is still pending.
+not a complete qualification.
+
+For Sophia, `sophia_recipe.py` accepts an exact `control` of `delay` or `invalid`
+and generates a one-frame peer config. The colour recipe stays three frames.
+Each control uses a separate Session and the same host/output/environment
+checks. `gpu_control` publishes only a shell-socket hint; the driver independently
+finds Session's listener and reuses the private hold listener and SO_PEERPIDFD
+binding of the peer, its supervisor and Session. A fresh nonce challenge must be
+acknowledged before the peer exports/offers its frame. This is not a Presented
+record. The one-shot result is checked against the exact source records, grant,
+resource and output. Delay also requires one completed Presented candidate;
+invalid must have no acceptance or presentation. The driver waits for both
+stdout and stderr records to drain, because DONE uses a separate socket.
+
+The peer remains connected after DONE. The wrapper first checks Session's
+authenticated output/renderer readback, then stops Session; the driver must
+observe Session exit and an unchanged proof. This follows the colour teardown
+ordering and avoids a peer-restart race. The same bounded transport wait, ACK
+parser and shutdown wait serve both protocols. No consumer release is invented.
+Saved-data cleanup repeats the record reduction and checks executable identities
+and log prefixes. These controls do not capture pixels or produce CPU samples.
 
 On success, stop submissions, detach the last Wayland buffer and drain exact
 release events; X drains matching IdleNotify; Sophia drains its source/resource

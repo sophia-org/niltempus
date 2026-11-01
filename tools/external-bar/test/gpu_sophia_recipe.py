@@ -62,6 +62,16 @@ class SophiaRecipe(unittest.TestCase):
         self.assertIn('--max-runtime-ms=280000', self.recipe['argv'])
         self.assertFalse(any('retire-on-present' in a or 'diagnostic-capture-directory' in a for a in self.recipe['argv']))
 
+    def test_one_shot_recipe_uses_one_frame_and_exact_control(self):
+        for kind in ('delay','invalid'):
+            directory=self.root/kind
+            recipe=s.prepare(dict(self.inputs,control=kind),directory)
+            self.assertEqual(recipe['control'],kind)
+            self.assertEqual(s.verify(directory),recipe)
+            self.assertEqual(json.loads((directory/'peer.json').read_text()),dict(s.PEER,frames=1))
+        for kind in ('colour',None,1,True):
+            with self.assertRaises(ValueError):s.validate(dict(self.inputs,control=kind))
+
     def test_missing_extra_wrong_type_and_artifact_drift_refuse(self):
         bad = []
         for key in s.ARTIFACTS:
@@ -150,7 +160,10 @@ class SophiaRecipe(unittest.TestCase):
         finally:
             fixture.tearDown();fixture.doCleanups()
 
-    def test_sophia_cleanup_requires_terminal_driver_and_exact_exits(self):
+    def test_sophia_cleanup_requires_terminal_driver_and_exact_exits(self, control=None):
+        if control:
+            self.directory=self.root/'control-config'
+            self.recipe=s.prepare(dict(self.inputs,control=control),self.directory)
         fixture=hf.Handoff();fixture.setUp()
         try:
             fixture.receipts();base,run=fixture.base,fixture.run
@@ -162,6 +175,27 @@ class SophiaRecipe(unittest.TestCase):
             values={run/'result.json':result,run/'cleanup.json':local,
                     run/'driver/result.json':dict(schema=1,status='session_exited_after_captures'),
                     run/'driver/captures_verified.json':dict(schema=1,status='captures_verified',records=[{}, {}, {}])}
+            if control:
+                cf=load('control_fixture',ROOT/'test/gpu_sophia_control.py')
+                ready=dict(cf.ready(control),output=1)
+                before=cf.initial(control)
+                completed=before+cf.body(control).replace(b'"output":7',b'"output":1')
+                (run/'session.log').write_bytes(completed)
+                (run/'driver/before-ack.log').write_bytes(before)
+                (run/'driver/completed.log').write_bytes(completed)
+                proof=cf.s.qualify(completed,control,ready)
+                observed={}
+                for role in ('peer','supervisor'):
+                    stat=Path(self.recipe[role]['executable']).stat()
+                    observed[role+'_executable']=dict(self.recipe[role],dev=stat.st_dev,ino=stat.st_ino)
+                value=dict(schema=1,status='control_verified',control=control,ready=ready,proof=proof,
+                           ack=dict(schema=1,status='ack',generation=1,nonce=ready['nonce']),
+                           done=dict(schema=1,status='control_done',kind=control),
+                           peer_pid=125,peer_starttime=3,supervisor_pid=126,supervisor_starttime=4,**observed)
+                del values[run/'driver/captures_verified.json']
+                values[run/'driver/control_verified.json']=value
+                values[run/'driver/result.json']=dict(schema=1,status='session_exited_after_control')
+                result.update(control=control,control_verified_sha256=hashlib.sha256(json.dumps(value).encode()).hexdigest())
             raw=ef.data()
             environment=dict(schema=1,status='startup_environment_verified',receiver_exit=0,
                 host=dict(self.pin,pid=123,starttime=1),
@@ -181,8 +215,13 @@ class SophiaRecipe(unittest.TestCase):
                    (run/'result.json',lambda v:v.update(host_argv=[])),
                    (run/'cleanup.json',lambda v:v.update(host_forced=True)),
                    (run/'cleanup.json',lambda v:v.update(host_exit=False)),
-                   (run/'driver/result.json',lambda v:v.update(status='running')),
-                   (run/'driver/captures_verified.json',lambda v:v.update(records=[{},{}]))]
+                   (run/'driver/result.json',lambda v:v.update(status='running'))]
+            if control:
+                cases += [(run/'result.json',lambda v:v.update(control='foreign')),
+                          (run/'result.json',lambda v:v.update(control_verified_sha256='0'*64)),
+                          (run/'driver/control_verified.json',lambda v:v['proof'].update(status='made_up'))]
+            else:
+                cases.append((run/'driver/captures_verified.json',lambda v:v.update(records=[{},{}])))
             for path,change in cases:
                 value=copy.deepcopy(values[path]);change(value);path.write_text(json.dumps(value))
                 with self.assertRaises(ValueError):h.qualify_cleanup(base)
@@ -196,6 +235,12 @@ class SophiaRecipe(unittest.TestCase):
             with self.assertRaises(ValueError):h.qualify_cleanup(base)
         finally:
             fixture.tearDown();fixture.doCleanups()
+
+    def test_one_shot_cleanup_rechecks_saved_remote_proof_and_binding(self):
+        self.test_sophia_cleanup_requires_terminal_driver_and_exact_exits(control='invalid')
+
+    def test_delayed_release_cleanup_rechecks_saved_remote_proof_and_binding(self):
+        self.test_sophia_cleanup_requires_terminal_driver_and_exact_exits(control='delay')
 
 
 if __name__ == '__main__':

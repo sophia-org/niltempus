@@ -224,9 +224,11 @@ class Hold(unittest.TestCase):
             os.close(notification)
             os.close(directory)
 
-    def wrapper_case(self, output):
+    def wrapper_case(self, output, control=None):
         recipe=dict(schema=1,host=self.pin,peer=self.pin,supervisor=self.pin,
                     argv=['session','run','--output-environment-readback'],output_generation=1,environment_receiver=self.pin)
+        if control:
+            recipe['control']=control
         real=subprocess.Popen
         children=[]
         fake_driver=r'''
@@ -235,8 +237,10 @@ from pathlib import Path
 root=Path(sys.argv[1]); expected=json.loads((root/'expected.json').read_text())
 fd=os.pidfd_open(expected['session']['pid'])
 d=root/'driver'; d.mkdir(mode=0o700)
-p=d/'captures_verified.partial'; p.write_text(json.dumps(dict(status='captures_verified',records=[dict(ready=dict(output=int(sys.argv[2]))) for _ in range(3)])))
-p.rename(d/'captures_verified.json')
+kind=expected.get('control')
+name='control_verified' if kind else 'captures_verified'
+value=dict(status='control_verified',control=kind,ready=dict(output=int(sys.argv[2]))) if kind else dict(status='captures_verified',records=[dict(ready=dict(output=int(sys.argv[2]))) for _ in range(3)])
+p=d/(name+'.partial'); p.write_text(json.dumps(value)); p.rename(d/(name+'.json'))
 assert select.select([fd],[],[],5)[0]
 '''
         def popen(argv,**kwargs):
@@ -259,6 +263,9 @@ assert select.select([fd],[],[],5)[0]
                 result=w.run(recipe,self.f.root/'wrapper')
                 self.assertEqual(result['status'],'driver_completed')
                 self.assertEqual(result['host_exit'],-signal.SIGTERM)
+                if control:
+                    self.assertEqual(result['control'],control)
+                    self.assertEqual(result['control_verified_sha256'],hashlib.sha256((self.f.root/'wrapper/driver/control_verified.json').read_bytes()).hexdigest())
             else:
                 with self.assertRaisesRegex(ValueError,'different outputs'):
                     w.run(recipe,self.f.root/'wrapper')
@@ -272,5 +279,11 @@ assert select.select([fd],[],[],5)[0]
 
     def test_wrapper_refuses_capture_of_another_readback_output(self):
         self.wrapper_case(2)
+
+    def test_wrapper_stops_host_after_one_shot_result(self):
+        self.wrapper_case(1,'invalid')
+
+    def test_wrapper_refuses_one_shot_for_another_output(self):
+        self.wrapper_case(2,'delay')
 
 if __name__=='__main__': unittest.main()

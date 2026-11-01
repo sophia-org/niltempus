@@ -1,6 +1,33 @@
 use super::*;
 
 #[test]
+fn one_shot_ready_has_no_presentation_or_colour_claim() {
+    let nonce = "0123456789abcdef0123456789abcdef";
+    for (kind, label) in [(OneShot::Invalid, "invalid"), (OneShot::Delay, "delay")] {
+        let value = ControlReady {
+            schema: 1,
+            status: "control_ready",
+            kind,
+            connection_epoch: 2,
+            content_grant_epoch: 3,
+            output: 7,
+            shell_output_generation: 90,
+            nonce,
+        };
+        assert_eq!(
+            serde_json::to_string(&value).unwrap(),
+            format!(
+                r#"{{"schema":1,"status":"control_ready","kind":"{label}","connection_epoch":2,"content_grant_epoch":3,"output":7,"shell_output_generation":90,"nonce":"{nonce}"}}"#
+            )
+        );
+        let good = format!(r#"{{"schema":1,"status":"ack","generation":1,"nonce":"{nonce}"}}"#);
+        ack(good.as_bytes(), 1, nonce).unwrap();
+        assert!(ack(good.as_bytes(), 2, nonce).is_err());
+        assert!(ack(good.as_bytes(), 1, "foreign").is_err());
+    }
+}
+
+#[test]
 fn diagnostic_recipe_is_separate_and_bounded() {
     let text =
         r#"{"wire":"files","output":1,"frames":3,"height":24,"hold_msec":0,"source":"dma_buf"}"#;
@@ -44,6 +71,7 @@ fn ack_is_for_one_ready_challenge_not_elapsed_time() {
 }
 
 #[test]
+#[cfg(feature = "diagnostic-colour-hold")]
 fn colour_scene_refuses_any_other_geometry_or_generation() {
     use super::super::canvas::gpu_scene as scene;
     let _ordinary = scene::scene(1920, 24, 7);

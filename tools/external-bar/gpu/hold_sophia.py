@@ -85,9 +85,11 @@ class Peer:
             os.close(self.supervisor_fd)
 
 
-def shell_endpoint(log, session):
-    hints = [line for line in log.decode().splitlines() if 'gpu_colour_hold ' in line]
-    prefix = 'gpu_colour_hold schema=1 status=endpoint_hint shell_socket='
+def shell_endpoint(log, session, tag='gpu_colour_hold'):
+    if tag not in ('gpu_colour_hold', 'gpu_control'):
+        raise ValueError('unknown diagnostic endpoint tag')
+    hints = [line for line in log.decode().splitlines() if tag+' ' in line]
+    prefix = tag+' schema=1 status=endpoint_hint shell_socket='
     if len(hints) != 1 or not hints[0].startswith(prefix):
         raise ValueError('need one diagnostic peer hint')
     owned = set()
@@ -338,10 +340,19 @@ def main():
         if len(data) > 16384:
             raise ValueError('driver input too large')
         expected = r.record(data)
-        if (type(expected) is not dict or expected.keys() != {'schema', 'session', 'session_log',
-                'delivery_directory', 'output_generation', 'peer', 'supervisor'}
+        keys = {'schema', 'session', 'session_log', 'delivery_directory', 'output_generation', 'peer', 'supervisor'}
+        if (type(expected) is not dict or expected.keys() not in (keys, keys|{'control'})
                 or type(expected['schema']) is not int or expected['schema'] != 1):
             raise ValueError('invalid driver input')
+        single = None
+        if 'control' in expected:
+            if expected['control'] not in ('delay', 'invalid'):
+                raise ValueError('unknown one-shot control')
+            spec = importlib.util.spec_from_file_location('control_sophia', Path(__file__).with_name('control_sophia.py'))
+            single = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(single)
+        tag = 'gpu_control' if single else 'gpu_colour_hold'
+        verified_name = 'control_verified' if single else 'captures_verified'
         r.uint(expected['output_generation'], True)
         pin_artifact(expected['peer'])
         pin_artifact(expected['supervisor'])
@@ -356,8 +367,8 @@ def main():
                 if str(error) != 'no bounded complete Session log prefix' or Path(expected['session_log']).stat().st_size > c.LIMIT:
                     raise
                 log = b''
-            if b'gpu_colour_hold ' in log:
-                endpoint = shell_endpoint(log, session)
+            if (tag+' ').encode() in log:
+                endpoint = shell_endpoint(log, session, tag)
                 break
             wait([notification], session, deadline)
             try:
@@ -369,15 +380,15 @@ def main():
         connection, _ = listener.socket.accept()
         connection.setblocking(False)
         peer = Peer(connection, session, expected['peer'], expected['supervisor'])
-        result = drive(connection, peer, expected, evidence)
+        result = (single.drive if single else drive)(connection, peer, expected, evidence)
         listener.close()  # Before the wrapper stops Session or its endpoint directory.
         listener = None
-        terminal = evidence / 'captures_verified.partial'
+        terminal = evidence / (verified_name+'.partial')
         with terminal.open('x') as file:
             file.write(json.dumps(result, indent=2) + '\n')
             file.flush()
             os.fsync(file.fileno())
-        terminal.rename(evidence / 'captures_verified.json')
+        terminal.rename(evidence / (verified_name+'.json'))
         # The wrapper owns shutdown. Keep the peer channel alive until Session exits.
         deadline = time.monotonic() + 30
         while True:
@@ -388,10 +399,15 @@ def main():
             if notification in events:
                 os.read(notification, 65536)
             log, _ = c.log_bytes(expected['session_log'])
-            peer_log(log, result['records'][-1]['ready'])
+            if single:
+                if single.qualify(log,expected['control'],result['ready']) != result['proof']:
+                    raise ValueError('one-shot proof changed during shutdown')
+            else:
+                peer_log(log, result['records'][-1]['ready'])
             if session.fd in events:
                 break
-        (evidence / 'result.json').write_text(json.dumps({'schema': 1, 'status': 'session_exited_after_captures'}) + '\n')
+        (evidence / 'result.json').write_text(json.dumps({'schema': 1,
+            'status': 'session_exited_after_control' if single else 'session_exited_after_captures'}) + '\n')
     except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as error:
         (evidence / 'refused.json').write_text(json.dumps({'schema': 1, 'status': 'refused', 'reason': str(error), 'retry': False}) + '\n')
         raise SystemExit(1)

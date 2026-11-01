@@ -21,9 +21,12 @@ spec.loader.exec_module(h)
 
 
 def validate(value):
-    if (type(value) is not dict or value.keys() != {'schema', 'host', 'argv', 'peer', 'supervisor', 'output_generation', 'environment_receiver'}
+    keys = {'schema', 'host', 'argv', 'peer', 'supervisor', 'output_generation', 'environment_receiver'}
+    if (type(value) is not dict or value.keys() not in (keys,keys|{'control'})
             or type(value['schema']) is not int or value['schema'] != 1):
         raise ValueError('invalid wrapper recipe')
+    if 'control' in value and value['control'] not in ('delay','invalid'):
+        raise ValueError('unknown one-shot control')
     h.r.uint(value['output_generation'], True)
     for name in ('host', 'peer', 'supervisor', 'environment_receiver'):
         h.pin_artifact(value[name])
@@ -68,6 +71,8 @@ def run(recipe, root):
     host_fd = driver_fd = directory = notification = None
     files = []
     collector = None
+    single = recipe.get('control')
+    verified_name = 'control_verified' if single else 'captures_verified'
     try:
         collector = environment_collector(recipe['environment_receiver'], root)
         log = session_log.open('xb')
@@ -83,6 +88,8 @@ def run(recipe, root):
         expected = {'schema': 1, 'session': dict(recipe['host'], pid=host.pid, starttime=h.c.snapshot(host.pid)),
                     'session_log': str(session_log), 'delivery_directory': str(root / 'captures'),
                     'output_generation': recipe['output_generation'], 'peer': recipe['peer'], 'supervisor': recipe['supervisor']}
+        if single:
+            expected['control'] = single
         path = root / 'expected.json'
         path.write_text(json.dumps(expected, indent=2) + '\n')
         directory = h.c.private_directory(str(root))
@@ -105,13 +112,18 @@ def run(recipe, root):
                     driver_notification = h.c.watch(driver_directory)
                 if (root / 'driver/refused.json').exists():
                     raise ValueError('driver refused; no retry')
-                if (root / 'driver/captures_verified.json').exists():
-                    with (root / 'driver/captures_verified.json').open('rb') as file:
+                if (root / 'driver' / (verified_name+'.json')).exists():
+                    with (root / 'driver' / (verified_name+'.json')).open('rb') as file:
                         terminal = h.r.record(file.read(65537))
-                    if terminal['status'] != 'captures_verified' or len(terminal['records']) != 3:
-                        raise ValueError('invalid driver terminal result')
-                    if any(record['ready']['output'] != int(environment['output']['output'])
-                           for record in terminal['records']):
+                    if single:
+                        if terminal['status']!='control_verified' or terminal['control']!=single:
+                            raise ValueError('invalid one-shot terminal result')
+                        readies = [terminal['ready']]
+                    else:
+                        if terminal['status'] != 'captures_verified' or len(terminal['records']) != 3:
+                            raise ValueError('invalid driver terminal result')
+                        readies = [record['ready'] for record in terminal['records']]
+                    if any(ready['output'] != int(environment['output']['output']) for ready in readies):
                         raise ValueError('captures and environment name different outputs')
                     break
                 if session_log.stat().st_size > h.c.LIMIT or any(p.stat().st_size > 4096 for p in (root / 'driver.stdout', root / 'driver.stderr')):
@@ -137,6 +149,9 @@ def run(recipe, root):
                   'driver_exit': driver.returncode, 'host_argv': command,
                   'environment_sha256': hashlib.sha256((root/'environment.json').read_bytes()).hexdigest(),
                   'limits': 'Local child exit only; full PAM/cgroup/device cleanup is a separate native gate.'}
+        if single:
+            result['control'] = single
+            result['control_verified_sha256'] = hashlib.sha256((root/'driver/control_verified.json').read_bytes()).hexdigest()
         (root / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
         return result
     except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as error:

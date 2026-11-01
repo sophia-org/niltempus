@@ -19,6 +19,8 @@ pub(super) struct Backing {
     pub(super) invalid_import: bool,
     #[cfg(feature = "diagnostic-release-delay")]
     pub(super) release_delay: bool,
+    #[cfg(feature = "diagnostic-control-channel")]
+    pub(super) control: Option<super::hold::Control>,
 }
 
 impl Backing {
@@ -32,6 +34,8 @@ impl Backing {
             invalid_import: false,
             #[cfg(feature = "diagnostic-release-delay")]
             release_delay: false,
+            #[cfg(feature = "diagnostic-control-channel")]
+            control: None,
         }
     }
 
@@ -119,7 +123,17 @@ pub(super) fn dma_frame(
     let source_bytes = frame.source_bytes();
     #[cfg(feature = "diagnostic-import-refusal")]
     if backing.invalid_import {
-        return super::invalid_import::offer(wire, frame, metadata, grant, resource);
+        return super::invalid_import::offer(
+            wire,
+            frame,
+            metadata,
+            grant,
+            resource,
+            backing
+                .control
+                .as_mut()
+                .ok_or("missing import-refusal controller")?,
+        );
     }
     let begun = wire.client.image_begin_dma_buf(
         metadata,

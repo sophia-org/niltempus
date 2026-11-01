@@ -40,10 +40,13 @@ def load(path):
 
 
 def validate(inputs):
-    if (type(inputs) is not dict or inputs.keys() != {'schema', 'artifacts', 'output_generation'}
+    keys = {'schema', 'artifacts', 'output_generation'}
+    if (type(inputs) is not dict or inputs.keys() not in (keys,keys|{'control'})
         or type(inputs['schema']) is not int or inputs['schema'] != 1
         or type(inputs['artifacts']) is not dict or inputs['artifacts'].keys() != ARTIFACTS):
         raise ValueError('exact Sophia diagnostic input set required')
+    if 'control' in inputs and inputs['control'] not in ('delay','invalid'):
+        raise ValueError('unknown one-shot control')
     wrapper.h.r.uint(inputs['output_generation'], True)
     for pin in inputs['artifacts'].values():
         wrapper.h.pin_artifact(pin)
@@ -94,9 +97,13 @@ def materialize(inputs, directory):
     recipe = dict(schema=1, host=a['host'], peer=a['peer'], supervisor=a['supervisor'],
                   environment_receiver=a['environment_receiver'],
                   output_generation=inputs['output_generation'], argv=argv)
+    peer = PEER
+    if 'control' in inputs:
+        recipe['control'] = inputs['control']
+        peer = dict(PEER,frames=1)
     wrapper.validate(recipe)
     return {'core.kdl': CORE, 'desktop.kdl': profile(a['peer']['executable'], directory/'peer.json'),
-            'peer.json': json.dumps(PEER, indent=2)+'\n',
+            'peer.json': json.dumps(peer, indent=2)+'\n',
             'recipe.json': json.dumps(recipe, indent=2)+'\n'}
 
 

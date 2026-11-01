@@ -11,8 +11,9 @@ autobins = false
 
 [features]
 diagnostic-colour-hold = ["rustix/event", "rustix/fs", "rustix/net", "rustix/process"]
-diagnostic-import-refusal = ["rustix/fs"]
-diagnostic-release-delay = []
+diagnostic-control-channel = ["rustix/event", "rustix/fs", "rustix/net", "rustix/process"]
+diagnostic-import-refusal = ["diagnostic-control-channel"]
+diagnostic-release-delay = ["diagnostic-control-channel"]
 
 [[bin]]
 name = "gpu-bar-dma"

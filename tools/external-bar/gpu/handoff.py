@@ -206,9 +206,38 @@ def qualify_cleanup(base):
                 *recipe['wrapper']['argv'], f'--diagnostic-capture-directory={run/"captures"}']
             or (run/'driver/refused.json').exists()):
             raise ValueError('Sophia local cleanup refused')
-        extra = [run/'driver/result.json', run/'driver/captures_verified.json']
+        single = recipe['wrapper'].get('control')
+        extra = [run/'driver/result.json', run/'driver'/('control_verified.json' if single else 'captures_verified.json')]
         terminal, captures = map(load, extra)
-        if (terminal.get('status') != 'session_exited_after_captures'
+        if single:
+            if (terminal.get('status')!='session_exited_after_control' or result.get('control')!=single
+                    or captures.get('status')!='control_verified' or captures.get('control')!=single
+                    or result.get('control_verified_sha256')!=sha(extra[1])):
+                raise ValueError('Sophia one-shot driver did not finish')
+            for role in ('peer','supervisor'):
+                identity = captures[role+'_executable']
+                live = w.h.pin_artifact(recipe['wrapper'][role])
+                if identity != dict(recipe['wrapper'][role],dev=live[0],ino=live[1]):
+                    raise ValueError('Sophia one-shot executable identity changed')
+            control = w.colour.load('control_sophia')
+            final = w.read(run/'session.log',w.MAX_LOG)
+            before = w.read(run/'driver/before-ack.log',w.MAX_LOG)
+            completed = w.read(run/'driver/completed.log',w.MAX_LOG)
+            if (not completed.startswith(before) or not final.startswith(completed)
+                    or control.qualify(final,single,captures['ready'])!=captures['proof']):
+                raise ValueError('Sophia one-shot saved log changed')
+            if (captures.get('ack')!=dict(schema=1,status='ack',generation=1,nonce=captures['ready']['nonce'])
+                    or captures.get('done')!=dict(schema=1,status='control_done',kind=single)
+                    or any(line.startswith(b'{') or b'gpu_invalid_import ' in line or b'gpu_release_delay ' in line
+                           for line in before.splitlines())):
+                raise ValueError('Sophia one-shot challenge bracket differs')
+            for field in ('peer_pid','peer_starttime','supervisor_pid','supervisor_starttime'):
+                w.h.r.uint(captures[field], True)
+            for record in ('ack','done'):
+                w.h.r.uint(captures[record]['schema'], True)
+            w.h.r.uint(captures['ack']['generation'], True)
+            extra += [run/'session.log',run/'driver/before-ack.log',run/'driver/completed.log']
+        elif (terminal.get('status') != 'session_exited_after_captures'
             or captures.get('status') != 'captures_verified'
             or type(captures.get('records')) is not list or len(captures['records']) != 3):
             raise ValueError('Sophia driver did not finish three captures')
@@ -227,6 +256,8 @@ def qualify_cleanup(base):
             environment['start_usec'], environment['end_usec'])
         if any(environment.get(k) != v for k, v in parsed.items()):
             raise ValueError('Sophia environment reduction changed')
+        if single and captures['ready']['output']!=int(environment['output']['output']):
+            raise ValueError('Sophia control and readback name different outputs')
         extra += [environment_path, raw_path, stderr_path]
     else:
         qualify_external_cleanup(recipe, result, local)

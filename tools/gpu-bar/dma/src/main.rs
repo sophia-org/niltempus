@@ -31,7 +31,11 @@ mod dma_frame;
 mod producer;
 mod profile;
 use producer::Producer;
-#[cfg(feature = "diagnostic-colour-hold")]
+#[cfg(any(
+    feature = "diagnostic-colour-hold",
+    feature = "diagnostic-control-channel"
+))]
+#[allow(dead_code)] // Shared channel; each separate diagnostic uses only its own protocol.
 mod hold;
 #[cfg(feature = "diagnostic-import-refusal")]
 mod invalid_import;
@@ -590,6 +594,25 @@ fn run_mode(mode: Diagnostic) -> Result<()> {
         wire.enable_image(&socket, &limits, Some((slots, length)))?;
     }
     wire.wait_ready()?;
+    #[cfg(feature = "diagnostic-control-channel")]
+    {
+        let kind = match mode {
+            #[cfg(feature = "diagnostic-import-refusal")]
+            Diagnostic::ImportRefusal => Some(hold::OneShot::Invalid),
+            #[cfg(feature = "diagnostic-release-delay")]
+            Diagnostic::ReleaseDelay => Some(hold::OneShot::Delay),
+            _ => None,
+        };
+        if let Some(kind) = kind {
+            backing.control = Some(hold::Control::one_shot(
+                &socket,
+                &mut wire,
+                kind,
+                grant,
+                output.output,
+            )?);
+        }
+    }
     #[cfg(feature = "diagnostic-colour-hold")]
     let mut hold_control = if diagnostic {
         Some(hold::Control::connect(&socket, &mut wire)?)
@@ -708,11 +731,17 @@ fn run_mode(mode: Diagnostic) -> Result<()> {
         }
     }
     // A reused export is destroyed only now, after the counted window.
+    #[cfg(feature = "diagnostic-control-channel")]
+    let mut single_control = backing.control.take();
     drop(backing);
     emit(Event::End {
         offered: frames,
         completed: frames,
     })?;
+    #[cfg(feature = "diagnostic-control-channel")]
+    if let Some(control) = &mut single_control {
+        control.finish_one_shot(&mut wire)?;
+    }
     #[cfg(feature = "diagnostic-colour-hold")]
     if let Some(control) = &mut hold_control {
         control.finish(&mut wire)?;
