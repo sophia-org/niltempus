@@ -68,3 +68,48 @@ fn dma_reuse_is_a_dma_only_boolean_diagnostic() {
         assert!(parse_config(&ring).is_err(), "{value}");
     }
 }
+
+#[test]
+fn cpu_is_explicit_and_only_the_plain_owned_ring_path() {
+    assert_eq!(parse_config(RING).unwrap().producer, Producer::Gpu);
+    assert_eq!(parse_config(DMA).unwrap().producer, Producer::Gpu);
+    let cpu = RING.replace('}', r#","producer":"cpu"}"#);
+    assert_eq!(parse_config(&cpu).unwrap().producer, Producer::Cpu);
+    assert_eq!(
+        parse_config(&RING.replace('}', r#","producer":"gpu"}"#)).unwrap(),
+        parse_config(RING).unwrap()
+    );
+    for bad in ["null", "true", "1", "[]", "{}", "\"CPU\"", "\"other\""] {
+        assert!(parse_config(&RING.replace('}', &format!(",\"producer\":{bad}}}"))).is_err());
+    }
+    for bad in [
+        DMA.replace('}', r#","producer":"cpu"}"#),
+        cpu.replace('}', r#","capture_profile":true}"#),
+        cpu.replace('}', r#","dma_reuse":false}"#),
+    ] {
+        assert!(parse_config(&bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn cpu_retirement_comparison_changes_only_the_explicit_mode() {
+    for height in [24, 512] {
+        let cpu = RING
+            .replace("\"height\":24", &format!("\"height\":{height}"))
+            .replace('}', r#","producer":"cpu"}"#);
+        let baseline = parse_config(&cpu).unwrap();
+        assert_eq!(baseline.producer, Producer::Cpu);
+        assert!(!baseline.retire_on_present);
+        let mut candidate =
+            parse_config(&cpu.replace('}', r#","retire_on_present":true}"#)).unwrap();
+        assert!(candidate.retire_on_present);
+        candidate.retire_on_present = false;
+        assert_eq!(candidate, baseline);
+    }
+    assert!(parse_config(&DMA.replace('}', r#","retire_on_present":true}"#)).is_err());
+    assert!(
+        !parse_config(&DMA.replace('}', r#","retire_on_present":false}"#))
+            .unwrap()
+            .retire_on_present
+    );
+}

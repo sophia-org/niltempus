@@ -4,7 +4,7 @@
 //! source differs. There is no IPC, byte, sealed, probe or retained path.
 //! Arm R runs the same loop with `source: owned_ring`: the same GPU frame read
 //! back and copied into the SDK's one persistent owned-ring registration,
-//! journalled at schema 7 (see ring_journal.rs).
+//! journalled at schema 7 (see ring_journal.rs). CPU mode fills that ring directly.
 use sophia_image_producer::ResourceStatusKind;
 use sophia_shell_client::{
     IMAGE_CAPABILITY_DMA_BUF, IMAGE_CAPABILITY_OWNED_RING, ImageChannelState, OfferState,
@@ -32,7 +32,9 @@ use journal::{Event, RetireCounters, Upload};
 #[path = "../../common/gpu_canvas.rs"]
 mod canvas;
 mod dma_frame;
+mod producer;
 mod profile;
+use producer::Producer;
 mod ring_journal;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,6 +65,7 @@ impl Source {
 #[derive(Debug, PartialEq, Eq)]
 struct Config {
     source: Source,
+    producer: Producer,
     capture_profile: bool,
     /// Diagnostic DMA arm that redraws one export (see dma_frame.rs).
     dma_reuse: bool,
@@ -70,9 +73,9 @@ struct Config {
     frames: u64,
     height: u64,
     hold_msec: u64,
-    /// W2 prototype: name each predecessor in its successor's candidate
+    /// Opt-in W2: name each predecessor in its successor's candidate
     /// instead of retiring it explicitly. Needs a session that negotiates
-    /// r12 with capability bit 17; production policy does not.
+    /// r12 with capability bit 17; the owner must explicitly permit it.
     retire_on_present: bool,
 }
 
@@ -87,12 +90,14 @@ fn parse_config(text: &str) -> Result<Config> {
     let profiling = object.contains_key("capture_profile");
     let reusing = object.contains_key("dma_reuse");
     let retiring = object.contains_key("retire_on_present");
+    let producing = object.contains_key("producer");
     let allowed = |k: &str| {
         KEYS.contains(&k)
             || (ring && k == "ring_slots")
             || k == "capture_profile"
             || k == "dma_reuse"
             || k == "retire_on_present"
+            || k == "producer"
     };
     if object.len()
         != KEYS.len()
@@ -100,12 +105,13 @@ fn parse_config(text: &str) -> Result<Config> {
             + usize::from(profiling)
             + usize::from(reusing)
             + usize::from(retiring)
+            + usize::from(producing)
         || object.keys().any(|k| !allowed(k))
     {
         return Err(
             "configuration requires exactly wire, output, frames, height, hold_msec \
                     and source, plus ring_slots for owned_ring, optional capture_profile \
-                    and, for dma_buf, optional dma_reuse"
+                    and, for dma_buf, optional dma_reuse; optional producer is gpu or cpu and retire_on_present is boolean"
                 .into(),
         );
     }
@@ -125,8 +131,17 @@ fn parse_config(text: &str) -> Result<Config> {
     if config["wire"].as_str() != Some("files") {
         return Err("GPU files peer requires wire files".into());
     }
+    let producer = match object.get("producer") {
+        None => Producer::Gpu,
+        Some(value) => match value.as_str() {
+            Some("gpu") => Producer::Gpu,
+            Some("cpu") => Producer::Cpu,
+            _ => return Err("producer must be gpu or cpu".into()),
+        },
+    };
     let parsed = Config {
         source,
+        producer,
         capture_profile: if profiling {
             config["capture_profile"]
                 .as_bool()
@@ -156,6 +171,12 @@ fn parse_config(text: &str) -> Result<Config> {
         height: number("height")?,
         hold_msec: number("hold_msec")?,
     };
+    if producer == Producer::Cpu && (!ring || parsed.capture_profile || reusing) {
+        return Err("CPU producer requires owned_ring without profiling or dma_reuse".into());
+    }
+    if parsed.retire_on_present && !ring {
+        return Err("retire_on_present requires owned_ring".into());
+    }
     if parsed.output == 0
         || !(1..=10000).contains(&parsed.frames)
         || !(1..=512).contains(&parsed.height)
@@ -507,6 +528,7 @@ fn run() -> Result<()> {
     }
     let Config {
         source,
+        producer,
         capture_profile,
         dma_reuse,
         output: output_id,
@@ -527,11 +549,7 @@ fn run() -> Result<()> {
     if source == Source::DmaBuf {
         wire.enable_image(&socket, &limits, None)?;
     }
-    canvas::open(limits.grant.connection_epoch, source.label())?;
-    canvas::with_gpu(|gpu| {
-        gpu.set_dma_timing_enabled(capture_profile);
-        Ok(())
-    })?;
+    producer.open(limits.grant.connection_epoch, source, capture_profile)?;
     if capture_profile {
         eprintln!(
             "gpu_bar_profile schema=1 source={} enabled=true",
@@ -659,6 +677,7 @@ fn run() -> Result<()> {
             ring_frame(
                 &mut wire,
                 canvas,
+                producer,
                 upload,
                 grant,
                 &allocation,
@@ -728,11 +747,11 @@ fn run() -> Result<()> {
     Ok(())
 }
 
-/// One owned-ring frame: the same GPU frame read back, copied into a free
-/// slot of the persistent registration, and journalled once settled.
+/// One owned-ring frame, journalled only after exact acceptance and settlement.
 fn ring_frame(
     wire: &mut Wire,
     canvas: &mut canvas::Canvas,
+    producer: Producer,
     mut upload: Upload,
     grant: ContentGrant,
     allocation: &ContentAllocationResult,
@@ -743,38 +762,39 @@ fn ring_frame(
         id: upload.resource_id,
         generation: upload.resource_generation,
     };
-    let fill_start_usec = clock_usec();
-    let pixels = canvas.fill(
-        usize::try_from(upload.total_bytes)?,
-        upload.width,
-        upload.height,
-        upload.candidate_generation,
-    )?;
-    canvas::prepared(
-        upload.candidate_generation,
-        resource.id,
-        fill_start_usec,
-        clock_usec(),
-    );
-    upload.begin_usec = clock_usec();
-    let offer = wire
-        .client
-        .image_upload_ring(
-            RingUpload {
-                resource: resource.id,
-                resource_generation: resource.generation,
-                allocation: allocation.allocation.id,
-                allocation_generation: allocation.allocation.generation,
-                output: output.id,
-                output_generation: output.generation,
-                topology_generation: facts_generation,
-                width: upload.width,
-                height: upload.height,
-            },
-            pixels,
-            Instant::now(),
-        )
-        .map_err(|e| format!("ring upload refused: {e:?}"))?;
+    let mut fill_start_usec = clock_usec();
+    let metadata = RingUpload {
+        resource: resource.id,
+        resource_generation: resource.generation,
+        allocation: allocation.allocation.id,
+        allocation_generation: allocation.allocation.generation,
+        output: output.id,
+        output_generation: output.generation,
+        topology_generation: facts_generation,
+        width: upload.width,
+        height: upload.height,
+    };
+    let length = usize::try_from(upload.total_bytes)?;
+    let offer = match producer {
+        Producer::Gpu => {
+            let pixels = canvas.fill(length, upload.width, upload.height, upload.candidate_generation)?;
+            canvas::prepared(upload.candidate_generation, resource.id, fill_start_usec, clock_usec());
+            upload.begin_usec = clock_usec();
+            wire.client.image_upload_ring(metadata, pixels, Instant::now())
+        }
+        Producer::Cpu => {
+            let offer = wire.client.image_upload_ring_fill(metadata, length, Instant::now(), |pixels| {
+                fill_start_usec = clock_usec();
+                producer::fill_cpu(pixels, upload.candidate_generation);
+                upload.begin_usec = clock_usec();
+            });
+            if offer.is_ok() {
+                eprintln!("gpu_bar_prepare schema=1 arm=owned_ring generation={} resource_id={} start_usec={} end_usec={}",
+                    upload.candidate_generation, resource.id, fill_start_usec, upload.begin_usec);
+            }
+            offer
+        }
+    }.map_err(|e| format!("ring upload refused: {e:?}"))?;
     let slot = u64::from(
         wire.client
             .image_ring_offer(offer)

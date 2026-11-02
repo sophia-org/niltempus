@@ -20,14 +20,14 @@ Optional `dma_reuse` (boolean) is accepted only for `dma_buf`; absent or
 `capture_profile: true` (and so its bounds), so no comparison plan can treat
 reused backing as fresh G before a separate measured acceptance.
 
-Optional `retire_on_present` (boolean, W2 prototype) negotiates exactly r12
+Optional `retire_on_present` (boolean, default off) negotiates exactly r12
 with capability bit 17 and fails if the session does not grant it. Each
 successor candidate then names its predecessor (retire transaction 7) instead
 of sending a separate `ResourceRetire`; the first frame names nothing, the
 predecessor's exact `ResourceReleased` is still awaited before the next
 frame, and the last resource stays held until disconnect as on the explicit
-path. No production session advertises r12 today, so this path is
-device-free only.
+path. It requires owned-ring source and an owner explicitly permitting r12/W2.
+The integrated CPU/W2 comparison remains unqualified until a fresh matched run.
 
 Optional `capture_profile: true` enables cumulative producer DMA-stage timing
 for a 24-row, 2120-frame, 60000-ms diagnostic. The runner must also pin
@@ -65,3 +65,41 @@ when the peer observed the event, so acceptance and release may be equal.
 
 Tests live in `tests/support/` and are compiled as private `#[cfg(test)]`
 modules of the binary.
+
+## Matched CPU producer
+
+`"producer": "cpu"` is an explicit owned-ring-only mode. It fills the mapped
+SDK ring slot directly through `image_upload_ring_fill`, using
+`shade_mod128_a255` (all RGB bytes equal generation modulo 128, alpha 255).
+It initializes no GPU producer and performs no readback or staging copy.
+Acceptance, exact slot settlement, candidate presentation and predecessor
+retirement use the unchanged ring loop. The two configured slots do not imply
+two frames in flight: this peer remains serial.
+
+Absent `producer`, or `"producer": "gpu"`, keeps the GPU path. Other types/values
+are refused. CPU mode refuses DMA-BUF, enabled capture profiling and any
+`dma_reuse` key. It emits exactly one stderr producer receipt:
+
+```
+cpu_bar schema=1 source=owned_ring producer=cpu_shm fill=shade_mod128_a255
+```
+
+The historical `gpu_bar_prepare` tag is retained for compatibility; in CPU mode
+its span measures only the direct fill callback. It is not GPU evidence.
+Schema-7 journal records and settlement rules are unchanged. A new runner/package
+must pair the requested producer, config and observed receipt; old GPU-only
+postflight rules must not be relaxed silently. No benchmark result is implied.
+
+## Integrated CPU/W2 comparison source
+
+This branch combines the frozen W2 peer (`b12b0a1c`) with the existing matched
+CPU direct-fill path (`9cb0a37c`). Both comparison modes must explicitly set
+`producer: "cpu"`, `source: "owned_ring"` and the same ring/workload bounds;
+only `retire_on_present` and the matching owner opt-in differ. CPU mode never
+opens the GPU and fills the acquired slot with the matched shade-mod128 pattern.
+The default remains GPU for old configurations; omission is not a CPU baseline.
+
+SDK dependencies now use published `d70e77a08d610a3c6bf8ef3dd7d1408fc7eeed30`
+through the public Git URL. The local unpublished patch is removed. The Lom
+GPU helper pin is unchanged and has no SDK dependency to repin. Historical
+GPU-readback W2 measurements are not transferred to this CPU configuration.

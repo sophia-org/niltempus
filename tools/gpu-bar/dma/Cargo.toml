@@ -16,25 +16,8 @@ rustix = { version = "1.1", default-features = false, features = ["std", "time"]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sophia-shell-gpu = { git = "https://github.com/sophia-org/lom", rev = "dcb1eb88cb1e386ed3d3f1f22400de37174e88ea" }
-sophia-shell-protocol = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "0706ea2c78cd16ba59ed209620354f30a2c78906" }
-sophia-shell-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "0706ea2c78cd16ba59ed209620354f30a2c78906" }
-sophia-launch-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "0706ea2c78cd16ba59ed209620354f30a2c78906" }
-sophia-9p-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "0706ea2c78cd16ba59ed209620354f30a2c78906" }
-sophia-image-producer = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "0706ea2c78cd16ba59ed209620354f30a2c78906" }
-
-# W2 PROTOTYPE ONLY (cpu/w2-peer): the SDK's unpublished local commit
-# 1951d597 (cpu/w2-codec): the r12/bit-17 retire-on-present client and the
-# shared owned_ring_image_revision mapping with the exact W2 welcome.
-# This breaks PROVENANCE.txt's public-URL rule on purpose, for device-free
-# tests; it must not be packaged, released or merged until the commit is
-# reachable upstream and this patch is removed.
-[patch."https://github.com/sophia-org/sophia-desktop-sdk-rs"]
-sophia-9p-client = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "1951d5971c47502c67bc8753dc10f827856702fd" }
-sophia-9p-records = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "1951d5971c47502c67bc8753dc10f827856702fd" }
-sophia-desktop-ids = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "1951d5971c47502c67bc8753dc10f827856702fd" }
-sophia-image-producer = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "1951d5971c47502c67bc8753dc10f827856702fd" }
-sophia-isb = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "1951d5971c47502c67bc8753dc10f827856702fd" }
-sophia-launch-client = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "1951d5971c47502c67bc8753dc10f827856702fd" }
-sophia-lock-protocol = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "1951d5971c47502c67bc8753dc10f827856702fd" }
-sophia-shell-client = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "1951d5971c47502c67bc8753dc10f827856702fd" }
-sophia-shell-protocol = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "1951d5971c47502c67bc8753dc10f827856702fd" }
+sophia-shell-protocol = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "d70e77a08d610a3c6bf8ef3dd7d1408fc7eeed30" }
+sophia-shell-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "d70e77a08d610a3c6bf8ef3dd7d1408fc7eeed30" }
+sophia-launch-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "d70e77a08d610a3c6bf8ef3dd7d1408fc7eeed30" }
+sophia-9p-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "d70e77a08d610a3c6bf8ef3dd7d1408fc7eeed30" }
+sophia-image-producer = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "d70e77a08d610a3c6bf8ef3dd7d1408fc7eeed30" }
