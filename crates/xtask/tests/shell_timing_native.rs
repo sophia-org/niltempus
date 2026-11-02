@@ -38,6 +38,7 @@ impl Fixture {
                 reference_workload: None,
                 producer: xtask::shell_timing_native::ProducerKind::Cpu,
                 managed_destination_reuse: false,
+                retire_on_present: false,
             },
         };
         // These fixtures are hashed only. None may be executed by validation.
@@ -766,6 +767,7 @@ fn captured_source_cannot_be_substituted_after_preparation() {
         terminal_usec: vec![],
         placements: vec![],
         live_resources: vec![],
+        retire_counters: None,
     };
     let fresh = |m: &Journal, probe: u64| {
         validate_captured_workload(m, &f.request, probe, WorkloadMode::Fresh, None)
@@ -1244,6 +1246,7 @@ fn reference_capture_uses_its_config_and_checks_source_cadence_and_hold() {
         terminal_usec: vec![],
         placements: vec![],
         live_resources: vec![],
+        retire_counters: None,
     };
     validate_captured_config(&metrics, &f.request, config).unwrap();
     metrics.draw.as_mut().unwrap().hold_usec -= 1;
@@ -1307,4 +1310,281 @@ fn configuration_artifacts_must_not_be_group_or_other_writable() {
             assert_eq!(validate(&f.request).is_ok(), accepted, "{key} {mode:o}");
         }
     }
+}
+
+#[test]
+fn retire_on_present_is_a_paired_owned_ring_gpu_setting() {
+    use xtask::shell_timing::{ImageSource, Journal, RetireCounters, WorkloadMode};
+    use xtask::shell_timing_native::{ProducerKind, validate_retire_counters};
+    const FLAG: &str = "--experimental-shell-retire-on-present";
+    let mut f = Fixture::new("retire-on-present", "files");
+    f.request.source = ImageSource::OwnedRing;
+    f.request.producer = ProducerKind::Gpu;
+    f.request.frames = 2120;
+    let profile = fs::read_to_string(&f.request.artifacts["profile"].path).unwrap();
+    f.put(
+        "profile",
+        profile
+            .replace("gpu \"denied\"", "gpu \"direct\"")
+            .as_bytes(),
+        false,
+    );
+    let mut config = serde_json::json!({"wire":"files","source":"owned_ring","output":1,
+        "frames":2120,"height":24,"hold_msec":60000,"ring_slots":2});
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    let plain = validate(&f.request).unwrap();
+    assert!(!plain.iter().any(|arg| arg == FLAG));
+    assert!(
+        serde_json::to_value(&f.request)
+            .unwrap()
+            .get("retire_on_present")
+            .is_none()
+    );
+    // The pair is the setting: either half alone is refused.
+    f.request.retire_on_present = true;
+    assert!(validate(&f.request).is_err(), "flag without key");
+    config["retire_on_present"] = true.into();
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    let both = validate(&f.request).unwrap();
+    assert_eq!(&both[..plain.len()], plain);
+    assert_eq!(both.last().unwrap(), FLAG);
+    assert_eq!(
+        serde_json::to_value(&f.request).unwrap()["retire_on_present"],
+        true
+    );
+    f.request.retire_on_present = false;
+    assert!(validate(&f.request).is_err(), "key without flag");
+    config["retire_on_present"] = false.into();
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(
+        validate(&f.request).is_ok(),
+        "explicit false key is the W2 control"
+    );
+    for value in [serde_json::Value::Null, 1.into(), "true".into()] {
+        let mut bad = config.clone();
+        bad["retire_on_present"] = value;
+        f.put("peer-config", bad.to_string().as_bytes(), false);
+        assert!(validate(&f.request).is_err(), "non-boolean key");
+    }
+    // Only the files owned-ring GPU peer carries it.
+    config["retire_on_present"] = true.into();
+    f.request.retire_on_present = true;
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_ok());
+    f.request.producer = ProducerKind::Cpu;
+    assert!(validate(&f.request).is_err(), "cpu producer");
+    f.request.producer = ProducerKind::Gpu;
+    config["source"] = "dma_buf".into();
+    config.as_object_mut().unwrap().remove("ring_slots");
+    f.request.source = ImageSource::DmaBuf;
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_err(), "dma_buf source");
+
+    // Postflight: counters are exact for the declared mode; an uncounted
+    // journal keeps its acceptance only when no key was declared.
+    let counters = |sent: u64| RetireCounters {
+        retire_counter_schema: 1,
+        explicit_retires_sent: sent,
+        predecessor_releases_received: 2119,
+    };
+    let mut metrics = Journal {
+        ring: None,
+        draw: None,
+        schema: 7,
+        wire: "files".into(),
+        source: ImageSource::OwnedRing,
+        probe_bytes: 0,
+        workload: WorkloadMode::Fresh,
+        retained_resources: None,
+        interval_msec: None,
+        offers: vec![],
+        uploads: vec![],
+        permits: vec![],
+        terminal_usec: vec![],
+        placements: vec![],
+        live_resources: vec![],
+        retire_counters: None,
+    };
+    assert!(validate_retire_counters(&metrics, None, 2120).is_ok());
+    assert!(validate_retire_counters(&metrics, Some(false), 2120).is_err());
+    assert!(validate_retire_counters(&metrics, Some(true), 2120).is_err());
+    metrics.retire_counters = Some(counters(2119));
+    assert!(validate_retire_counters(&metrics, None, 2120).is_ok());
+    assert!(validate_retire_counters(&metrics, Some(false), 2120).is_ok());
+    assert!(validate_retire_counters(&metrics, Some(true), 2120).is_err());
+    assert!(validate_retire_counters(&metrics, Some(false), 2121).is_err());
+    metrics.retire_counters = Some(counters(0));
+    assert!(validate_retire_counters(&metrics, None, 2120).is_err());
+    assert!(validate_retire_counters(&metrics, Some(false), 2120).is_err());
+    assert!(validate_retire_counters(&metrics, Some(true), 2120).is_ok());
+    metrics.retire_counters = Some(RetireCounters {
+        retire_counter_schema: 2,
+        ..counters(0)
+    });
+    assert!(validate_retire_counters(&metrics, Some(true), 2120).is_err());
+}
+
+#[test]
+fn declared_peer_producer_matches_the_request_and_cpu_is_plain_owned_ring() {
+    use xtask::shell_timing::ImageSource;
+    use xtask::shell_timing_native::ProducerKind;
+    let ring = |extra: &str| {
+        format!(
+            r#"{{"wire":"files","source":"owned_ring","output":1,"frames":3,"height":24,"hold_msec":60000,"ring_slots":2{extra}}}"#
+        )
+    };
+    // CPU producer: request cpu (profile gpu denied) and peer "cpu".
+    let mut f = Fixture::new("producer-cpu", "files");
+    f.request.source = ImageSource::OwnedRing;
+    f.put("peer-config", ring("").as_bytes(), false);
+    assert!(validate(&f.request).is_ok(), "historical: no peer key");
+    for (extra, accepted) in [
+        (r#","producer":"cpu""#, true),
+        (r#","producer":"gpu""#, false),
+        (r#","producer":null"#, false),
+        (r#","producer":"CPU""#, false),
+        (r#","producer":"cpu_shm""#, false),
+        (r#","producer":1"#, false),
+        (r#","producer":true"#, false),
+        (r#","producer":"cpu","producer":"cpu""#, false),
+        (r#","producer":"cpu","dma_reuse":false"#, false),
+        (r#","producer":"cpu","capture_profile":true"#, false),
+    ] {
+        f.put("peer-config", ring(extra).as_bytes(), false);
+        assert_eq!(validate(&f.request).is_ok(), accepted, "{extra}");
+    }
+    // A CPU producer exists only as a plain owned-ring arm.
+    let mut f = Fixture::new("producer-cpu-bytes", "ipc");
+    f.put(
+        "peer-config",
+        br#"{"wire":"ipc","output":1,"frames":3,"height":24,"hold_msec":60000,"producer":"cpu"}"#,
+        false,
+    );
+    assert!(validate(&f.request).is_err());
+    // GPU producer: request gpu with the direct grant and peer "gpu".
+    let mut f = Fixture::new("producer-gpu", "files");
+    f.request.source = ImageSource::OwnedRing;
+    f.request.producer = ProducerKind::Gpu;
+    let profile = fs::read_to_string(f.request.artifacts["profile"].path.clone()).unwrap();
+    f.put(
+        "profile",
+        profile
+            .replace("gpu \"denied\"", "gpu \"direct\"")
+            .as_bytes(),
+        false,
+    );
+    for (extra, accepted) in [
+        ("", true),
+        (r#","producer":"gpu""#, true),
+        (r#","producer":"cpu""#, false),
+    ] {
+        f.put("peer-config", ring(extra).as_bytes(), false);
+        assert_eq!(validate(&f.request).is_ok(), accepted, "{extra}");
+    }
+}
+
+#[test]
+fn producer_receipt_is_exact_once_and_never_crosses_modes() {
+    use xtask::shell_timing::ImageSource;
+    use xtask::shell_timing_native::{CPU_PRODUCER_RECEIPT, validate_producer_receipt};
+    let mut f = Fixture::new("receipt", "files");
+    f.request.source = ImageSource::OwnedRing;
+    let config = |key: &str| {
+        format!(
+            r#"{{"wire":"files","source":"owned_ring","output":1,"frames":3,"height":24,"hold_msec":60000,"ring_slots":2{key}}}"#
+        )
+    };
+    let cpu = config(r#","producer":"cpu""#);
+    let gpu = config(r#","producer":"gpu""#);
+    let absent = config("");
+    let host = "sophia_shell_native_completion schema=1\n";
+    let prepare = "gpu_bar_prepare schema=1 arm=owned_ring generation=1 resource_id=1 start_usec=1 end_usec=2\n";
+    let exact = format!("{host}{CPU_PRODUCER_RECEIPT}\n{prepare}");
+    let check = |config: &str, capture: &str| -> Result<Option<serde_json::Value>, String> {
+        validate_producer_receipt(&f.request, config.as_bytes(), capture)
+    };
+    // CPU: exactly one exact receipt, retained in native samples.
+    assert_eq!(
+        check(&cpu, &exact).unwrap(),
+        Some(serde_json::json!({"kind": "cpu", "receipt": CPU_PRODUCER_RECEIPT}))
+    );
+    assert!(check(&cpu, &format!("  {CPU_PRODUCER_RECEIPT}\n")).is_ok());
+    for capture in [
+        host.to_owned(),
+        format!("{CPU_PRODUCER_RECEIPT}\n{CPU_PRODUCER_RECEIPT}\n"),
+        format!("{CPU_PRODUCER_RECEIPT} \n"),
+        format!("{CPU_PRODUCER_RECEIPT} extra=1\n"),
+        format!("x {CPU_PRODUCER_RECEIPT}\n"),
+        "cpu_bar schema=1 producer=cpu_shm source=owned_ring fill=shade_mod128_a255\n".into(),
+        "cpu_bar schema=2 source=owned_ring producer=cpu_shm fill=shade_mod128_a255\n".into(),
+        format!(
+            "{exact}gpu_bar schema=1 arm=owned_ring producer=vello_wgpu gpu_time=unavailable\n"
+        ),
+        format!("{exact}gpu_bar_gpu_admission schema=2 status=ready\n"),
+        format!("{exact}x gpu_bar_gpu_admission schema=2 status=ready\n"),
+        format!("{exact}gpu_bar_profile schema=1\n"),
+    ] {
+        assert!(check(&cpu, &capture).is_err(), "{capture}");
+    }
+    // GPU or historical absent key: no CPU receipt, and no new evidence.
+    let gpu_capture = format!(
+        "{host}gpu_bar schema=1 arm=owned_ring producer=vello_wgpu gpu_time=unavailable gpu_bar_gpu_admission schema=2 status=ready\n{prepare}"
+    );
+    for config in [&gpu, &absent] {
+        assert_eq!(check(config, &gpu_capture).unwrap(), None);
+        assert_eq!(check(config, host).unwrap(), None);
+        assert!(check(config, &exact).is_err());
+        assert!(check(config, &format!("{gpu_capture}x {CPU_PRODUCER_RECEIPT}\n")).is_err());
+    }
+    // Malformed configs refuse before any receipt is read.
+    assert!(check(&config(r#","producer":null"#), &exact).is_err());
+}
+
+#[test]
+fn cpu_w2_requires_the_exact_cpu_peer_and_preserves_gpu_denial() {
+    use xtask::shell_timing::ImageSource;
+    use xtask::shell_timing_native::ProducerKind;
+    const FLAG: &str = "--experimental-shell-retire-on-present";
+    let mut f = Fixture::new("cpu-w2", "files");
+    f.request.source = ImageSource::OwnedRing;
+    f.request.producer = ProducerKind::Cpu;
+    let mut config = serde_json::json!({"wire":"files","source":"owned_ring","output":1,
+        "frames":3,"height":24,"hold_msec":60000,"ring_slots":2,"producer":"cpu"});
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    let plain = validate(&f.request).unwrap();
+    assert!(!plain.iter().any(|arg| arg == FLAG));
+    f.request.retire_on_present = true;
+    assert!(validate(&f.request).is_err(), "missing peer intent setting");
+    config["retire_on_present"] = true.into();
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    let candidate = validate(&f.request).unwrap();
+    assert_eq!(&candidate[..plain.len()], plain);
+    assert_eq!(candidate.last().unwrap(), FLAG);
+    for value in [None, Some("gpu")] {
+        let mut changed = config.clone();
+        if let Some(value) = value {
+            changed["producer"] = value.into();
+        } else {
+            changed.as_object_mut().unwrap().remove("producer");
+        }
+        f.put("peer-config", changed.to_string().as_bytes(), false);
+        assert!(
+            validate(&f.request).is_err(),
+            "W2 must not infer a CPU peer"
+        );
+    }
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    let profile = fs::read_to_string(&f.request.artifacts["profile"].path).unwrap();
+    assert!(profile.contains("gpu \"denied\""));
+    f.put(
+        "profile",
+        profile
+            .replace("gpu \"denied\"", "gpu \"direct\"")
+            .as_bytes(),
+        false,
+    );
+    assert!(
+        validate(&f.request).is_err(),
+        "CPU W2 must not grant GPU access"
+    );
 }

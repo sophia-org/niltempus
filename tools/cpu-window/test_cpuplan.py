@@ -244,6 +244,174 @@ class GpuPositive(Base):
         refused("producer=gpu", source="bytes",
                 edit=setter(["native-samples.json", "journal", "wire"], "files"))
 
+    def test_retire_counters_are_keyed_to_the_declared_mode(self):
+        def counters(sent, received, schema=1):
+            return {"retire_counter_schema": schema, "explicit_retires_sent": sent,
+                    "predecessor_releases_received": received}
+
+        def arm(request=None, journal=None):
+            def edit(files):
+                files["plan.json"]["request"].update(request or {})
+                files["native-samples.json"]["journal"].update(journal or {})
+            return self.gpu_dir(source="owned_ring", edit=edit)
+
+        def refused(needle, **kw):
+            with self.assertRaises(cpuplan.Refused) as cm:
+                cpuplan.build([("s1", "s", arm(**kw))])
+            self.assertIn(needle, str(cm.exception))
+        frames = {"frames": END}
+        # Original peers carry no counters; their acceptance is unchanged.
+        cpuplan.build([("s1", "s", arm())])
+        # Both W2 build modes report exact counters.
+        cpuplan.build([("s1", "s", arm(request=frames,
+                                       journal={"retire_counters": counters(END - 1, END - 1)}))])
+        cpuplan.build([("s1", "s", arm(request=dict(frames, retire_on_present=True),
+                                       journal={"retire_counters": counters(0, END - 1)}))])
+        # The named arm needs its receipt; neither mode accepts the other's counts.
+        refused("retire counters", request=dict(frames, retire_on_present=True))
+        refused("retire counters", request=dict(frames, retire_on_present=True),
+                journal={"retire_counters": counters(END - 1, END - 1)})
+        refused("retire counters", request=frames,
+                journal={"retire_counters": counters(0, END - 1)})
+        refused("retire counters", request=dict(frames, retire_on_present=True),
+                journal={"retire_counters": counters(0, END - 1, schema=2)})
+        refused("retire counters", request=dict(frames, retire_on_present=True),
+                journal={"retire_counters": counters(0, END)})
+        refused("retire counters", request=dict(frames, retire_on_present=True),
+                journal={"retire_counters": {"retire_counter_schema": 1, "explicit_retires_sent": 0}})
+        refused("retire counters", request=dict(frames, retire_on_present=True),
+                journal={"retire_counters": counters("0", END - 1)})
+        # A counted journal without a frame count, or a non-boolean key, is refused.
+        refused("frame count", journal={"retire_counters": counters(END - 1, END - 1)})
+        refused("boolean", request=dict(frames, retire_on_present=1),
+                journal={"retire_counters": counters(0, END - 1)})
+        # The mode is validated even when no counters were journalled.
+        refused("boolean", request=dict(frames, retire_on_present="true"))
+        refused("boolean", request=dict(frames, retire_on_present=None))
+        # Python's bool/float equality aliases are not integer counts.
+        refused("retire counters", request=dict(frames, retire_on_present=True),
+                journal={"retire_counters": counters(False, float(END - 1), schema=True)})
+        refused("retire counters", request=frames,
+                journal={"retire_counters": counters(float(END - 1), END - 1, schema=1.0)})
+        refused("retire counters", request=dict(frames, retire_on_present=True),
+                journal={"retire_counters": dict(counters(0, END - 1), extra=0)})
+        # An explicitly null counter object is not absence.
+        refused("retire counters", request=frames, journal={"retire_counters": None})
+        refused("retire counters", request=dict(frames, retire_on_present=True),
+                journal={"retire_counters": None})
+
+
+PEER_CONFIG = {"path": "/pkg/arm-c1/peer.json", "sha256": "7" * 64}
+
+
+def cpu_shape(files):
+    """Turn a GPU owned-ring stage into the matched CPU producer's schema-4 shape."""
+    files["panel-diagnostic.json"]["schema"] = 4
+    files["plan.json"]["request"].pop("producer")
+    files["native-samples.json"]["producer"] = dict(cpuplan.CPU_PRODUCER)
+    files["plan.json"]["request"]["artifacts"]["peer-config"] = dict(PEER_CONFIG)
+
+
+class CpuProducer(Base):
+    def cpu_dir(self, edit=None, **kw):
+        self.count += 1
+        def both(files):
+            cpu_shape(files)
+            if edit:
+                edit(files)
+        return write_run_gpu(self.root / f"c{self.count}", source="owned_ring", edit=both, **kw)
+
+    def refused(self, needle, **kw):
+        with self.assertRaises(cpuplan.Refused) as cm:
+            cpuplan.build([("c1", "c", self.cpu_dir(**kw))])
+        self.assertIn(needle, str(cm.exception))
+
+    def test_cpu_w2_requires_exact_retirement_counters(self):
+        def edit(mode, sent, received):
+            def apply(files):
+                request = files["plan.json"]["request"]
+                request.update(frames=END, retire_on_present=mode)
+                files["native-samples.json"]["journal"]["retire_counters"] = {
+                    "retire_counter_schema": 1,
+                    "explicit_retires_sent": sent, "predecessor_releases_received": received}
+            return apply
+        for mode, sent in [(False, END - 1), (True, 0)]:
+            cpuplan.build([("c1", "c", self.cpu_dir(edit=edit(mode, sent, END - 1)))])
+        for mode, sent, received in [(True, END - 1, END - 1), (False, 0, END - 1),
+                                     (True, 0, END - 2), (True, False, END - 1)]:
+            self.refused("retire counters", edit=edit(mode, sent, received))
+
+    def test_cpu_ring_arms_share_host_and_peer_and_analyze(self):
+        a, b = self.cpu_dir(), self.cpu_dir()
+        plan = cpuplan.build([("c1", "c", a), ("c2", "c", b)], "c")
+        for run in plan["runs"]:
+            self.assertEqual(set(run["expect"]), {"session", "peer"})
+            self.assertEqual(run["evidence"]["producer"], "cpu")
+            self.assertEqual(run["evidence"]["peer_config"], PEER_CONFIG)
+        sampler_file(a / "cpu-window.jsonl", {"session": HEADER["session"], "peer": HEADER["peer"]})
+        self.assertEqual(cpuwin.analyze_run(plan["runs"][0], plan["max_gap_ms"])["intervals"], COUNTED)
+        for kw, needle in [({"sophia": "6" * 64}, "sophia_sha256"), ({"peer": "9" * 64}, "peer_sha256"),
+                           ({"bar_height": 512}, "bar_height")]:
+            with self.assertRaises(cpuplan.Refused) as cm:
+                cpuplan.build([("c1", "c", a), ("c3", "c", self.cpu_dir(**kw))])
+            self.assertIn(needle, str(cm.exception))
+
+    def test_cpu_receipt_is_exact_and_never_inferred_from_the_request(self):
+        receipt = ["native-samples.json", "producer"]
+        for value in [None, "cpu", {"kind": "cpu"}, {"kind": "gpu", "receipt": cpuplan.CPU_PRODUCER["receipt"]},
+                      {"kind": "cpu", "receipt": cpuplan.CPU_PRODUCER["receipt"] + " "},
+                      dict(cpuplan.CPU_PRODUCER, extra=1)]:
+            self.refused("exact CPU producer receipt", edit=setter(receipt, value))
+        self.refused("exact CPU producer receipt", edit=lambda f: f["native-samples.json"].pop("producer"))
+        for producer in ["cpu", "gpu", None]:
+            self.refused("exact CPU producer receipt", edit=setter(["plan.json", "request", "producer"], producer))
+        self.refused("exact CPU producer receipt", edit=setter(["plan.json", "request", "source"], "dma_buf"))
+
+    def test_cpu_peer_config_pin_is_required_and_canonical(self):
+        pin = ["plan.json", "request", "artifacts", "peer-config"]
+        needle = "peer-config path and canonical sha256"
+        self.refused(needle, edit=lambda f: f["plan.json"]["request"]["artifacts"].pop("peer-config"))
+        for value in [None, "7" * 64, {"path": "/pkg/peer.json"}, {"sha256": "7" * 64}]:
+            self.refused(needle, edit=setter(pin, value))
+        for path in ["pkg/peer.json", "/pkg/../peer.json", "/pkg/peer\n.json", 7, None]:
+            self.refused(needle, edit=setter(pin + ["path"], path))
+        for digest in ["7" * 63, "7" * 65, "A" * 64, "g" * 64, " " + "7" * 63, 7, None]:
+            self.refused(needle, edit=setter(pin + ["sha256"], digest))
+
+    def test_cpu_schema_must_be_an_integer(self):
+        for schema in (4.0, True):
+            with self.assertRaises(cpuplan.Refused):
+                cpuplan.build([("c1", "c", self.cpu_dir(edit=setter(["panel-diagnostic.json", "schema"], schema)))])
+        self.refused("integer schema", edit=setter(["panel-diagnostic.json", "schema"], 4.0))
+        # Frozen schemas keep their historical comparison unchanged.
+        gpu = write_run_gpu(self.root / "g", source="owned_ring",
+                            edit=setter(["panel-diagnostic.json", "schema"], 3.0))
+        self.assertEqual(len(cpuplan.build([("g1", "g", gpu)])["runs"]), 1)
+
+    def test_cpu_descriptor_and_journal_shape_refusals(self):
+        for schema in (2, 5, 6):
+            self.refused("schema-7 files owned-ring", edit=setter(["native-samples.json", "journal", "schema"], schema))
+        self.refused("schema-7 files owned-ring", edit=setter(["native-samples.json", "journal", "wire"], "ipc"))
+        self.refused("schema-7 files owned-ring", edit=setter(["native-samples.json", "journal", "workload"], "retained"))
+        self.refused("CPU schema-4", edit=setter(["panel-diagnostic.json", "bar_height"], 108))
+        self.refused("CPU schema-4", edit=lambda f: f["panel-diagnostic.json"].pop("bar_height"))
+        self.refused("CPU schema-4", edit=lambda f: f["panel-diagnostic.json"].update(
+            raster={"path": RASTER_EXE, "sha256": "0" * 64}))
+        self.refused("want a schema-2", edit=setter(["native-samples.json", "journal", "source"], "dma_buf"))
+        self.refused("non-raster arm", edit=lambda f: f.update({"cpu-raster-binding.json": {}}))
+
+    def test_no_cross_mode_between_cpu_and_gpu(self):
+        gpu = write_run_gpu(self.root / "g", source="owned_ring")
+        with self.assertRaises(cpuplan.Refused) as cm:
+            cpuplan.build([("c1", "c", self.cpu_dir()), ("g1", "g", gpu)])
+        self.assertIn("mix producers", str(cm.exception))
+        # Schema 3 refuses CPU evidence even with a GPU request.
+        bad = write_run_gpu(self.root / "g2", source="owned_ring", edit=setter(
+            ["native-samples.json", "producer"], dict(cpuplan.CPU_PRODUCER)))
+        with self.assertRaises(cpuplan.Refused) as cm:
+            cpuplan.build([("g2", "g", bad)])
+        self.assertIn("refuses CPU producer evidence", str(cm.exception))
+
 
 class Positive(Base):
     def test_plain_schema1_ring_report(self):

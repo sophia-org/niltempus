@@ -32,8 +32,8 @@ pub struct Descriptor {
     pub raster: Option<Artifact>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workload: Option<DrawWorkload>,
-    /// Schema 3 (explicit GPU-producer arms) pins the bar height so
-    /// compared runs cannot mix 24- and 512-line workloads.
+    /// Schemas 3 (explicit GPU producer) and 4 (matched CPU producer) pin
+    /// the bar height so compared runs cannot mix 24- and 512-line workloads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bar_height: Option<u64>,
 }
@@ -80,6 +80,18 @@ pub fn policy(d: &Descriptor, r: &Request, probe: u64) -> Result<(), String> {
                     }
                     _ => false,
                 }
+        }
+        // Schema 4 is the matched CPU producer: the explicit peer key and
+        // its observed receipt, never the request's historical Cpu
+        // default, qualify it. Plain files owned ring only.
+        4 => {
+            d.raster.is_none()
+                && d.workload.is_none()
+                && matches!(d.bar_height, Some(24 | 512))
+                && r.producer == ProducerKind::Cpu
+                && r.reference_workload.is_none()
+                && r.source == ImageSource::OwnedRing
+                && r.wire == "files"
         }
         _ => false,
     };
@@ -137,8 +149,19 @@ fn verify(d: &Descriptor) -> Result<Request, String> {
     } else if d.schema == 3 {
         if config["height"] != serde_json::json!(d.bar_height)
             || config.get("workload").is_some_and(|v| v != "fresh")
+            || config.get("producer").is_some_and(|v| v != "gpu")
         {
             return Err("GPU diagnostic requires fresh content at the pinned bar height".into());
+        }
+    } else if d.schema == 4 {
+        if config["height"] != serde_json::json!(d.bar_height)
+            || config.get("workload").is_some_and(|v| v != "fresh")
+            || config.get("producer") != Some(&serde_json::json!("cpu"))
+        {
+            return Err(
+                "CPU producer diagnostic requires peer producer cpu with fresh content at the pinned bar height"
+                    .into(),
+            );
         }
     } else {
         if config["workload"] != serde_json::to_value(d.workload).map_err(|e| e.to_string())? {

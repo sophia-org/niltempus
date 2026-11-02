@@ -259,8 +259,10 @@ enum Observed {
         link: PathBuf,
         identity: ExecutableIdentity,
     },
-    /// Gone, or a deleted target.
-    Absent,
+    /// The link or its target was missing (ENOENT).
+    Missing,
+    /// The link explicitly named a deleted target.
+    Deleted,
     /// The kernel refused the read (EACCES).
     Opaque,
 }
@@ -497,16 +499,20 @@ impl Binder {
             |e: &io::Error| e.raw_os_error() == Some(rustix::io::Errno::ACCESS.raw_os_error());
         let link = match fs::read_link(&exe) {
             Ok(target) => target,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Observed::Absent),
+            Err(e) if e.raw_os_error() == Some(rustix::io::Errno::NOENT.raw_os_error()) => {
+                return Ok(Observed::Missing);
+            }
             Err(e) if denied(&e) => return Ok(Observed::Opaque),
             Err(e) => return Err(format!("{}: {e}", exe.display())),
         };
         if link.to_string_lossy().ends_with(" (deleted)") {
-            return Ok(Observed::Absent);
+            return Ok(Observed::Deleted);
         }
         let meta = match fs::metadata(&exe) {
             Ok(meta) => meta,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Observed::Absent),
+            Err(e) if e.raw_os_error() == Some(rustix::io::Errno::NOENT.raw_os_error()) => {
+                return Ok(Observed::Missing);
+            }
             Err(e) if denied(&e) => return Ok(Observed::Opaque),
             Err(e) => return Err(format!("{}: {e}", exe.display())),
         };
@@ -541,29 +547,6 @@ impl Binder {
             ));
         }
         Ok(Some(bytes == expected))
-    }
-
-    /// Executable evidence when a bound `pid` still runs `expected`, or
-    /// `None` when it provably runs something else (including a deleted
-    /// target, which cannot prove identity). A bound process that turned
-    /// opaque is an error.
-    fn executable_match(
-        &self,
-        pid: u32,
-        prepared: &Path,
-        expected: &ExecutableIdentity,
-    ) -> Result<Option<ExecutableEvidence>, String> {
-        match self.observe_executable(pid)? {
-            Observed::File { link, identity } if identity == *expected => {
-                Ok(Some(ExecutableEvidence {
-                    prepared_path: prepared.to_path_buf(),
-                    observed_link: link,
-                    identity,
-                }))
-            }
-            Observed::File { .. } | Observed::Absent => Ok(None),
-            Observed::Opaque => Err(format!("pid {pid}: executable is no longer readable")),
-        }
     }
 
     /// One resolve pass. See the module docs for the matching rules.
@@ -654,7 +637,7 @@ impl Binder {
                         ));
                     }
                 }
-                Observed::Absent => {}
+                Observed::Missing | Observed::Deleted => {}
                 Observed::Opaque => opaque.push(pid),
             }
         }
@@ -931,7 +914,43 @@ impl Binder {
                     prepared.display()
                 ));
             }
-            match self.executable_match(identity.pid, prepared, &expected)? {
+            let current = match self.observe_executable(identity.pid)? {
+                Observed::File { link, identity } if identity == expected => {
+                    Some(ExecutableEvidence {
+                        prepared_path: prepared.to_path_buf(),
+                        observed_link: link,
+                        identity,
+                    })
+                }
+                Observed::Missing => {
+                    // Exit can remove exe after the earlier live checks.
+                    // Recheck only this ENOENT observation: a real mismatch,
+                    // deleted link or permission failure must remain an error.
+                    let Some(facts) = self.stat(identity.pid)? else {
+                        return Ok(BindingRecheck::Ended);
+                    };
+                    if facts.identity != identity {
+                        return Err(format!(
+                            "pid {} was reused: start_time {} replaced {}",
+                            identity.pid,
+                            facts.identity.start_time_ticks,
+                            identity.start_time_ticks
+                        ));
+                    }
+                    if ended(facts.state) {
+                        return Ok(BindingRecheck::Ended);
+                    }
+                    None
+                }
+                Observed::File { .. } | Observed::Deleted => None,
+                Observed::Opaque => {
+                    return Err(format!(
+                        "pid {}: executable is no longer readable",
+                        identity.pid
+                    ));
+                }
+            };
+            match current {
                 Some(current) if current == *evidence => {}
                 Some(_) => {
                     return Err(format!(

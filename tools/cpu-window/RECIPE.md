@@ -174,6 +174,24 @@ Upload-begin timestamps exclude producer rendering/readback/export. Report that
 limit when deriving upload-to-kernel-completion latency; CPU windows include
 producer work across the counted frame cadence. Neither measure is GPU time.
 
+## Matched CPU producer owned-ring diagnostic
+
+Descriptor schema 4 is the CPU-producer counterpart of schema 3's R arm. It covers the same SDK owned ring (journal schema 7), files transport and a 24- or 512-row bar, with no instrumentation.
+
+The request keeps the historical CPU default: `producer` is absent and the GPU grant is `denied`. That default is not evidence of this mode, because historical CPU peers carry the same request. Two things bind the mode instead:
+- the peer config's explicit `"producer": "cpu"`;
+- the runner's `native-samples.json` `producer` record, which holds the exact receipt `cpu_bar schema=1 source=owned_ring producer=cpu_shm fill=shade_mod128_a255`.
+
+The runner refuses a CPU arm unless that receipt appears exactly once. It also refuses a CPU arm that prints any `gpu_bar`, `gpu_bar_gpu_admission` or `gpu_bar_profile` record. In the other direction, it refuses a receipt from any other arm.
+
+The receipt is stderr text and carries no PID. It is evidence only together with the existing executable hash, dev+inode, argv and PID/starttime binding and the denied grant. It never proves by itself which process emitted it, or that no driver was used.
+
+The peer's historical `gpu_bar_prepare` lines measure the CPU fill's wall span in this mode, not GPU work.
+
+`cpuplan.py` requires the schema-4 descriptor's `schema` to be the integer 4. It also requires the saved plan to pin `peer-config` with an absolute path and a canonical lowercase sha256, and it records that pin in the run's evidence. It does not re-read the live file.
+
+`cpuplan.py` refuses plans that mix producers, including schema 4 with schema 3. A CPU-versus-GPU producer-cost experiment needs its own explicit plan. Schema 3 refuses CPU producer evidence. Schemas 1 to 3 are otherwise unchanged.
+
 ## t341 schema-2 draw diagnostic
 
 Use the same pinned Session, reference client and sibling raster helper for
@@ -264,3 +282,19 @@ Pin source, binary, configuration, helper hashes and file modes before launch. N
 old frozen package is reusable after a binary or helper changes. A native run
 still needs its attended VT/PAM/cleanup wrapper; this offline analyzer does not
 launch a Session or prove safe teardown.
+
+## Integrated CPU retirement comparison
+
+The W2 request/peer pair is also admitted for the existing schema-4 CPU
+owned-ring arm. Its peer must explicitly declare `producer: "cpu"`; the
+request remains CPU, and the installed profile must deny GPU access. W2 does
+not relax the CPU producer receipt, peer-config pin, dimensions, custody,
+process binding or uninstrumented-window gates. Declaring either W2 half alone
+is refused. End counters must show zero explicit retires with W2 enabled and
+`frames-1` with W2 disabled, and `frames-1` predecessor releases in both modes.
+Missing, null, noninteger or mismatched declared counters remain refusals.
+
+Use the same newly built host and producer for both modes and keep the same
+CPU fill, ring geometry, output/mode, frame count and windows. The old W2 GPU
+readback experiment is a separate workload. Neither the forward integration
+nor these device-free checks establish a native CPU saving or latency acceptance.

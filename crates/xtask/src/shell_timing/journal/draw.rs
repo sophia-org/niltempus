@@ -459,6 +459,7 @@ pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String>
         terminal_usec: Vec::with_capacity(expected),
         placements: Vec::new(),
         live_resources: Vec::new(),
+        retire_counters: None,
     };
     let mut batches: Vec<BatchTiming> = Vec::new();
     let mut value_dues: Vec<ValueDueTiming> = Vec::new();
@@ -765,8 +766,13 @@ pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String>
         return Err("post-terminal hold shorter than one observer tick".into());
     }
     match cursor.next()? {
-        Parsed::Legacy(LegacyEvent::End { offered, completed })
-            if offered == expected && completed == expected => {}
+        Parsed::Legacy(LegacyEvent::End {
+            offered,
+            completed,
+            retire_counter_schema: None,
+            explicit_retires_sent: None,
+            predecessor_releases_received: None,
+        }) if offered == expected && completed == expected => {}
         _ => return Err("wrong draw end count".into()),
     }
     if cursor.lines.next().is_some() {

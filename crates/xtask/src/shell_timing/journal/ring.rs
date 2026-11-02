@@ -3,7 +3,7 @@
 //! the retained workload copies a tile pool once, then places it every frame.
 use super::{
     AcceptedUpload, CandidatePlacements, Event as LegacyEvent, ImageSource, Journal, LiveResource,
-    Offer, PermitTiming, Upload, WorkloadMode,
+    Offer, PermitTiming, RetireCounters, Upload, WorkloadMode,
 };
 use serde::{Deserialize, Serialize};
 
@@ -282,6 +282,7 @@ pub(super) fn collect(journal: &str, expected: usize, schema: u64) -> Result<Jou
         terminal_usec: Vec::with_capacity(expected),
         placements: Vec::new(),
         live_resources: Vec::new(),
+        retire_counters: None,
     };
     let mut copies = Vec::with_capacity(expected);
     let mut last = ready.ready_usec;
@@ -454,11 +455,21 @@ pub(super) fn collect(journal: &str, expected: usize, schema: u64) -> Result<Jou
         result.offers.push(offer);
         result.terminal_usec.push(last);
     }
-    if !matches!(next::<LegacyEvent>(&mut lines, schema)?, LegacyEvent::End { offered, completed }
-        if offered == expected && completed == expected)
-        || lines.next().is_some()
-    {
-        return Err("wrong ring end count or records after end".into());
+    match next::<LegacyEvent>(&mut lines, schema)? {
+        LegacyEvent::End {
+            offered,
+            completed,
+            retire_counter_schema,
+            explicit_retires_sent,
+            predecessor_releases_received,
+        } if offered == expected && completed == expected && lines.next().is_none() => {
+            result.retire_counters = RetireCounters::from_end(
+                retire_counter_schema,
+                explicit_retires_sent,
+                predecessor_releases_received,
+            )?;
+        }
+        _ => return Err("wrong ring end count or records after end".into()),
     }
     result.ring = Some(RingEvidence {
         registration: ready,

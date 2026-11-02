@@ -27,6 +27,12 @@ Compared runs share workload, native target, bar height and helper pin.
 Historical GPU I/S/G permits a different Session per arm; GPU owned-ring
 comparisons require one Session and peer binary across arms. Other comparisons
 require one Session. One boot, machine state and run order remain recipe checks.
+
+Schema 4 is the matched CPU producer: a fresh schema-7 SDK ring journal whose
+native-samples.json carries the runner's exact CPU producer receipt. Its
+request leaves the historical CPU default, so the receipt, not the request,
+binds the mode. Runs never mix producers; a producer-cost comparison needs its
+own explicit plan.
 """
 import argparse
 import hashlib
@@ -45,6 +51,8 @@ GPU_SOURCES = {"bytes", "sealed", "owned_ring", "dma_buf"}
 DRAW_SOURCES = {"draw": "draw", "mixed": "mixed", "ring": "owned_ring"}  # journal -> plan
 WORKLOADS = {"retained", "continuous", "bursty"}
 MAX_GAP_MS = 20
+CPU_PRODUCER = {"kind": "cpu",
+                "receipt": "cpu_bar schema=1 source=owned_ring producer=cpu_shm fill=shade_mod128_a255"}
 
 
 class Refused(Exception):
@@ -114,17 +122,43 @@ def anchor_ns(sample, lines, generation):
     return sample["completed_monotonic_usec"] * 1000
 
 
+def retire_counters(request, journal):
+    """A retire_on_present arm needs the peer's exact counters for its mode
+    (retire_counter_schema 1; no explicit retires, every predecessor released).
+    Without the key, a counted journal is held to the explicit path and an
+    uncounted one keeps its original acceptance."""
+    named = request.get("retire_on_present", False)
+    if type(named) is not bool:
+        raise Refused("retire_on_present must be a boolean in the request")
+    if not named and "retire_counters" not in journal:
+        return
+    if not is_int(request.get("frames"), 1):
+        raise Refused("retire_on_present requires an integer frame count in the request")
+    counters = journal.get("retire_counters")
+    predecessors = request["frames"] - 1
+    want = {"retire_counter_schema": 1, "explicit_retires_sent": 0 if named else predecessors,
+            "predecessor_releases_received": predecessors}
+    # Exact keys and real integers: Python's True == 1 and 2119.0 == 2119 must not pass.
+    if type(counters) is not dict or counters.keys() != want.keys() \
+            or not all(is_int(counters[k]) and counters[k] == v for k, v in want.items()):
+        raise Refused(f"retire counters {counters!r} differ from the declared retire_on_present mode {want!r}")
+
+
 def build_run(name, arm, stage):
     stage = Path(stage).resolve()
     d = load(stage / "panel-diagnostic.json")
     plain_ring = d.get("schema") == 1
     gpu = d.get("schema") == 3
-    if d.get("schema") not in (1, 2, 3) or not is_int(d.get("warmup"), 1) or not is_int(d.get("counted"), 1) \
-            or (not plain_ring and not gpu and not isinstance(d.get("raster"), dict)) \
-            or ((plain_ring or gpu) and ("raster" in d or "workload" in d)) \
-            or (gpu and d.get("bar_height") not in (24, 512)) \
-            or (not gpu and "bar_height" in d):
-        raise Refused("panel-diagnostic.json: expected a plain schema-1, pinned-helper schema-2 or GPU schema-3 descriptor")
+    cpu = d.get("schema") == 4
+    if cpu and type(d["schema"]) is not int:  # 4.0 == 4 in Python
+        raise Refused("panel-diagnostic.json: CPU schema-4 descriptor requires an integer schema")
+    pinned_height = gpu or cpu
+    if d.get("schema") not in (1, 2, 3, 4) or not is_int(d.get("warmup"), 1) or not is_int(d.get("counted"), 1) \
+            or (not plain_ring and not pinned_height and not isinstance(d.get("raster"), dict)) \
+            or ((plain_ring or pinned_height) and ("raster" in d or "workload" in d)) \
+            or (pinned_height and d.get("bar_height") not in (24, 512)) \
+            or (not pinned_height and "bar_height" in d):
+        raise Refused("panel-diagnostic.json: expected a plain schema-1, pinned-helper schema-2, GPU schema-3 or CPU schema-4 descriptor")
     start, end = d["warmup"], d["warmup"] + d["counted"]
     plan_bytes = (stage / "plan.json").read_bytes()
     if hashlib.sha256(plan_bytes).hexdigest() != (d.get("plan") or {}).get("sha256"):
@@ -136,8 +170,8 @@ def build_run(name, arm, stage):
                 "sophia_sha256": ((request.get("artifacts") or {}).get("sophia") or {}).get("sha256"),
                 "peer_sha256": ((request.get("artifacts") or {}).get("peer") or {}).get("sha256"),
                 "bar_height": d.get("bar_height"),
-                "raster_sha256": None if (plain_ring or gpu) else d["raster"].get("sha256")}
-    if not (isinstance(compared["sophia_sha256"], str) and (plain_ring or gpu or isinstance(compared["raster_sha256"], str))
+                "raster_sha256": None if (plain_ring or pinned_height) else d["raster"].get("sha256")}
+    if not (isinstance(compared["sophia_sha256"], str) and (plain_ring or pinned_height or isinstance(compared["raster_sha256"], str))
             and isinstance(compared["target"], dict)):
         raise Refused("descriptor or plan lacks the target, Session or helper pin")
 
@@ -152,7 +186,8 @@ def build_run(name, arm, stage):
     journal = native.get("journal") or {}
     source = journal.get("source")
     if native.get("schema") != 2 or native.get("verdict") != "joined_only" \
-            or (source not in SOURCES and not (gpu and source in GPU_SOURCES)):
+            or (source not in SOURCES and not (gpu and source in GPU_SOURCES)) \
+            or (cpu and source != "owned_ring"):
         raise Refused(f"native-samples.json: want a schema-2 joined_only {sorted(SOURCES | GPU_SOURCES)} arm")
     draw = journal.get("draw") or {}
     if plain_ring:
@@ -174,9 +209,32 @@ def build_run(name, arm, stage):
                 or request.get("wire") != want_wire \
                 or journal.get("wire") != want_wire:
             raise Refused("schema-3 descriptor requires request producer=gpu with source and wire matching the GPU journal")
+        if "producer" in native:
+            raise Refused("schema-3 descriptor refuses CPU producer evidence")
+    elif cpu:
+        if journal.get("schema") != 7 or source != "owned_ring" or draw \
+                or journal.get("workload", "fresh") != "fresh" \
+                or journal.get("interval_msec") is not None or journal.get("retained_resources") is not None \
+                or journal.get("wire") != "files":
+            raise Refused("schema-4 descriptor requires a fresh schema-7 files owned-ring journal")
+        # The request keeps the historical CPU default; only the runner's
+        # exact receipt, bound to the pinned peer config, proves this mode.
+        if "producer" in request or request.get("source") != "owned_ring" or request.get("wire") != "files" \
+                or native.get("producer") != CPU_PRODUCER:
+            raise Refused("schema-4 descriptor requires the exact CPU producer receipt for a files owned-ring request")
+        # The receipt is bound to the peer config the runner pinned; the
+        # saved plan's pin is recorded, never the live file re-read.
+        pin = (request.get("artifacts") or {}).get("peer-config")
+        path, digest = (pin.get("path"), pin.get("sha256")) if isinstance(pin, dict) else (None, None)
+        if not (isinstance(path, str) and path.startswith("/") and ".." not in Path(path).parts
+                and not any(ord(c) < 32 or ord(c) == 127 for c in path)) \
+                or not (isinstance(digest, str) and len(digest) == 64
+                        and all(c in "0123456789abcdef" for c in digest)):
+            raise Refused("schema-4 descriptor requires an absolute peer-config path and canonical sha256 pin")
     elif journal.get("schema") != 6 or DRAW_SOURCES.get(draw.get("source")) != source \
             or d.get("workload") not in WORKLOADS or draw.get("workload") != d.get("workload"):
         raise Refused("descriptor workload or source differs from the schema-6 draw journal")
+    retire_counters(request, journal)
     samples = {s.get("candidate_generation"): s for s in native.get("samples", [])}
     if sorted(samples) != list(range(1, end + 1)) or len(native["samples"]) != end:
         raise Refused(f"native-samples.json: generations are not exactly 1..{end}")
@@ -239,6 +297,9 @@ def build_run(name, arm, stage):
     run["evidence"] = {"stage": str(stage), "source": source, "compared": compared,
                        "clock": "kernel page-flip, drm_timestamp_monotonic=1 on both anchor completions",
                        "sha256": {f: hashlib.sha256((stage / f).read_bytes()).hexdigest() for f in inputs}}
+    if cpu:
+        run["evidence"]["producer"] = "cpu"
+        run["evidence"]["peer_config"] = {"path": path, "sha256": digest}
     return run
 
 
@@ -262,13 +323,15 @@ def build(runs, baseline=None):
     for key in ("workload", "target", "raster_sha256", "bar_height"):
         if len({json.dumps(r["evidence"]["compared"][key], sort_keys=True) for r in plan}) > 1:
             errors.append(f"compared runs differ in {key}")
+    if len({r["evidence"].get("producer") for r in plan}) > 1:
+        errors.append("compared runs mix producers; a producer-cost comparison needs its own plan")
     matched_ring = gpu_plan and any(r["evidence"]["source"] == "owned_ring" for r in plan)
     if (not gpu_plan or matched_ring) and len({r["evidence"]["compared"]["sophia_sha256"] for r in plan}) > 1:
         errors.append("compared runs differ in sophia_sha256")
     if matched_ring:
         peers = [r["evidence"]["compared"]["peer_sha256"] for r in plan]
         if any(not isinstance(p, str) or len(p) != 64 for p in peers) or len(set(peers)) != 1:
-            errors.append("GPU owned-ring comparison requires one pinned peer_sha256")
+            errors.append("owned-ring comparison requires one pinned peer_sha256")
     if len({n for n, _, _ in runs}) != len(runs):
         errors.append("run names must be unique")
     if baseline is not None and baseline not in {a for _, a, _ in runs}:

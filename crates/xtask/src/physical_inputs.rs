@@ -83,10 +83,11 @@ const PRODUCT_KEYS: [&str; 9] = [
     "nim_stdlib_sha256",
     "nim_command",
 ];
-pub const FEATURES: [&str; 3] = [
+pub const FEATURES: [&str; 4] = [
     "native-session",
     "atomic-scanout-live",
     "native-session,experimental-shell-capture",
+    "native-session,experimental-shell-capture,experimental-shell-retire-on-present",
 ];
 pub const PACKAGES: [&str; 3] = [
     "sophia-cli",

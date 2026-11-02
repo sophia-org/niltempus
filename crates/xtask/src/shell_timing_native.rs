@@ -2,6 +2,7 @@
 use crate::shell_timing::{DrawSource, DrawWorkload, ImageSource, WorkloadMode};
 use crate::{hex, output_file_native_run::process, sha256};
 use serde::{Deserialize, Serialize};
+mod cost_environment;
 mod external;
 pub use external::ExternalTiming;
 use std::{
@@ -84,6 +85,16 @@ pub struct Request {
     /// historical request, plan and argv byte-identical.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub managed_destination_reuse: bool,
+    /// Opt-in W2: the host permits the bar to retire its predecessor on
+    /// presentation. Valid solely for a files owned-ring plan whose peer
+    /// declares the same `retire_on_present`; the pair is the setting, not
+    /// either half. Absent/false keeps every historical request, plan and
+    /// argv byte-identical. The runner does not prove the host binary was
+    /// built with `experimental-shell-retire-on-present`: the package
+    /// prelaunch gate binds the host hash to its signed build receipt and runs
+    /// that binary's `validate-session-args` on the paired argv before sealing.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub retire_on_present: bool,
 }
 
 /// Who renders the peer's pixels.
@@ -138,7 +149,22 @@ struct PeerConfig {
     capture_profile: bool,
     #[serde(default, deserialize_with = "present_bool")]
     dma_reuse: Option<bool>,
+    /// W2 peer key; its presence declares a counted run.
+    #[serde(default, deserialize_with = "present_bool")]
+    retire_on_present: Option<bool>,
     image: Option<ImageConfig>,
+    /// Explicit pixel producer of a matched-benchmark peer. Absent keeps
+    /// every historical config: historical CPU peers carry no key, so
+    /// absence is never read as either producer. Explicit null is invalid.
+    #[serde(default, deserialize_with = "present_producer")]
+    producer: Option<ProducerKind>,
+}
+
+fn present_producer<'de, D>(deserializer: D) -> Result<Option<ProducerKind>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    ProducerKind::deserialize(deserializer).map(Some)
 }
 
 fn present_bool<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
@@ -148,7 +174,7 @@ where
     bool::deserialize(deserializer).map(Some)
 }
 
-fn present_u64<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+pub(crate) fn present_u64<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
@@ -213,6 +239,13 @@ impl PeerConfig {
         }
         if self.dma_reuse == Some(true) && !self.capture_profile {
             return Err("DMA reuse requires capture-profile diagnostics".into());
+        }
+        if self.retire_on_present.is_some()
+            && (self.source != ImageSource::OwnedRing || self.wire != "files")
+        {
+            return Err(
+                "retire_on_present requires the files wire and an owned_ring source".into(),
+            );
         }
         if self.source == ImageSource::DmaBuf {
             // GPU DMA-BUF content changes each frame, even when backing is
@@ -429,6 +462,13 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
     {
         return Err("managed destination reuse requires a capture-profile dma_buf plan".into());
     }
+    if request.retire_on_present
+        && (request.wire != "files"
+            || request.source != ImageSource::OwnedRing
+            || request.reference_workload.is_some())
+    {
+        return Err("retire-on-present requires a files owned-ring peer plan".into());
+    }
     let mut texts = BTreeMap::new();
     for (key, artifact) in &request.artifacts {
         absolute(&artifact.path)?;
@@ -482,6 +522,31 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
         }
         if request.managed_destination_reuse && peer.dma_reuse != Some(true) {
             return Err("managed destination reuse requires peer dma_reuse".into());
+        }
+        if request.retire_on_present != (peer.retire_on_present == Some(true)) {
+            return Err(
+                "retire-on-present requires the peer key and the host flag together".into(),
+            );
+        }
+        // A declared producer must be the request's. The matched CPU
+        // producer exists only as a files owned-ring arm; the rules above
+        // already refuse it any instrumentation, capture profile or DMA key
+        // (owned ring admits only none/capture-profile, which needs GPU).
+        if let Some(producer) = peer.producer
+            && (producer != request.producer
+                || producer == ProducerKind::Cpu
+                    && (peer.source != ImageSource::OwnedRing || peer.wire != "files"))
+        {
+            return Err(
+                "peer producer differs from the request or is not a plain CPU owned-ring arm"
+                    .into(),
+            );
+        }
+        if request.retire_on_present
+            && request.producer == ProducerKind::Cpu
+            && peer.producer != Some(ProducerKind::Cpu)
+        {
+            return Err("CPU retire-on-present requires explicit peer producer=cpu".into());
         }
         external::validate(request, &peer)?;
         if peer.wire != request.wire
@@ -603,6 +668,9 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
     }
     if request.managed_destination_reuse {
         argv.push("--experimental-shell-capture-destination-reuse".into());
+    }
+    if request.retire_on_present {
+        argv.push("--experimental-shell-retire-on-present".into());
     }
     Ok(argv)
 }
@@ -767,7 +835,88 @@ pub fn validate_captured_config(
     {
         return Err("captured ring geometry differs from prepared configuration".into());
     }
+    validate_retire_counters(metrics, peer.retire_on_present, request.frames)
+}
+
+/// A peer that declares `retire_on_present` must report the exact counters of
+/// its mode: every predecessor released, and explicit retires only when the
+/// key is false. Without the key, a counted journal is held to the explicit
+/// path and an uncounted one keeps its original acceptance.
+pub fn validate_retire_counters(
+    metrics: &crate::shell_timing::Journal,
+    retire_on_present: Option<bool>,
+    frames: usize,
+) -> Result<(), String> {
+    let predecessors = frames.saturating_sub(1) as u64;
+    let expected = |named: bool| crate::shell_timing::RetireCounters {
+        retire_counter_schema: 1,
+        explicit_retires_sent: if named { 0 } else { predecessors },
+        predecessor_releases_received: predecessors,
+    };
+    let accepted = match retire_on_present {
+        Some(named) => metrics.retire_counters == Some(expected(named)),
+        None => metrics
+            .retire_counters
+            .is_none_or(|counters| counters == expected(false)),
+    };
+    if !accepted {
+        return Err("retire counters differ from the declared retire_on_present mode".into());
+    }
     Ok(())
+}
+
+/// The matched CPU producer's one start receipt, matched byte for byte.
+pub const CPU_PRODUCER_RECEIPT: &str =
+    "cpu_bar schema=1 source=owned_ring producer=cpu_shm fill=shade_mod128_a255";
+
+/// Bind the observed producer to the peer config's explicit key. The
+/// stderr receipt carries no PID: it is evidence only together with the
+/// artifact hash, dev+inode, argv and PID/starttime binding and the denied
+/// GPU grant, never per-process or no-driver proof by itself. A CPU arm
+/// needs exactly one exact receipt and no GPU admission or profile record;
+/// every other arm (explicit gpu or historical absent key) refuses any
+/// CPU receipt. Returns the native-samples `producer` value for CPU only.
+pub fn validate_producer_receipt(
+    request: &Request,
+    config: &[u8],
+    capture: &str,
+) -> Result<Option<serde_json::Value>, String> {
+    let declared = if request.reference_workload.is_some() {
+        None
+    } else {
+        serde_json::from_slice::<PeerConfig>(config)
+            .map_err(|e| e.to_string())?
+            .producer
+    };
+    let mut receipts = 0;
+    for line in capture.lines().map(str::trim_start) {
+        if line.contains("cpu_bar") {
+            if line != CPU_PRODUCER_RECEIPT {
+                return Err("malformed or glued CPU producer receipt".into());
+            }
+            receipts += 1;
+        }
+        if declared == Some(ProducerKind::Cpu)
+            && (line.starts_with("gpu_bar ")
+                || [
+                    "gpu_bar schema=",
+                    "gpu_bar_gpu_admission",
+                    "gpu_bar_profile",
+                ]
+                .iter()
+                .any(|tag| line.contains(tag)))
+        {
+            return Err("CPU producer arm emitted GPU admission or profile evidence".into());
+        }
+    }
+    match (declared, receipts) {
+        (Some(ProducerKind::Cpu), 1) => Ok(Some(
+            serde_json::json!({"kind": "cpu", "receipt": CPU_PRODUCER_RECEIPT}),
+        )),
+        (Some(ProducerKind::Cpu), _) => Err("CPU producer arm needs exactly one receipt".into()),
+        (_, 0) => Ok(None),
+        _ => Err("CPU producer receipt from a non-CPU arm".into()),
+    }
 }
 
 /// A reference peer must timestamp submission and receipt in the kernel
@@ -1069,6 +1218,7 @@ fn run_inner(
                     None => None,
                 };
                 let mut environment = vec![("SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE", "1")];
+                environment.extend(cost_environment::selected(|key| std::env::var_os(key)));
                 if plan.request.instrumentation == "capture-profile" {
                     environment.push(("SOPHIA_RENDER_TIMING", "1"));
                 }
@@ -1129,6 +1279,11 @@ fn run_inner(
                 return Err("peer configuration changed during capture".into());
             }
             validate_captured_config(&metrics, &plan.request, &peer_bytes)?;
+            let producer = validate_producer_receipt(
+                &plan.request,
+                &peer_bytes,
+                std::str::from_utf8(&capture).map_err(|e| e.to_string())?,
+            )?;
             let offers = &metrics.offers;
             let samples = crate::shell_timing::join(
                 &host,
@@ -1166,6 +1321,9 @@ fn run_inner(
                 crate::shell_timing_cost::for_mode(&plan.request.instrumentation, counters, offers)?
             };
             let mut report = serde_json::json!({"schema":2,"verdict":"joined_only","instrumentation":plan.request.instrumentation,"offered":offers.len(),"samples":samples,"costs":costs,"journal":metrics,"progress":progress});
+            if let Some(producer) = producer {
+                report["producer"] = producer;
+            }
             if let Some(timing) = &plan.request.external_timing {
                 report["external_timing"] =
                     serde_json::to_value(timing).map_err(|e| e.to_string())?;

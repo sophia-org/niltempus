@@ -408,3 +408,77 @@ fn retained_ring_journal_refuses_pool_and_placement_substitution() {
     bad.insert(11, copy);
     assert!(collect_metrics(&encode(&bad), 3).is_err());
 }
+
+/// The end record's retire counters are an additive, versioned extension: all
+/// three fields at schema 1 or none of them. Partial or other-schema data is
+/// malformed, not ignored.
+#[test]
+fn ring_end_counters_are_exact_or_absent() {
+    use xtask::shell_timing::RetireCounters;
+    let rows = sdk_rows();
+    assert!(
+        collect_metrics(&encode(&rows), 3)
+            .unwrap()
+            .retire_counters
+            .is_none()
+    );
+    let end = rows.len() - 1;
+    let counted = |sent: Value, received: Value, schema: Value| {
+        let mut rows = sdk_rows();
+        rows[end]["retire_counter_schema"] = schema;
+        rows[end]["explicit_retires_sent"] = sent;
+        rows[end]["predecessor_releases_received"] = received;
+        collect_metrics(&encode(&rows), 3)
+    };
+    assert_eq!(
+        counted(json!(2), json!(2), json!(1))
+            .unwrap()
+            .retire_counters,
+        Some(RetireCounters {
+            retire_counter_schema: 1,
+            explicit_retires_sent: 2,
+            predecessor_releases_received: 2,
+        })
+    );
+    assert_eq!(
+        counted(json!(0), json!(2), json!(1))
+            .unwrap()
+            .retire_counters
+            .unwrap()
+            .explicit_retires_sent,
+        0
+    );
+    for (sent, received, schema) in [
+        (json!(0), json!(2), json!(2)),
+        (json!(0), json!(2), Value::Null),
+        (Value::Null, json!(2), json!(1)),
+        (json!(0), Value::Null, json!(1)),
+        (json!("0"), json!(2), json!(1)),
+        (json!(-1), json!(2), json!(1)),
+        (Value::Null, Value::Null, Value::Null),
+    ] {
+        assert!(
+            counted(sent.clone(), received.clone(), schema.clone()).is_err(),
+            "{sent} {received} {schema}"
+        );
+    }
+    // An explicit null is not absence, even as the only counter key.
+    for key in [
+        "retire_counter_schema",
+        "explicit_retires_sent",
+        "predecessor_releases_received",
+    ] {
+        let mut rows = sdk_rows();
+        rows[end][key] = Value::Null;
+        assert!(
+            collect_metrics(&encode(&rows), 3).is_err(),
+            "lone null {key}"
+        );
+    }
+    let mut rows = sdk_rows();
+    rows[end]["retire_counters"] = json!({"retire_counter_schema": 1});
+    assert!(
+        collect_metrics(&encode(&rows), 3).is_err(),
+        "unknown end key"
+    );
+}

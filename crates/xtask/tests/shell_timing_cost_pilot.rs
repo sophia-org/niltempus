@@ -234,6 +234,7 @@ impl World {
             reference_workload: None,
             producer: Default::default(),
             managed_destination_reuse: false,
+            retire_on_present: false,
             frames: shape.frames,
             mode_millihz: 120_000,
             instrumentation: shape.instrumentation.into(),

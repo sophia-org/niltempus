@@ -226,6 +226,7 @@ fn request(arm: &Arm) -> xtask::shell_timing_native::Request {
         reference_workload: None,
         producer: Default::default(),
         managed_destination_reuse: false,
+        retire_on_present: false,
     }
 }
 

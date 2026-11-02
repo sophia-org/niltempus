@@ -23,6 +23,9 @@ const NS: u64 = INITIAL_TIME_NAMESPACE_INODE;
 const OFFSETS: &str = "monotonic 0 0\nboottime 0 0\n";
 const HOST_ARGS: [&str; 3] = ["session", "run", "--display=:94"];
 
+#[path = "support/binding_exit_race.rs"]
+mod binding_exit_race;
+
 #[test]
 fn environment_collector_refuses_bad_bounds_before_binding() {
     use xtask::shell_timing_process_set::receive_environment;

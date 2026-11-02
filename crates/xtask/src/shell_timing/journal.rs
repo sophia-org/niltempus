@@ -69,6 +69,35 @@ fn fresh(mode: &WorkloadMode) -> bool {
     *mode == WorkloadMode::Fresh
 }
 
+/// The peer's run totals for the predecessor-retirement exchange, carried on
+/// its end record as `retire_counter_schema` 1. Absent on peers without them.
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+pub struct RetireCounters {
+    pub retire_counter_schema: u64,
+    pub explicit_retires_sent: u64,
+    pub predecessor_releases_received: u64,
+}
+
+impl RetireCounters {
+    /// The three end fields together, or none of them. Anything partial, or
+    /// another counter schema, is malformed rather than ignored.
+    pub(super) fn from_end(
+        schema: Option<u64>,
+        sent: Option<u64>,
+        received: Option<u64>,
+    ) -> Result<Option<Self>, String> {
+        match (schema, sent, received) {
+            (None, None, None) => Ok(None),
+            (Some(1), Some(sent), Some(received)) => Ok(Some(Self {
+                retire_counter_schema: 1,
+                explicit_retires_sent: sent,
+                predecessor_releases_received: received,
+            })),
+            _ => Err("malformed retire counters on the end record".into()),
+        }
+    }
+}
+
 #[derive(Serialize)]
 pub struct Journal {
     pub schema: u64,
@@ -94,6 +123,8 @@ pub struct Journal {
     pub placements: Vec<CandidatePlacements>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub live_resources: Vec<LiveResource>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retire_counters: Option<RetireCounters>,
 }
 
 #[derive(Deserialize)]
@@ -162,6 +193,13 @@ enum Event {
     End {
         offered: usize,
         completed: usize,
+        // Absence is the legacy end record; an explicit null is refused.
+        #[serde(default, deserialize_with = "crate::shell_timing_native::present_u64")]
+        retire_counter_schema: Option<u64>,
+        #[serde(default, deserialize_with = "crate::shell_timing_native::present_u64")]
+        explicit_retires_sent: Option<u64>,
+        #[serde(default, deserialize_with = "crate::shell_timing_native::present_u64")]
+        predecessor_releases_received: Option<u64>,
     },
 }
 
@@ -590,15 +628,25 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
     // Shape A: no release records. The pool stays live at End; any
     // retained_released record in this shape is a hard error, not a cue to
     // weaken custody. The live set is derived from the accepted pool below.
-    match event(lines.next().ok_or("missing end")?, schema)? {
-        Event::End { offered, completed } if offered == expected && completed == expected => {}
+    let retire_counters = match event(lines.next().ok_or("missing end")?, schema)? {
+        Event::End {
+            offered,
+            completed,
+            retire_counter_schema,
+            explicit_retires_sent,
+            predecessor_releases_received,
+        } if offered == expected && completed == expected => RetireCounters::from_end(
+            retire_counter_schema,
+            explicit_retires_sent,
+            predecessor_releases_received,
+        )?,
         Event::RetainedReleased { .. } => {
             return Err(
                 "schema 3 shape A has no retained_released records; tiles stay live at end".into(),
             );
         }
         _ => return Err("wrong end counts".into()),
-    }
+    };
     if lines.next().is_some() {
         return Err("records after end".into());
     }
@@ -627,5 +675,6 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
         terminal_usec,
         placements,
         live_resources,
+        retire_counters,
     })
 }

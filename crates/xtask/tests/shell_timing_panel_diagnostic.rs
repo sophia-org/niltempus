@@ -55,6 +55,7 @@ fn fixture() -> (Descriptor, Request) {
             reference_workload: None,
             producer: Default::default(),
             managed_destination_reuse: false,
+            retire_on_present: false,
         },
     )
 }
@@ -255,4 +256,52 @@ fn draw_diagnostic_requires_helper_pin_and_explicit_updating_workload() {
     d.workload = None;
     r.source = ImageSource::OwnedRing;
     assert!(policy(&d, &r, 0).is_err()); // No silent alteration of frozen schema 1.
+}
+
+#[test]
+fn cpu_schema4_admits_only_plain_cpu_owned_ring_arms() {
+    use xtask::shell_timing_native::ProducerKind;
+    let (mut d, mut r) = fixture();
+    d.schema = 4;
+    for height in [24, 512] {
+        d.bar_height = Some(height);
+        for retire_on_present in [false, true] {
+            r.retire_on_present = retire_on_present;
+            policy(&d, &r, 0).unwrap();
+        }
+    }
+    // Unpinned or wrong bar height, helper or workload refused.
+    for height in [None, Some(108)] {
+        d.bar_height = height;
+        assert!(policy(&d, &r, 0).is_err());
+    }
+    d.bar_height = Some(24);
+    d.workload = Some(DrawWorkload::Continuous);
+    assert!(policy(&d, &r, 0).is_err());
+    d.workload = None;
+    // No cross-mode: the GPU binding, another source or wire, a reference
+    // workload or any instrumentation is refused.
+    r.producer = ProducerKind::Gpu;
+    assert!(policy(&d, &r, 0).is_err());
+    r.producer = ProducerKind::Cpu;
+    for source in [ImageSource::Isb, ImageSource::Bytes, ImageSource::DmaBuf] {
+        r.source = source;
+        assert!(policy(&d, &r, 0).is_err());
+    }
+    r.source = ImageSource::OwnedRing;
+    r.wire = "ipc".into();
+    assert!(policy(&d, &r, 0).is_err());
+    r.wire = "files".into();
+    r.reference_workload = Some(DrawWorkload::Continuous);
+    assert!(policy(&d, &r, 0).is_err());
+    r.reference_workload = None;
+    for mode in ["capture-profile", "cpu-only", "profile", "progress"] {
+        r.instrumentation = mode.into();
+        assert!(policy(&d, &r, 0).is_err(), "{mode}");
+    }
+    r.instrumentation = "none".into();
+    policy(&d, &r, 0).unwrap();
+    // Schema 3 still refuses the CPU arm it never admitted.
+    d.schema = 3;
+    assert!(policy(&d, &r, 0).is_err());
 }
