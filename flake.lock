@@ -114,11 +114,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792550433,
-        "narHash": "sha256-Cdt5fXi9jxmpUCy159//9u5LqGBfcZsYmzkIaFKZMDo=",
+        "lastModified": 1792551251,
+        "narHash": "sha256-Bt03aiBZjipriVIW26rt/kWPuDcpsKYHhgctQbtNiDc=",
         "owner": "sophia-org",
         "repo": "kleis",
-        "rev": "574d4004129fdc7ea384254c243e51516974a69b",
+        "rev": "0907d29e2b82b686544a0bccf3a3461222b647b1",
         "type": "github"
       },
       "original": {
@@ -306,11 +306,11 @@
         "rust-overlay": "rust-overlay_3"
       },
       "locked": {
-        "lastModified": 1792549226,
-        "narHash": "sha256-M+FYZCzdonJ1Yk144FrwF3/OhZu8e9QsUmUZheS9S90=",
+        "lastModified": 1793743141,
+        "narHash": "sha256-dqD5cerp3y3ZIn4CCv1yJ2K+r4u0hkiSs8CL+Vv0CK0=",
         "owner": "sophia-org",
         "repo": "sophia",
-        "rev": "1c9638093337012a9a0fb6597d9a0c4a785d4637",
+        "rev": "8d694554c7de562e7ba726f152d47606abf581af",
         "type": "github"
       },
       "original": {

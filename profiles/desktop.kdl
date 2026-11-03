@@ -260,8 +260,8 @@ shortcut {
 }
 session {
     window-manager "@hagia@"
-    // Keep the development GPU outside this desktop even without its seat1 rule.
-    exclude-gpu "pci-0000:16:00.0"
+    // The only connected monitor is on the integrated GPU.
+    exclude-gpu "pci-0000:03:00.0"
     // Admits host scripting for WM reloads.
     control "host-admin"
     application "terminal" { exec "/usr/bin/kitty"; }
@@ -321,28 +321,18 @@ input {
 output {
     availability "adaptive"
     fallback-policy-key 1
-    named DP-1 {
-        gpu "pci-0000:03:00.0"
+    named HDMI-A-2 {
+        gpu "pci-0000:16:00.0"
         policy-key 1
-        mode "2560x1440@120"
-        scale auto
+        mode "1920x1080@60"
+        scale 1
         position 0 0
         enabled #true
         focus-at-startup #true
-        vrr 1
-    }
-    named HDMI-A-1 {
-        gpu "pci-0000:03:00.0"
-        policy-key 2
-        mode "1920x1080@60"
-        scale 1
-        position 2560 0
-        enabled #true
-        focus-at-startup #false
         vrr 0
     }
-    // Keep the development connector dark as well as excluding its GPU above.
-    named HDMI-A-2 { enabled #false; }
+    named DP-1 { enabled #false; }
+    named HDMI-A-1 { enabled #false; }
     // Unnamed outputs stay off unless a fallback is needed to reach the desktop.
     inherit-sophia #false
 }
