@@ -305,3 +305,61 @@ fn cpu_schema4_admits_only_plain_cpu_owned_ring_arms() {
     d.schema = 3;
     assert!(policy(&d, &r, 0).is_err());
 }
+
+#[test]
+fn retained_schema5_only_admits_the_uninstrumented_cpu_tile_workload() {
+    use xtask::shell_timing_native::ProducerKind;
+    let (mut d, mut r) = fixture();
+    d.schema = 5;
+    d.bar_height = Some(512);
+    d.workload = Some(DrawWorkload::Retained);
+    policy(&d, &r, 0).unwrap();
+    for source in [ImageSource::Isb, ImageSource::DmaBuf, ImageSource::Draw] {
+        r.source = source;
+        assert!(policy(&d, &r, 0).is_err());
+    }
+    r.source = ImageSource::OwnedRing;
+    r.producer = ProducerKind::Gpu;
+    assert!(policy(&d, &r, 0).is_err());
+    r.producer = ProducerKind::Cpu;
+    r.retire_on_present = true;
+    assert!(policy(&d, &r, 0).is_err());
+    r.retire_on_present = false;
+    r.reference_workload = Some(DrawWorkload::Retained);
+    assert!(policy(&d, &r, 0).is_err());
+    r.reference_workload = None;
+    r.wire = "ipc".into();
+    assert!(policy(&d, &r, 0).is_err());
+    r.wire = "files".into();
+    for height in [None, Some(24), Some(513)] {
+        d.bar_height = height;
+        assert!(policy(&d, &r, 0).is_err());
+    }
+    d.bar_height = Some(512);
+    for workload in [
+        None,
+        Some(DrawWorkload::Continuous),
+        Some(DrawWorkload::Idle),
+    ] {
+        d.workload = workload;
+        assert!(policy(&d, &r, 0).is_err());
+    }
+    d.workload = Some(DrawWorkload::Retained);
+    for mode in ["capture-profile", "cpu-only", "profile", "progress"] {
+        r.instrumentation = mode.into();
+        assert!(policy(&d, &r, 0).is_err());
+    }
+    r.instrumentation = "none".into();
+    assert!(policy(&d, &r, 1).is_err());
+    d.raster = Some(Artifact {
+        path: d.sampler.path.clone(),
+        sha256: d.sampler.sha256.clone(),
+    });
+    assert!(policy(&d, &r, 0).is_err());
+    d.raster = None;
+    policy(&d, &r, 0).unwrap();
+    for schema in [1, 2, 3, 4] {
+        d.schema = schema;
+        assert!(policy(&d, &r, 0).is_err(), "frozen schema {schema}");
+    }
+}

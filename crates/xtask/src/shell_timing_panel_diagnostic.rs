@@ -32,7 +32,7 @@ pub struct Descriptor {
     pub raster: Option<Artifact>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workload: Option<DrawWorkload>,
-    /// Schemas 3 (explicit GPU producer) and 4 (matched CPU producer) pin
+    /// Schemas 3 (GPU), 4 (fresh CPU) and 5 (retained CPU tiles) pin
     /// the bar height so compared runs cannot mix 24- and 512-line workloads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bar_height: Option<u64>,
@@ -93,6 +93,18 @@ pub fn policy(d: &Descriptor, r: &Request, probe: u64) -> Result<(), String> {
                 && r.source == ImageSource::OwnedRing
                 && r.wire == "files"
         }
+        // The existing raw ring peer uploads four immutable CPU tiles once.
+        5 => {
+            d.raster.is_none()
+                && d.workload == Some(DrawWorkload::Retained)
+                && d.bar_height == Some(512)
+                && r.producer == ProducerKind::Cpu
+                && r.reference_workload.is_none()
+                && !r.retire_on_present
+                && !r.managed_destination_reuse
+                && r.source == ImageSource::OwnedRing
+                && r.wire == "files"
+        }
         _ => false,
     };
     // The longer schema-2 window reduces counter quantization after the
@@ -133,6 +145,29 @@ fn artifact(value: &Artifact, cap: u64) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+fn retained_ring_config(config: &serde_json::Value) -> bool {
+    // Native request validation already binds output, frame count and hold time.
+    const KEYS: [&str; 9] = [
+        "wire",
+        "output",
+        "frames",
+        "height",
+        "hold_msec",
+        "source",
+        "ring_slots",
+        "workload",
+        "retained_resources",
+    ];
+    config.as_object().is_some_and(|object| {
+        object.len() == KEYS.len() && object.keys().all(|key| KEYS.contains(&key.as_str()))
+    }) && config["wire"] == "files"
+        && config["source"] == "owned_ring"
+        && config["workload"] == "retained"
+        && config["height"] == 512
+        && config["retained_resources"] == 4
+        && config["ring_slots"] == 2
+}
+
 fn verify(d: &Descriptor) -> Result<Request, String> {
     let bytes = artifact(&d.plan, CAP)?;
     artifact(&d.python, 128 * CAP)?;
@@ -163,6 +198,10 @@ fn verify(d: &Descriptor) -> Result<Request, String> {
                     .into(),
             );
         }
+    } else if d.schema == 5 {
+        if !retained_ring_config(&config) {
+            return Err("retained CPU diagnostic requires four tiles, height 512 and two ring slots without optional peer modes".into());
+        }
     } else {
         if config["workload"] != serde_json::to_value(d.workload).map_err(|e| e.to_string())? {
             return Err("draw diagnostic workload differs from the peer config".into());
@@ -182,6 +221,10 @@ fn verify(d: &Descriptor) -> Result<Request, String> {
     }
     Ok(request)
 }
+
+#[cfg(test)]
+#[path = "../tests/support/retained_panel_config.rs"]
+mod retained_config_tests;
 
 struct Sampler {
     child: Child,
