@@ -11,6 +11,9 @@ use std::time::{Duration, Instant};
 
 use rustix::process::{Pid, Signal, WaitId, WaitIdOptions, WaitIdStatus};
 
+#[path = "session_log.rs"]
+mod session_log;
+
 const LOG_CAP: u64 = 64 << 20;
 
 pub(super) fn attended(tty: &str) -> Result<String, String> {
@@ -218,6 +221,8 @@ pub(crate) fn run_bound_observed(
         .stdin(Stdio::inherit())
         .stdout(log.try_clone().map_err(|e| e.to_string())?)
         .stderr(log);
+    let capture =
+        session_log::SessionLog::new(&logs.join("untrusted-session-output.log"), LOG_CAP)?;
     let child = Wrapper {
         child: command
             .spawn()
@@ -257,15 +262,22 @@ pub(crate) fn run_bound_observed(
     }
     let recovery = fs::read_to_string(logs.join("recovery.log")).map_err(|e| e.to_string())?;
     check_recovery(&recovery)?;
+    capture
+        .persist()
+        .map_err(|error| match observation_error.as_deref() {
+            Some(primary) => format!("native observation failed: {primary}; {error}"),
+            None => error,
+        })?;
     // Retain the wrapper's separate lifecycle log and put only the actual
     // Session/peer output at the verifier's canonical path.
-    fs::rename(logs.join("session.log"), stage.join("wrapper-session.log"))
-        .map_err(|e| e.to_string())?;
-    fs::rename(
-        logs.join("untrusted-session-output.log"),
-        stage.join("session.log"),
-    )
-    .map_err(|e| e.to_string())?;
+    session_log::move_new(
+        &logs.join("session.log"),
+        &stage.join("wrapper-session.log"),
+    )?;
+    session_log::move_new(
+        &logs.join("untrusted-session-output.log"),
+        &stage.join("session.log"),
+    )?;
     if let Some(error) = observation_error {
         return Err(format!("native observation failed: {error}"));
     }
