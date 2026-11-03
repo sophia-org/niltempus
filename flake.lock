@@ -9,11 +9,11 @@
         "nixpkgs-sophia": "nixpkgs-sophia"
       },
       "locked": {
-        "lastModified": 1792356183,
-        "narHash": "sha256-jOqhFfzU2d/C40lxboJsLtHxmNEV7xJpduDuKut9uMo=",
+        "lastModified": 1792639273,
+        "narHash": "sha256-P+zP8fr+mce6jHW+VDvKGspJ/C0q+6MA1Li2mCS8IVQ=",
         "owner": "sophia-org",
         "repo": "bemenu",
-        "rev": "2a1a73fbec1e0c5552d965b3b7aa3fd6b2e4977b",
+        "rev": "f73a3b8d0bce36196a601ea15099663e1eb79905",
         "type": "github"
       },
       "original": {
@@ -137,11 +137,11 @@
         "rust-overlay": "rust-overlay"
       },
       "locked": {
-        "lastModified": 1792354871,
-        "narHash": "sha256-nCizaoXWJhkC/S7HesHkWRgcAT9dlbb84ElzgMUuTI4=",
+        "lastModified": 1792602088,
+        "narHash": "sha256-72k6AsiaD3xvABp7ocYmwQJx+zUJJ8mZ6/Z0YZm55nY=",
         "owner": "sophia-org",
         "repo": "lom",
-        "rev": "9245bd05b95cec795819fbb9cee14b472722dc9a",
+        "rev": "27b64c5c79e2186895178ff05cbbaac63e15c322",
         "type": "github"
       },
       "original": {
