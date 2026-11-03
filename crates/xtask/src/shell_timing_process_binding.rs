@@ -61,6 +61,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod exit;
 mod time;
 use time::proof_matches;
 
@@ -922,26 +923,7 @@ impl Binder {
                         identity,
                     })
                 }
-                Observed::Missing => {
-                    // Exit can remove exe after the earlier live checks.
-                    // Recheck only this ENOENT observation: a real mismatch,
-                    // deleted link or permission failure must remain an error.
-                    let Some(facts) = self.stat(identity.pid)? else {
-                        return Ok(BindingRecheck::Ended);
-                    };
-                    if facts.identity != identity {
-                        return Err(format!(
-                            "pid {} was reused: start_time {} replaced {}",
-                            identity.pid,
-                            facts.identity.start_time_ticks,
-                            identity.start_time_ticks
-                        ));
-                    }
-                    if ended(facts.state) {
-                        return Ok(BindingRecheck::Ended);
-                    }
-                    None
-                }
+                Observed::Missing => return self.settle_exit(identity),
                 Observed::File { .. } | Observed::Deleted => None,
                 Observed::Opaque => {
                     return Err(format!(

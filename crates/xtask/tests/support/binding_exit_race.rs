@@ -96,5 +96,12 @@ fn executable_probe_race_controls_stay_fail_closed() {
             }
         });
         assert!(result.is_err(), "{fault}: {result:?}");
+        if fault == "absent_live" {
+            assert!(
+                result
+                    .unwrap_err()
+                    .contains("executable missing while still live")
+            );
+        }
     }
 }
