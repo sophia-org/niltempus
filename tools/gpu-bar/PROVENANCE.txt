@@ -1,3 +1,16 @@
+2026-11-03, dma/ SDK wait correction:
+All five direct SDK dependencies and the lockfile now pin signed Rust SDK
+c7bde621c88563b4f9d5375e74a08e9e43d6cde7, parent d70e77a08d610a3c6bf8ef3dd7d1408fc7eeed30.
+wait_for_io returns when its internal drive processes journal events, including
+SlotReleased that updates the image adapter without a content inbox record.
+The SDK's real-socket regression fails before the fix and passes afterward;
+951 workspace tests and strict Clippy pass. Evidence: sophia-image-wait-progress-01
+SHA256SUMS 9d0cd5b9a8ff5754bf08dfd9095f40da1683aee47b0e763e3fdd39e8076ff7e4.
+Peer code, Lom, producer, protocol revisions, timeouts and workload are unchanged.
+This does not prove the cause of a saved native stall or qualify a CPU saving.
+Use this same peer in both arms of any fresh native GL comparison.
+
+Earlier provenance:
 GPU comparison peers for the t339 matched comparison (arms I, S, G). One GPU
 producer, common/gpu_canvas.rs, on Lom sophia-shell-gpu at signed
 ae28569a4ed6b4fbb6382e2cdfd1637bcdb21575. Every Sophia, SDK and Lom input is an

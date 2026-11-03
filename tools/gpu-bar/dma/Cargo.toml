@@ -1,5 +1,5 @@
 # Arm G (producer-completed DMA-BUF over files, r10), run by current Sophia
-# master. Its own workspace and lock; the SDK pin is Lom's. See ../PROVENANCE.txt.
+# master. Its own workspace and lock; SDK provenance is in ../PROVENANCE.txt.
 [package]
 name = "gpu-bar-dma"
 version = "0.1.0"
@@ -16,8 +16,8 @@ rustix = { version = "1.1", default-features = false, features = ["std", "time"]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sophia-shell-gpu = { git = "https://github.com/sophia-org/lom", rev = "dcb1eb88cb1e386ed3d3f1f22400de37174e88ea" }
-sophia-shell-protocol = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "d70e77a08d610a3c6bf8ef3dd7d1408fc7eeed30" }
-sophia-shell-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "d70e77a08d610a3c6bf8ef3dd7d1408fc7eeed30" }
-sophia-launch-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "d70e77a08d610a3c6bf8ef3dd7d1408fc7eeed30" }
-sophia-9p-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "d70e77a08d610a3c6bf8ef3dd7d1408fc7eeed30" }
-sophia-image-producer = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "d70e77a08d610a3c6bf8ef3dd7d1408fc7eeed30" }
+sophia-shell-protocol = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "c7bde621c88563b4f9d5375e74a08e9e43d6cde7" }
+sophia-shell-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "c7bde621c88563b4f9d5375e74a08e9e43d6cde7" }
+sophia-launch-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "c7bde621c88563b4f9d5375e74a08e9e43d6cde7" }
+sophia-9p-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "c7bde621c88563b4f9d5375e74a08e9e43d6cde7" }
+sophia-image-producer = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "c7bde621c88563b4f9d5375e74a08e9e43d6cde7" }
