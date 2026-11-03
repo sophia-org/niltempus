@@ -38,9 +38,14 @@ impl SessionLog {
                 }
             }
         }
-        let shm = File::open("/dev/shm").map_err(|e| e.to_string())?;
-        if rustix::fs::fstatfs(&shm).map_err(|e| e.to_string())?.f_type as i64 != TMPFS_MAGIC {
-            return Err("/dev/shm is not tmpfs".into());
+        // /dev/shm may be removed by elogind RemoveIPC at the last PAM exit.
+        let temporary = File::open("/tmp").map_err(|e| e.to_string())?;
+        if rustix::fs::fstatfs(&temporary)
+            .map_err(|e| e.to_string())?
+            .f_type as i64
+            != TMPFS_MAGIC
+        {
+            return Err("/tmp is not tmpfs".into());
         }
         let parent = path.parent().ok_or("session log has no parent")?;
         fs::DirBuilder::new()
@@ -50,7 +55,7 @@ impl SessionLog {
             .map_err(|e| e.to_string())?;
         // create_dir refuses a stale name; never reuse another attempt's source.
         let directory = PathBuf::from(format!(
-            "/dev/shm/sophia-session-log-{}-{}-{}",
+            "/tmp/sophia-session-log-{}-{}-{}",
             rustix::process::getuid().as_raw(),
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)

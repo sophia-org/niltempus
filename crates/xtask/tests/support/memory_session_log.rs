@@ -30,6 +30,7 @@ impl Drop for Root {
 fn capture_is_memory_backed_before_the_wrapper_runs() {
     let root = Root::new();
     let capture = SessionLog::new(&root.log(), 1024).unwrap();
+    let source = fs::canonicalize(&capture.target).unwrap();
     assert_eq!(
         rustix::fs::fstatfs(&capture.file).unwrap().f_type as i64,
         TMPFS_MAGIC
@@ -47,6 +48,12 @@ fn capture_is_memory_backed_before_the_wrapper_runs() {
     assert_eq!(receipt["source"], capture.target.to_string_lossy().as_ref());
     assert_eq!(fs::metadata(root.log()).unwrap().mode() & 0o777, 0o600);
     capture.persist().unwrap();
+    assert_eq!(
+        source.parent().and_then(Path::parent),
+        Some(Path::new("/tmp")),
+        "failure log must outlive IPC and session-runtime cleanup: {}",
+        source.display()
+    );
 }
 
 fn shell(path: &Path, exit: u8) -> std::process::Output {
