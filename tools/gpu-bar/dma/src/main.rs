@@ -308,7 +308,8 @@ impl Wire {
     fn receive_tx(&mut self) -> Result<(TransactionId, ShellContentRecord)> {
         let deadline = Instant::now() + WAIT;
         loop {
-            if let Some(received) = self.client.poll_content()? {
+            // wait_for_io drives I/O; drain buffered replies before driving again.
+            if let Some(received) = self.client.take_content()? {
                 return Ok(received);
             }
             if Instant::now() >= deadline {
