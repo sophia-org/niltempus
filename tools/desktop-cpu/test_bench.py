@@ -77,15 +77,16 @@ NIRI_OUTPUTS = {
 }
 
 
-def sophia_run(root, instrumentation='capture-profile'):
+def sophia_run(root, instrumentation='capture-profile', profile='dgpu-120'):
     """A shell-timing run directory as sophia_window reads it (shapes from
     continuous-thin-lto-01 r120b1)."""
+    connector, refresh, period = ('HDMI-A-2', 60000, 16_666_667) if profile == 'igpu-60' else ('DP-1', 119880, PERIOD)
     src = root / 'sophia'
     src.mkdir()
-    samples(src / 'cpu-window.jsonl', {'session': 201, 'peer': 202}, START + 2000 * PERIOD)
+    samples(src / 'cpu-window.jsonl', {'session': 201, 'peer': 202}, START + 2000 * period)
     gens = []
     for g in range(1, 2121):
-        done = (START + (g - 120) * PERIOD) // 1000
+        done = (START + (g - 120) * period) // 1000
         gens.append(dict(candidate_generation=g, completed_monotonic_usec=done, submitted_monotonic_usec=done - 7500,
                          latency_usec=7500, output=1, heads=1))
     files = {
@@ -94,12 +95,12 @@ def sophia_run(root, instrumentation='capture-profile'):
                                     instrumentation=instrumentation,
                                     journal=dict(offers=[dict(outcome='presented')] * 2120)),
         'postflight.json': dict(schema=1, status='passed', failures=[],
-                                observed=dict(connector='DP-1', actual_refresh_millihz=119880)),
+                                observed=dict(connector=connector, actual_refresh_millihz=refresh)),
         'result.json': dict(schema=1, status='captured_only', error=None),
         'plan.json': dict(request=dict(source='owned_ring', frames=2120, instrumentation=instrumentation,
                                        artifacts={})),
         'panel-diagnostic.json': dict(bar_height=24, warmup=120, counted=2000,
-                                      target=dict(connector='DP-1', width=1920, height=1080, vrr=False)),
+                                      target=dict(connector=connector, width=1920, height=1080, vrr=False)),
     }
     for name, value in files.items():
         (src / name).write_text(json.dumps(value))
@@ -310,8 +311,18 @@ class Report(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn('refresh', report['refused'][0]['reason'])
 
-    def import_(self, src, out, allow=False):
-        return bench.cmd_import_sophia(types.SimpleNamespace(out=self.root / out, run=src, allow_instrumented=allow))
+    def import_(self, src, out, allow=False, profile='dgpu-120'):
+        return bench.cmd_import_sophia(types.SimpleNamespace(out=self.root / out, run=src, allow_instrumented=allow, profile=profile))
+
+    def test_niri_gpu_selection_is_explicit_and_native_only(self):
+        args = types.SimpleNamespace(output='HDMI-A-2', mode_size='1920x1080', rate='60.000',
+                                     disable_output=['DP-1'], render_drm_device=None)
+        self.assertNotIn('render-drm-device', bench.niri_config(args, True))
+        args.render_drm_device = '/dev/dri/renderD129'
+        config = bench.niri_config(args, True)
+        self.assertIn('render-drm-device "/dev/dri/renderD129"', config)
+        self.assertIn('mode "1920x1080@60.000"', config)
+        self.assertNotIn('render-drm-device', bench.niri_config(args, False))
 
     def test_sophia_import_uses_kernel_completions_120_to_2120(self):
         src = sophia_run(self.root)
@@ -331,6 +342,33 @@ class Report(unittest.TestCase):
         self.assertEqual(self.import_(sophia_run(self.root, 'none'), 'imported'), 0)
         _, stats = bench.plan_run('s', self.root / 'imported')
         self.assertEqual((stats['evidence'], stats['missed_vblank_gaps'], stats['nominal_hz']), ('native', 0, 119.88))
+
+    def test_igpu_import_requires_explicit_profile_and_report_rechecks_it(self):
+        src = sophia_run(self.root, 'none', profile='igpu-60')
+        self.assertEqual(self.import_(src, 'wrong-profile'), 2)
+        self.assertEqual(self.import_(src, 'imported', profile='igpu-60'), 0)
+        entry, stats = bench.plan_run('s', self.root / 'imported')
+        self.assertEqual((stats['evidence'], stats['missed_vblank_gaps'], stats['nominal_hz']),
+                         ('native', 0, 60))
+        self.assertEqual((entry['start_frame'], entry['end_frame']), (120, 2120))
+        edit_json(self.root / 'imported/run.json', lambda v: v.update(profile='dgpu-120'))
+        with self.assertRaises(bench.Refused):
+            bench.plan_run('s', self.root / 'imported')
+
+    def test_igpu_import_refuses_wrong_connector_or_refresh(self):
+        src = sophia_run(self.root, 'none', profile='igpu-60')
+        edit_json(src / 'postflight.json', lambda v: v['observed'].update(actual_refresh_millihz=59940))
+        self.assertEqual(self.import_(src, 'wrong-rate', profile='igpu-60'), 2)
+        edit_json(src / 'postflight.json', lambda v: v['observed'].update(actual_refresh_millihz=60000))
+        edit_json(src / 'panel-diagnostic.json', lambda v: v['target'].update(connector='DP-1'))
+        self.assertEqual(self.import_(src, 'wrong-connector', profile='igpu-60'), 2)
+
+    def test_legacy_sophia_import_without_profile_still_loads(self):
+        src = sophia_run(self.root, 'none')
+        self.assertEqual(self.import_(src, 'imported'), 0)
+        edit_json(self.root / 'imported/run.json', lambda v: v.pop('profile', None))
+        _, stats = bench.plan_run('s', self.root / 'imported')
+        self.assertEqual(stats['nominal_hz'], 119.88)
 
     def cpu_sophia(self, root):
         src = sophia_run(root, 'none')
@@ -378,7 +416,7 @@ class Report(unittest.TestCase):
                 edit_json(src / 'plan.json', lambda v: v['request'].update(producer='gpu'))
             imported = root / 'imported'
             self.assertEqual(bench.cmd_import_sophia(types.SimpleNamespace(
-                out=imported, run=src, allow_instrumented=False)), 0)
+                out=imported, run=src, allow_instrumented=False, profile='dgpu-120')), 0)
             out = root / 'report'
             status = bench.cmd_report(types.SimpleNamespace(
                 out=out, runs=[external, imported], matched_cpu=True, quiet=True))

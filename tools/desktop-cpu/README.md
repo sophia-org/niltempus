@@ -88,13 +88,28 @@ python3 -I -B tools/desktop-cpu/bench.py run --stack niri --mode native --output
 python3 -I -B tools/desktop-cpu/bench.py run --stack xlibre --mode native --output DP-1 --out RUN_L
 
 # An existing Sophia shell-timing run, read only. It must be uninstrumented
-# (native-samples instrumentation "none") to be native; every continuous
-# package so far used capture-profile, which only imports as a diagnostic row:
+# (native-samples instrumentation "none") to be native; capture-profile
+# imports only as a diagnostic row:
 python3 -I -B tools/desktop-cpu/bench.py import-sophia --out RUN_S SOPHIA_RUN_DIR
 python3 -I -B tools/desktop-cpu/bench.py import-sophia --allow-instrumented --out RUN_S SOPHIA_RUN_DIR
+# Current iGPU output, explicitly selected; all other checks are unchanged:
+python3 -I -B tools/desktop-cpu/bench.py import-sophia --profile igpu-60 --out RUN_S SOPHIA_RUN_DIR
 
 python3 -I -B tools/desktop-cpu/bench.py report --out REPORT RUN_S RUN_N RUN_L
 ```
+
+Sophia imports default to the historical `dgpu-120` profile (DP-1, 119880 mHz).
+`igpu-60` requires HDMI-A-2 at exactly 60000 mHz. Both require 1920×1080,
+VRR off and the same 120+2000-frame strip workload. The profile is saved in
+the import and rechecked by the report; old imports retain their historical
+default. External arms must separately select the matching output, rate and
+GPU; the import option does not configure a compositor or launch a session.
+For niri, `--render-drm-device /dev/dri/renderD129` pins the render node in
+its native config. Pair it with `--output HDMI-A-2 --rate 60.000` and explicit
+`--disable-output` entries for the other connectors. XLibre instead uses
+`--kmsdev /dev/dri/card1 --bus-id PCI:22:0:0 --output HDMI-2 --rate 60.000`.
+These are launch inputs, not evidence of selection: the package must still
+verify the resulting GPU, active output, refresh and presentation cadence.
 
 Native defaults:
 

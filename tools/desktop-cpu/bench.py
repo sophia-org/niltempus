@@ -39,6 +39,7 @@ REPO = HERE.parent.parent
 CPUWIN = REPO / 'tools/cpu-window/cpuwin.py'
 CLIENTS = REPO / 'tools/external-bar/build'
 SCHEMA = 1
+SOPHIA_PROFILES = {'dgpu-120': ('DP-1', 119880), 'igpu-60': ('HDMI-A-2', 60000)}
 CPU_RECEIPT = 'cpu_bar schema=1 source=owned_ring producer=cpu_shm fill=shade_mod128_a255'
 RIG_OTHER_OUTPUTS = ['HDMI-A-1', 'HDMI-A-2', 'DP-2', 'DP-3', 'DP-4', 'DP-5', 'DP-6',
                      'Writeback-1', 'Writeback-2']
@@ -459,6 +460,8 @@ def x_outputs(query):
 def niri_config(args, native):
     lines = ['hotkey-overlay {\n    skip-at-startup\n}', 'animations {\n    off\n}',
              'xwayland-satellite {\n    off\n}', 'prefer-no-csd']
+    if native and args.render_drm_device:
+        lines.append('debug {\n    render-drm-device ' + json.dumps(args.render_drm_device) + '\n}')
     if native and args.output:
         lines.append(f'output "{args.output}" {{\n    mode "{args.mode_size}@{args.rate}"\n'
                      '    scale 1\n    transform "normal"\n    position x=0 y=0\n}')
@@ -524,10 +527,13 @@ def sophia_producer(src):
     return 'cpu_shm'
 
 
-def sophia_window(src):
+def sophia_window(src, profile='dgpu-120'):
     """A shell-timing run's counted window, validated: run outcome, output and
     shape, exact kernel-completion joins and sampled identity. Returns
     (instrumentation, expect, presented ns 120..2120, latency ns 121..2120)."""
+    if profile not in SOPHIA_PROFILES:
+        raise Refused(f'unknown Sophia profile: {profile!r}')
+    connector, refresh = SOPHIA_PROFILES[profile]
     load = lambda name: json.loads((src / name).read_text())
     native, binding, request = load('native-samples.json'), load('cpu-binding.json'), load('plan.json')['request']
     result, postflight, panel = load('result.json'), load('postflight.json'), load('panel-diagnostic.json')
@@ -538,12 +544,12 @@ def sophia_window(src):
     if postflight.get('status') != 'passed' or postflight.get('failures'):
         problems.append(f'postflight {postflight.get("status")}')
     observed, target = postflight.get('observed', {}), panel.get('target', {})
-    if (observed.get('connector'), observed.get('actual_refresh_millihz')) != ('DP-1', 119880):
+    if (observed.get('connector'), observed.get('actual_refresh_millihz')) != (connector, refresh):
         problems.append(f'postflight saw {observed.get("connector")} at {observed.get("actual_refresh_millihz")} mHz')
     if ((target.get('connector'), target.get('width'), target.get('height'), target.get('vrr'))
-            != ('DP-1', 1920, 1080, False)
+            != (connector, 1920, 1080, False)
             or (panel.get('bar_height'), panel.get('warmup'), panel.get('counted')) != (24, 120, 2000)):
-        problems.append('panel is not the 1920x24 strip on DP-1 1920x1080, VRR off, 120+2000 frames')
+        problems.append(f'panel is not the 1920x24 strip on {connector} 1920x1080, VRR off, 120+2000 frames')
     if (request.get('source'), request.get('frames')) != ('owned_ring', 2120) \
             or request.get('instrumentation') != native.get('instrumentation'):
         problems.append('request is not owned_ring, 2120 frames, at the samples\' instrumentation')
@@ -578,7 +584,7 @@ def sophia_window(src):
 def cmd_import_sophia(args):
     src = args.run.resolve()
     try:
-        instrumentation, expect, _, _ = sophia_window(src)
+        instrumentation, expect, _, _ = sophia_window(src, args.profile)
         sophia_producer(src)
     except (Refused, KeyError, TypeError, ValueError, OSError) as e:
         print(f'REFUSED: {e!r}', file=sys.stderr)
@@ -595,7 +601,7 @@ def cmd_import_sophia(args):
     write_json(out / 'run.json', dict(
         schema=SCHEMA, stack='sophia', mode='imported', instrumentation=instrumentation,
         evidence='native' if instrumentation == 'none' else 'diagnostic',
-        source=str(src), files=files, expect=expect,
+        source=str(src), files=files, expect=expect, profile=args.profile,
         artifacts=json.loads((src / 'plan.json').read_text())['request'].get('artifacts')))
     return 0
 
@@ -707,12 +713,13 @@ def plan_run(name, run_dir):
         for label, f in record['files'].items():
             if f['path'] != str(src / label) or sha256(f['path']) != f['sha256']:
                 raise Refused(f'{run_dir}: {label} changed since import')
-        instrumentation, expect, presented, latency = sophia_window(src)
+        profile = record.get('profile', 'dgpu-120')
+        instrumentation, expect, presented, latency = sophia_window(src, profile)
         producer = sophia_producer(src)
         if expect != record['expect']:
             raise Refused(f'{run_dir}: bound processes differ from the import')
         evidence = 'native' if instrumentation == 'none' else 'diagnostic'
-        nominal = 119.880  # postflight's observed actual_refresh_millihz, pinned in sophia_window
+        nominal = SOPHIA_PROFILES[profile][1] / 1000  # checked against postflight in sophia_window
         start, end = 120, 2120
         jsonl = record['files']['cpu-window.jsonl']['path']
     else:
@@ -879,6 +886,7 @@ def main():
                         f'{RIG_OTHER_OUTPUTS}. Native X turns off every other output the server lists.')
     r.add_argument('--niri-log', default='warn', help='RUST_LOG for niri (its source default is debug)')
     r.add_argument('--niri', default='/usr/bin/niri')
+    r.add_argument('--render-drm-device', help='native niri render node; otherwise niri selects it')
     r.add_argument('--xlibre-prefix', default=str(Path.home() / '.local/opt/xlibre-56be9f4320ef'))
     r.add_argument('--smoke-xserver', default='/usr/libexec/Xorg')
     r.add_argument('--smoke-wayland', default='/usr/bin/river', help='wlroots 0.3 river for smoke')
@@ -893,6 +901,8 @@ def main():
     r.set_defaults(fn=cmd_run)
     s = sub.add_parser('import-sophia')
     s.add_argument('--out', type=Path, required=True)
+    s.add_argument('--profile', choices=SOPHIA_PROFILES, default='dgpu-120',
+                   help='required output/refresh profile; rechecked when reporting')
     s.add_argument('--allow-instrumented', action='store_true',
                    help='import a capture-profile run as a diagnostic row')
     s.add_argument('run', type=Path)
