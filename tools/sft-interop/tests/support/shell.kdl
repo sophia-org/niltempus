@@ -1,0 +1,21 @@
+version 1
+panel "sft-interop" {
+    position "top"
+    height 24
+    renderer "cpu"
+    start { workspaces "workspaces" }
+    center { focused "focused" }
+    end { sys-info "system" }
+}
+theme "sft-interop" {
+    defaults {
+        background "#1c1c1c"
+        selected "#2d2d2d"
+        foreground "#ffffff"
+        active "#6699cc"
+        urgent "#8f0a0a"
+        font-size 13
+        gap 13
+        padding 7
+    }
+}

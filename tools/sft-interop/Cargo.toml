@@ -1,0 +1,26 @@
+[package]
+name = "sft-interop"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+publish = false
+
+# Like the standalone gpu-bar peer: experimental pins do not retarget xtask.
+[workspace]
+
+[dependencies]
+lom = { git = "https://github.com/sophia-org/lom", rev = "0b92a7b05748d05688f3e30cbee7ad83278baade", features = ["experimental-frame-transactions"] }
+sophia-session = { git = "https://github.com/sophia-org/sophia.git", rev = "502029a221d32deba98d82c5ee2f83aee134e9fa", features = ["experimental-native-frame-transaction"] }
+sophia-runtime = { git = "https://github.com/sophia-org/sophia.git", rev = "502029a221d32deba98d82c5ee2f83aee134e9fa", features = ["experimental-native-frame-transaction"] }
+sophia-protocol = { git = "https://github.com/sophia-org/sophia.git", rev = "502029a221d32deba98d82c5ee2f83aee134e9fa" }
+sophia-config = { git = "https://github.com/sophia-org/sophia.git", rev = "502029a221d32deba98d82c5ee2f83aee134e9fa" }
+sophia-9p = { git = "https://github.com/sophia-org/sophia.git", rev = "502029a221d32deba98d82c5ee2f83aee134e9fa" }
+sophia-shell-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "b483e1ee9d79730705d372ffcebd47c7b12c4514" }
+sophia-9p-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "b483e1ee9d79730705d372ffcebd47c7b12c4514" }
+rustix = { version = "1.1", features = ["process", "event"] }
+
+[profile.dev]
+debug = "line-tables-only"
+
+[lints.rust]
+unsafe_code = "forbid"
