@@ -105,13 +105,26 @@ pub fn policy(d: &Descriptor, r: &Request, probe: u64) -> Result<(), String> {
                 && r.source == ImageSource::OwnedRing
                 && r.wire == "files"
         }
+        6 => {
+            d.raster.is_none()
+                && d.workload.is_none()
+                && matches!(d.bar_height, Some(24 | 512))
+                && r.frame_transactions
+                && !r.retire_on_present
+                && !r.managed_destination_reuse
+                && r.producer == ProducerKind::Cpu
+                && r.reference_workload.is_none()
+                && r.source == ImageSource::OwnedRing
+                && r.wire == "files"
+        }
         _ => false,
     };
     // The longer schema-2 window reduces counter quantization after the
     // inconclusive t341-vello-03 CPU gate. Frozen schema 1 stays unchanged.
     let window_matches = (d.counted, r.runtime_ms) == (2000, 60_000)
         || d.schema == 2 && (d.counted, r.runtime_ms) == (6000, 120_000);
-    if !source_matches
+    if (r.frame_transactions && d.schema != 6)
+        || !source_matches
         || !window_matches
         || d.warmup != 120
         || d.interval_ms != 5
@@ -143,6 +156,28 @@ fn artifact(value: &Artifact, cap: u64) -> Result<Vec<u8>, String> {
         ));
     }
     Ok(bytes)
+}
+
+fn frame_ring_config(config: &serde_json::Value) -> bool {
+    const KEYS: [&str; 9] = [
+        "wire",
+        "output",
+        "frames",
+        "height",
+        "hold_msec",
+        "source",
+        "ring_slots",
+        "producer",
+        "frame_transactions",
+    ];
+    config
+        .as_object()
+        .is_some_and(|o| o.len() == KEYS.len() && o.keys().all(|k| KEYS.contains(&k.as_str())))
+        && config["wire"] == "files"
+        && config["source"] == "owned_ring"
+        && config["producer"] == "cpu"
+        && config["ring_slots"] == 2
+        && config["frame_transactions"] == true
 }
 
 fn retained_ring_config(config: &serde_json::Value) -> bool {
@@ -177,6 +212,9 @@ fn verify(d: &Descriptor) -> Result<Request, String> {
     let config: serde_json::Value =
         serde_json::from_slice(&artifact(&request.artifacts["peer-config"], CAP)?)
             .map_err(|e| e.to_string())?;
+    if d.schema == 6 && !frame_ring_config(&config) {
+        return Err("SFT diagnostic requires the exact CPU two-slot peer config".into());
+    }
     if d.schema == 1 {
         if config["height"] != 24 || config.get("workload").is_some_and(|v| v != "fresh") {
             return Err("panel diagnostic requires fresh 24-pixel content".into());
@@ -188,7 +226,7 @@ fn verify(d: &Descriptor) -> Result<Request, String> {
         {
             return Err("GPU diagnostic requires fresh content at the pinned bar height".into());
         }
-    } else if d.schema == 4 {
+    } else if matches!(d.schema, 4 | 6) {
         if config["height"] != serde_json::json!(d.bar_height)
             || config.get("workload").is_some_and(|v| v != "fresh")
             || config.get("producer") != Some(&serde_json::json!("cpu"))
@@ -527,3 +565,7 @@ pub fn run(args: &[String]) -> Result<Vec<String>, String> {
     result.push("CPU samples retained; window coverage and attribution remain unproven until cpuwin analyze succeeds. Scope: Session, peer, and the bound raster helper when present; excludes supervisor/wrapper and other processes.".into());
     Ok(result)
 }
+
+#[cfg(test)]
+#[path = "../tests/support/frame_panel_config.rs"]
+mod frame_config_tests;

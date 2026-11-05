@@ -1,0 +1,12 @@
+{
+  "source_log": "/home/niltempus/.local/state/sophia-frame-reference-peer-01/tests-final-02.log",
+  "source_log_sha256": "9d388c6bc383176066e9a21f082e98991bbf8e3b64b47a19a89c6d79b9c4bfc5",
+  "source": "tools/sft-bar real-owner integration; supplied afid/allocation/native completion, actual ring and Session stores",
+  "native": false,
+  "fixtures": {
+    "schema7-h24.ndjson": "f49b40a5d45674d952ffca60830a5cf774c066e07263c5b91c1e064242f240e5",
+    "schema8-h24.ndjson": "930c5b69418571b86b0323be56ba1a90f3c4717e6237792d87c7aa071ecb5d8d",
+    "schema7-h512.ndjson": "8d61b30be9908711ede6bbcd18d025e566c722a0b9a9019c2b09dd00b8bd16c2",
+    "schema8-h512.ndjson": "8d50a6f209e729a9c71540dcda6c8346d43e4946cab88ba1d68bbb54cd1cb7f9"
+  }
+}

@@ -56,6 +56,7 @@ fn fixture() -> (Descriptor, Request) {
             producer: Default::default(),
             managed_destination_reuse: false,
             retire_on_present: false,
+            frame_transactions: false,
         },
     )
 }
@@ -362,4 +363,36 @@ fn retained_schema5_only_admits_the_uninstrumented_cpu_tile_workload() {
         d.schema = schema;
         assert!(policy(&d, &r, 0).is_err(), "frozen schema {schema}");
     }
+}
+
+#[test]
+fn sft_diagnostic_is_a_separate_explicit_cpu_policy() {
+    use xtask::shell_timing_native::ProducerKind;
+    let (mut d, mut r) = fixture();
+    d.schema = 6;
+    d.bar_height = Some(24);
+    r.frame_transactions = true;
+    assert!(policy(&d, &r, 0).is_ok());
+    for schema in 1..=5 {
+        d.schema = schema;
+        assert!(policy(&d, &r, 0).is_err());
+    }
+    d.schema = 6;
+    r.frame_transactions = false;
+    assert!(policy(&d, &r, 0).is_err());
+    r.frame_transactions = true;
+    r.retire_on_present = true;
+    assert!(policy(&d, &r, 0).is_err());
+    r.retire_on_present = false;
+    r.producer = ProducerKind::Gpu;
+    assert!(policy(&d, &r, 0).is_err());
+    r.producer = ProducerKind::Cpu;
+    r.instrumentation = "capture-profile".into();
+    assert!(policy(&d, &r, 0).is_err());
+    r.instrumentation = "none".into();
+    d.workload = Some(DrawWorkload::Retained);
+    assert!(policy(&d, &r, 0).is_err());
+    d.workload = None;
+    d.bar_height = Some(512);
+    assert!(policy(&d, &r, 0).is_ok());
 }

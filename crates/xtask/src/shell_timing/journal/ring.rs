@@ -43,7 +43,7 @@ pub struct RingEvidence {
 
 #[derive(Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case", deny_unknown_fields)]
-enum Event {
+pub(super) enum Event {
     Start {
         frames: usize,
         wire: String,
@@ -87,7 +87,7 @@ enum Event {
     },
 }
 
-fn next<T: serde::de::DeserializeOwned>(
+pub(super) fn next<T: serde::de::DeserializeOwned>(
     lines: &mut std::str::Lines<'_>,
     schema: u64,
 ) -> Result<T, String> {
@@ -276,6 +276,7 @@ pub(super) fn collect(journal: &str, expected: usize, schema: u64) -> Result<Jou
         interval_msec,
         ring: None,
         draw: None,
+        frame: None,
         offers: Vec::with_capacity(expected),
         uploads: Vec::with_capacity(expected),
         permits: Vec::with_capacity(expected),

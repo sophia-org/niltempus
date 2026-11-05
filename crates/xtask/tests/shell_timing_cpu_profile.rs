@@ -332,6 +332,7 @@ fn only_observed_cpu_plans_can_be_profiled() {
         producer: Default::default(),
         managed_destination_reuse: false,
         retire_on_present: false,
+        frame_transactions: false,
     };
     assert!(projected(&request, 0, "sha").is_ok());
     assert!(projected(&request, 4_194_304, "sha").is_ok());

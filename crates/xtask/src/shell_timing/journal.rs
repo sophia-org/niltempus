@@ -3,6 +3,7 @@ use super::{ImageSource, MAX_BYTES, MAX_RECORDS, Offer, WorkloadMode};
 use serde::{Deserialize, Serialize};
 
 mod draw;
+mod frame;
 mod ring;
 pub use draw::{BatchTiming, DrawEvidence, DrawSource, DrawWorkload, RingReady6, ValueDueTiming};
 pub use ring::RingEvidence;
@@ -115,6 +116,8 @@ pub struct Journal {
     pub ring: Option<RingEvidence>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub draw: Option<DrawEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frame: Option<frame::Evidence>,
     pub offers: Vec<Offer>,
     pub uploads: Vec<AcceptedUpload>,
     pub permits: Vec<PermitTiming>,
@@ -242,6 +245,9 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
         .schema;
     if matches!(start_schema, 5 | 7) {
         return ring::collect(journal, expected, start_schema);
+    }
+    if start_schema == 8 {
+        return frame::collect(journal, expected);
     }
     if start_schema == 6 {
         return draw::collect(journal, expected);
@@ -669,6 +675,7 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
         interval_msec,
         ring: None,
         draw: None,
+        frame: None,
         offers,
         uploads,
         permits,

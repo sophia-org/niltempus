@@ -95,6 +95,10 @@ pub struct Request {
     /// that binary's `validate-session-args` on the paired argv before sealing.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub retire_on_present: bool,
+    /// SFT permission must match the CPU peer's explicit request; build identity
+    /// and validate-session-args remain the package's prelaunch responsibility.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub frame_transactions: bool,
 }
 
 /// Who renders the peer's pixels.
@@ -152,6 +156,8 @@ struct PeerConfig {
     /// W2 peer key; its presence declares a counted run.
     #[serde(default, deserialize_with = "present_bool")]
     retire_on_present: Option<bool>,
+    #[serde(default, deserialize_with = "present_bool")]
+    frame_transactions: Option<bool>,
     image: Option<ImageConfig>,
     /// Explicit pixel producer of a matched-benchmark peer. Absent keeps
     /// every historical config: historical CPU peers carry no key, so
@@ -469,6 +475,21 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
     {
         return Err("retire-on-present requires a files owned-ring peer plan".into());
     }
+    if request.frame_transactions
+        && (request.wire != "files"
+            || request.source != ImageSource::OwnedRing
+            || request.producer != ProducerKind::Cpu
+            || request.retire_on_present
+            || request.managed_destination_reuse
+            || request.reference_workload.is_some()
+            || request.external_timing.is_some()
+            || request.instrumentation != "none")
+    {
+        return Err(
+            "SFT requires an uninstrumented CPU owned-ring plan without other experimental modes"
+                .into(),
+        );
+    }
     let mut texts = BTreeMap::new();
     for (key, artifact) in &request.artifacts {
         absolute(&artifact.path)?;
@@ -526,6 +547,19 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
         if request.retire_on_present != (peer.retire_on_present == Some(true)) {
             return Err(
                 "retire-on-present requires the peer key and the host flag together".into(),
+            );
+        }
+        if request.frame_transactions != (peer.frame_transactions == Some(true))
+            || request.frame_transactions
+                && (peer.producer != Some(ProducerKind::Cpu)
+                    || peer.ring_slots != Some(2)
+                    || peer.workload != WorkloadMode::Fresh
+                    || peer.retire_on_present.is_some()
+                    || peer.capture_profile
+                    || peer.dma_reuse.is_some())
+        {
+            return Err(
+                "SFT requires paired host/peer permission and the exact CPU two-slot peer".into(),
             );
         }
         // A declared producer must be the request's. The matched CPU
@@ -668,6 +702,9 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
     }
     if request.managed_destination_reuse {
         argv.push("--experimental-shell-capture-destination-reuse".into());
+    }
+    if request.frame_transactions {
+        argv.push("--experimental-native-frame-transaction".into());
     }
     if request.retire_on_present {
         argv.push("--experimental-shell-retire-on-present".into());
@@ -835,7 +872,21 @@ pub fn validate_captured_config(
     {
         return Err("captured ring geometry differs from prepared configuration".into());
     }
-    validate_retire_counters(metrics, peer.retire_on_present, request.frames)
+    if request.frame_transactions {
+        if peer.frame_transactions != Some(true)
+            || metrics.schema != 8
+            || metrics.frame.is_none()
+            || !metrics.permits.is_empty()
+        {
+            return Err("captured SFT journal or peer permission missing".into());
+        }
+        validate_retire_counters(metrics, Some(true), request.frames)
+    } else {
+        if metrics.schema == 8 || metrics.frame.is_some() || peer.frame_transactions == Some(true) {
+            return Err("SFT journal supplied for an ordinary plan".into());
+        }
+        validate_retire_counters(metrics, peer.retire_on_present, request.frames)
+    }
 }
 
 /// A peer that declares `retire_on_present` must report the exact counters of

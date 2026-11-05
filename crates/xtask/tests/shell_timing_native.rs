@@ -39,6 +39,7 @@ impl Fixture {
                 producer: xtask::shell_timing_native::ProducerKind::Cpu,
                 managed_destination_reuse: false,
                 retire_on_present: false,
+                frame_transactions: false,
             },
         };
         // These fixtures are hashed only. None may be executed by validation.
@@ -754,6 +755,7 @@ fn captured_source_cannot_be_substituted_after_preparation() {
     let mut metrics = Journal {
         ring: None,
         draw: None,
+        frame: None,
         schema: 2,
         wire: "files".into(),
         source: ImageSource::Bytes,
@@ -1222,6 +1224,7 @@ fn reference_capture_uses_its_config_and_checks_source_cadence_and_hold() {
         retained_resources: None,
         interval_msec: None,
         ring: None,
+        frame: None,
         draw: Some(DrawEvidence {
             source: DrawSource::Mixed,
             workload: DrawWorkload::Retained,
@@ -1390,6 +1393,7 @@ fn retire_on_present_is_a_paired_owned_ring_gpu_setting() {
     let mut metrics = Journal {
         ring: None,
         draw: None,
+        frame: None,
         schema: 7,
         wire: "files".into(),
         source: ImageSource::OwnedRing,
@@ -1587,4 +1591,51 @@ fn cpu_w2_requires_the_exact_cpu_peer_and_preserves_gpu_denial() {
         validate(&f.request).is_err(),
         "CPU W2 must not grant GPU access"
     );
+}
+
+#[test]
+fn frame_transactions_require_both_permissions_and_preserve_ordinary_argv() {
+    const FLAG: &str = "--experimental-native-frame-transaction";
+    let mut f = Fixture::new("frame-transactions", "files");
+    f.request.source = xtask::shell_timing::ImageSource::OwnedRing;
+    let mut config = serde_json::json!({"wire":"files","source":"owned_ring","producer":"cpu","output":1,
+        "frames":3,"height":24,"hold_msec":60000,"ring_slots":2});
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    let ordinary = validate(&f.request).unwrap();
+    assert!(
+        serde_json::to_value(&f.request)
+            .unwrap()
+            .get("frame_transactions")
+            .is_none()
+    );
+    assert!(!ordinary.iter().any(|a| a == FLAG));
+    f.request.frame_transactions = true;
+    assert!(validate(&f.request).is_err());
+    config["frame_transactions"] = true.into();
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    let enabled = validate(&f.request).unwrap();
+    assert_eq!(enabled.iter().filter(|a| a.as_str() == FLAG).count(), 1);
+    assert_eq!(&enabled[..ordinary.len()], ordinary);
+    f.request.frame_transactions = false;
+    assert!(validate(&f.request).is_err());
+    f.request.frame_transactions = true;
+    for (field, value) in [
+        ("frame_transactions", serde_json::json!(null)),
+        ("frame_transactions", serde_json::json!("true")),
+        ("ring_slots", serde_json::json!(3)),
+        ("producer", serde_json::json!("gpu")),
+        ("retire_on_present", serde_json::json!(false)),
+        ("dma_reuse", serde_json::json!(false)),
+    ] {
+        let mut changed = config.clone();
+        changed[field] = value;
+        f.put("peer-config", changed.to_string().as_bytes(), false);
+        assert!(validate(&f.request).is_err(), "{field}");
+    }
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    f.request.retire_on_present = true;
+    assert!(validate(&f.request).is_err());
+    f.request.retire_on_present = false;
+    f.request.managed_destination_reuse = true;
+    assert!(validate(&f.request).is_err());
 }

@@ -227,6 +227,7 @@ fn request(arm: &Arm) -> xtask::shell_timing_native::Request {
         producer: Default::default(),
         managed_destination_reuse: false,
         retire_on_present: false,
+        frame_transactions: false,
     }
 }
 
