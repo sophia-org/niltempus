@@ -1,0 +1,31 @@
+[package]
+name = "sft-bar"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+publish = false
+
+[workspace]
+
+[features]
+experimental-frame-transactions = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rustix = { version = "1.1", features = ["process", "time", "event"] }
+sophia-shell-protocol = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "b483e1ee9d79730705d372ffcebd47c7b12c4514" }
+sophia-shell-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "b483e1ee9d79730705d372ffcebd47c7b12c4514" }
+sophia-launch-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "b483e1ee9d79730705d372ffcebd47c7b12c4514" }
+sophia-9p-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "b483e1ee9d79730705d372ffcebd47c7b12c4514" }
+sophia-image-producer = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "b483e1ee9d79730705d372ffcebd47c7b12c4514" }
+
+[dev-dependencies]
+host-protocol = { package = "sophia-protocol", git = "https://github.com/sophia-org/sophia.git", rev = "502029a221d32deba98d82c5ee2f83aee134e9fa" }
+sophia-config = { git = "https://github.com/sophia-org/sophia.git", rev = "502029a221d32deba98d82c5ee2f83aee134e9fa" }
+sophia-session = { git = "https://github.com/sophia-org/sophia.git", rev = "502029a221d32deba98d82c5ee2f83aee134e9fa", features = ["experimental-native-frame-transaction"] }
+sophia-runtime = { git = "https://github.com/sophia-org/sophia.git", rev = "502029a221d32deba98d82c5ee2f83aee134e9fa", features = ["experimental-native-frame-transaction"] }
+sophia-9p = { git = "https://github.com/sophia-org/sophia.git", rev = "502029a221d32deba98d82c5ee2f83aee134e9fa" }
+
+[profile.dev]
+debug = "line-tables-only"
