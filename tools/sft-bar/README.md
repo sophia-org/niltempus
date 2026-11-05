@@ -53,3 +53,10 @@ r13. It compares every captured byte and confirms 4 versus 0 demands, all four
 Presented records, N-1 releases and quiescent teardown. Authentication verdicts,
 allocation policy and native completion are supplied. It does not test Factotum,
 protected launch, GL/DRM, physical tear-free display or native CPU/frame.
+
+The native reference pins SDK ae473881, carrying the already reviewed journal
+progress-before-sleep guard onto the SFT branch. Both r10 and r13 use this same
+SDK. The guard prevents the internal wait drive from consuming SlotReleased and
+then sleeping until the caller deadline. Evidence: sophia-frame-peer-wait-progress-01;
+no native causality or performance claim. Host dev-test pin remains 502029a; its
+wire contract is unchanged. The old GPU/W2 peer is not retargeted.
