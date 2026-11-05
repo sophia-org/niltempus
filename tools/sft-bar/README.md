@@ -1,8 +1,8 @@
 # CPU reference for Sophia Frame Transactions
 
 A separate, default-off SFT experiment. The existing `gpu-bar/dma` executable,
-including its GPU and W2 modes, is unchanged. This workspace pins the same SDK
-as the real Lom SFT implementation and does not retarget the root runner.
+including its GPU and W2 modes, is unchanged. This candidate pins the buffered-event
+drive SDK for an isolated comparison and does not retarget the root runner.
 
 ```sh
 cargo-slot niltempus cargo test --manifest-path tools/sft-bar/Cargo.toml --all-features --locked
@@ -54,9 +54,15 @@ Presented records, N-1 releases and quiescent teardown. Authentication verdicts,
 allocation policy and native completion are supplied. It does not test Factotum,
 protected launch, GL/DRM, physical tear-free display or native CPU/frame.
 
-The native reference pins SDK ae473881, carrying the already reviewed journal
+The control native reference pins SDK ae473881, carrying the already reviewed journal
 progress-before-sleep guard onto the SFT branch. Both r10 and r13 use this same
 SDK. The guard prevents the internal wait drive from consuming SlotReleased and
 then sleeping until the caller deadline. Evidence: sophia-frame-peer-wait-progress-01;
 no native causality or performance claim. Host dev-test pin remains 502029a; its
 wire contract is unchanged. The old GPU/W2 peer is not retargeted.
+
+This candidate changes only the SDK pin to f522b0cff, whose drive polls once on
+entry and again when requests or ACKs need writing, while processing buffered
+events without repeated empty reads. Peer source, workload bytes and protocol
+are unchanged. Evidence: sophia-sdk-drive-buffered-events-01. Device-free
+read-count reductions do not establish native CPU savings.
