@@ -1,0 +1,168 @@
+diff --git a/crates/sophia-shell-client/src/frame_stream.rs b/crates/sophia-shell-client/src/frame_stream.rs
+index 90f1297..0df4729 100644
+--- a/crates/sophia-shell-client/src/frame_stream.rs
++++ b/crates/sophia-shell-client/src/frame_stream.rs
+@@ -30,6 +30,7 @@ struct Pending {
+ /// keep those owners alive independently. Do not recreate it to escape Unknown.
+ #[derive(Debug, Default)]
+ pub struct FrameStream {
++    trace_id: u64,
+     state: FrameStreamState,
+     key: Option<ShellFrameStreamKey>,
+     opening: Option<TransactionId>,
+@@ -89,6 +90,7 @@ impl FrameStream {
+         self.closing = None;
+         self.closed_notice = false;
+         self.credit = false;
++        self.trace("Open", transaction.raw(), 0, key.stream_id, false);
+         Ok(admission)
+     }
+ 
+@@ -152,6 +154,13 @@ impl FrameStream {
+             generation: candidate.candidate_generation,
+             prepared: false,
+         });
++        self.trace(
++            "Submit",
++            value.transaction.raw(),
++            candidate.candidate_generation,
++            candidate.pacing_permit,
++            false,
++        );
+     }
+ 
+     /// Stop admissions immediately after Close is queued. A refused Close may be
+@@ -182,6 +191,7 @@ impl FrameStream {
+         self.state = FrameStreamState::Closing;
+         self.credit = false;
+         self.closing = Some(transaction);
++        self.trace("Close", transaction.raw(), 0, key.stream_id, false);
+         Ok(admission)
+     }
+ 
+@@ -189,6 +199,7 @@ impl FrameStream {
+     pub fn disconnect(&mut self) {
+         self.state = FrameStreamState::Unknown;
+         self.credit = false;
++        self.trace("Fault", 0, 0, 0, false);
+     }
+ 
+     /// Apply a validated journal event in order, exactly once. Deadlines are
+@@ -216,6 +227,51 @@ impl FrameStream {
+                 "invalid frame stream observation",
+             ));
+         }
++        let (action, transaction, generation, stream, returned) = match record {
++            ShellFrameRecord::Opened {
++                transaction, key, ..
++            } => ("Opened", transaction.raw(), 0, key.stream_id, false),
++            ShellFrameRecord::Closed {
++                transaction, key, ..
++            } => ("Closed", transaction.raw(), 0, key.stream_id, false),
++            ShellFrameRecord::Refused {
++                transaction,
++                candidate_generation,
++                stream_id,
++                request_kind,
++                ..
++            } => (
++                match request_kind {
++                    ShellFileKind::FrameStreamOpen => "RefuseOpen",
++                    ShellFileKind::FrameStreamClose => "RefuseClose",
++                    ShellFileKind::FrameCommit => "RefuseCommit",
++                    _ => unreachable!(),
++                },
++                transaction.raw(),
++                *candidate_generation,
++                *stream_id,
++                false,
++            ),
++            ShellFrameRecord::Outcome {
++                transaction,
++                outcome,
++                stream_id,
++                credit_expires_msec,
++                ..
++            } => (
++                if outcome.kind == 1 {
++                    "Prepared"
++                } else {
++                    "Terminal"
++                },
++                transaction.raw(),
++                outcome.candidate_generation,
++                *stream_id,
++                *credit_expires_msec != 0,
++            ),
++            _ => unreachable!(),
++        };
++        self.trace(action, transaction, generation, stream, returned);
+         Ok(())
+     }
+ 
+@@ -341,3 +397,65 @@ impl FrameStream {
+         }
+     }
+ }
++
++// Trace-only patch: this module is never used by a native timing binary.
++impl FrameStream {
++    fn trace(&mut self, action: &str, tx: u64, generation: u64, stream: u64, returned: bool) {
++        use std::io::Write;
++        use std::sync::atomic::{AtomicU64, Ordering};
++        static NEXT: AtomicU64 = AtomicU64::new(1);
++        let Some(dir) = std::env::var_os("SFT_TRACE_DIR") else {
++            return;
++        };
++        let first = self.trace_id == 0;
++        if first {
++            self.trace_id = NEXT.fetch_add(1, Ordering::Relaxed);
++        }
++        let path = std::path::PathBuf::from(dir).join(format!(
++            "{}-{}.ndjson",
++            std::process::id(),
++            self.trace_id
++        ));
++        let mut options = std::fs::OpenOptions::new();
++        options.write(true);
++        if first {
++            options.create_new(true);
++        } else {
++            options.append(true);
++        }
++        let mut file = options.open(path).expect("trace file");
++        let time = std::time::SystemTime::now()
++            .duration_since(std::time::UNIX_EPOCH)
++            .unwrap()
++            .as_nanos();
++        let pending = self.pending.as_ref();
++        writeln!(
++            file,
++            concat!(
++                "{{\"tag\":\"trace\",\"timestamp\":\"{}\",\"action\":\"{}\",",
++                "\"tx\":{},\"generation\":{},\"stream\":{},\"returned\":{},\"state\":{{",
++                "\"phase\":\"{:?}\",\"key\":{},\"opening\":{},\"closing\":{},",
++                "\"last_stream\":{},\"last_candidate\":{},\"credit\":{},\"closed_notice\":{},",
++                "\"pending_tx\":{},\"pending_gen\":{},\"prepared\":{}}}}}"
++            ),
++            time,
++            action,
++            tx,
++            generation,
++            stream,
++            returned,
++            self.state,
++            self.key.map_or(0, |key| key.stream_id),
++            self.opening.map_or(0, TransactionId::raw),
++            self.closing.map_or(0, TransactionId::raw),
++            self.last_stream,
++            self.last_candidate,
++            self.credit,
++            self.closed_notice,
++            pending.map_or(0, |p| p.transaction.raw()),
++            pending.map_or(0, |p| p.generation),
++            pending.is_some_and(|p| p.prepared)
++        )
++        .unwrap();
++    }
++}
