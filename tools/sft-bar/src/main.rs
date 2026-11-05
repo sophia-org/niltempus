@@ -65,13 +65,12 @@ fn byte_len(width: u32, height: u32) -> Option<u64> {
         .checked_mul(4)
 }
 
-// Same shade_mod128_a255 loop as gpu-bar-dma e730d3910 producer::fill_cpu.
+// Same shade_mod128_a255 pixels as gpu-bar-dma e730d3910 producer::fill_cpu.
 fn fill_cpu(pixels: &mut [u8], frame: u64) {
-    assert!(pixels.len().is_multiple_of(4));
+    let (pixels, tail) = pixels.as_chunks_mut::<4>();
+    assert!(tail.is_empty());
     let shade = (frame % 128) as u8;
-    for pixel in pixels.chunks_exact_mut(4) {
-        pixel.copy_from_slice(&[shade, shade, shade, 255]);
-    }
+    pixels.fill([shade, shade, shade, 255]);
 }
 
 fn resource_for_frame(frame: u64) -> ContentResourceId {

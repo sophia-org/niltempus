@@ -43,3 +43,22 @@ fn pixels_match_the_held_shade_workload_and_keep_alpha_opaque() {
             ]));
     }
 }
+
+#[test]
+fn pixel_fill_handles_short_unaligned_slices_without_touching_neighbors() {
+    for pixels in [0, 1, 3, 4, 7, 8, 17, 65] {
+        for prefix in 0..4 {
+            for generation in [0, 127, 128, u64::MAX] {
+                let end = prefix + pixels * 4;
+                let mut bytes = vec![0xa5; end + 4];
+                fill_cpu(&mut bytes[prefix..end], generation);
+                assert!(bytes[..prefix].iter().all(|&b| b == 0xa5));
+                assert!(bytes[end..].iter().all(|&b| b == 0xa5));
+                for pixel in bytes[prefix..end].chunks_exact(4) {
+                    let shade = (generation % 128) as u8;
+                    assert_eq!(pixel, [shade, shade, shade, 255]);
+                }
+            }
+        }
+    }
+}
