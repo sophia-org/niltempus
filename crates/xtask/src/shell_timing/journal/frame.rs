@@ -40,6 +40,8 @@ enum Event {
 }
 #[derive(Serialize)]
 pub struct Evidence {
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub terminal_only: bool,
     pub stream_id: u64,
     pub opened_usec: u64,
     pub closed_usec: u64,
@@ -50,7 +52,11 @@ fn next(lines: &mut std::str::Lines<'_>) -> Result<Event, String> {
     ring::next(lines, 8)
 }
 
-pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String> {
+pub(super) fn collect(
+    journal: &str,
+    expected: usize,
+    terminal_only: bool,
+) -> Result<Journal, String> {
     let mut lines = journal.lines();
     match next(&mut lines)? {
         Event::Ring(Ring::Start {
@@ -114,6 +120,7 @@ pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String>
         retire_counters: None,
     };
     let mut evidence = Evidence {
+        terminal_only,
         stream_id,
         opened_usec,
         closed_usec: 0,
@@ -189,7 +196,7 @@ pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String>
         let (mut accepted, mut prepared, mut terminal, mut released, mut retired) =
             (None, None, None, None, generation == 1);
         while accepted.is_none()
-            || prepared.is_none()
+            || (!terminal_only && prepared.is_none())
             || terminal.is_none()
             || released.is_none()
             || !retired
@@ -210,7 +217,8 @@ pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String>
                 Event::Frame(Frame::Prepared {
                     candidate_generation,
                     observed_monotonic_usec,
-                }) if accepted.is_some()
+                }) if !terminal_only
+                    && accepted.is_some()
                     && prepared.is_none()
                     && candidate_generation == generation =>
                 {
@@ -226,7 +234,8 @@ pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String>
                     kind: 2,
                     reason: 0,
                     observed_monotonic_usec,
-                }) if prepared.is_some()
+                }) if accepted.is_some()
+                    && (terminal_only || prepared.is_some())
                     && terminal.is_none()
                     && connection_epoch == ready.connection_epoch
                     && content_grant_epoch == ready.content_grant_epoch
@@ -283,9 +292,9 @@ pub(super) fn collect(journal: &str, expected: usize) -> Result<Journal, String>
             }
             last = timestamp;
         }
-        evidence
-            .prepared_usec
-            .push(prepared.ok_or("missing SFT Prepared")?);
+        if let Some(prepared) = prepared {
+            evidence.prepared_usec.push(prepared);
+        }
         result
             .terminal_usec
             .push(terminal.ok_or("missing SFT Presented")?);

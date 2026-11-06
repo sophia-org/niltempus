@@ -228,6 +228,7 @@ fn request(arm: &Arm) -> xtask::shell_timing_native::Request {
         managed_destination_reuse: false,
         retire_on_present: false,
         frame_transactions: false,
+        frame_terminal_only: false,
     }
 }
 

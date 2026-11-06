@@ -10,6 +10,7 @@ mod latency;
 pub use journal::{
     BatchTiming, CandidatePlacements, DrawEvidence, DrawSource, DrawWorkload, Journal,
     LiveResource, Placement, RetireCounters, RingReady6, ValueDueTiming, collect, collect_metrics,
+    collect_terminal_frame_metrics,
 };
 pub use latency::{
     BoundReached, Distribution, Measures, TRANSFER_BOUND_USEC, Window, WindowedLatency,

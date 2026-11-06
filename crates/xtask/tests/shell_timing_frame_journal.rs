@@ -136,3 +136,46 @@ fn identity_order_credit_and_source_custody_mutations_refuse() {
     );
     assert!(collect_metrics(&encode(&invented), 4).is_err());
 }
+
+#[test]
+fn terminal_only_real_journals_require_the_explicit_parser_and_all_other_evidence() {
+    use xtask::shell_timing::collect_terminal_frame_metrics;
+    for text in [
+        include_str!("fixtures/sft/schema8-terminal-h24.ndjson"),
+        include_str!("fixtures/sft/schema8-terminal-h512.ndjson"),
+    ] {
+        assert!(collect_metrics(text, 4).is_err());
+        let result = collect_terminal_frame_metrics(text, 4).unwrap();
+        assert_eq!(result.terminal_usec.len(), 4);
+        let frame = result.frame.unwrap();
+        assert!(frame.terminal_only);
+        assert!(frame.prepared_usec.is_empty());
+        assert_eq!(frame.predecessor_released_usec.len(), 3);
+        let rows: Vec<serde_json::Value> = text
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        for event in [
+            "ring_accepted",
+            "slot_released",
+            "terminal",
+            "frame_retired",
+            "frame_closed",
+        ] {
+            let mut missing = rows.clone();
+            let index = missing.iter().position(|r| r["event"] == event).unwrap();
+            missing.remove(index);
+            assert!(
+                collect_terminal_frame_metrics(&encode(&missing), 4).is_err(),
+                "accepted missing {event}"
+            );
+        }
+    }
+    assert!(
+        collect_terminal_frame_metrics(SFT, 4).is_err(),
+        "Prepared must refuse terminal-only capture"
+    );
+    assert!(
+        collect_terminal_frame_metrics(include_str!("fixtures/sft/schema7-h24.ndjson"), 4).is_err()
+    );
+}

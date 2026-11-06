@@ -40,6 +40,7 @@ impl Fixture {
                 managed_destination_reuse: false,
                 retire_on_present: false,
                 frame_transactions: false,
+                frame_terminal_only: false,
             },
         };
         // These fixtures are hashed only. None may be executed by validation.
@@ -1638,4 +1639,76 @@ fn frame_transactions_require_both_permissions_and_preserve_ordinary_argv() {
     f.request.retire_on_present = false;
     f.request.managed_destination_reuse = true;
     assert!(validate(&f.request).is_err());
+}
+
+#[test]
+fn terminal_only_requires_paired_sft_permission_and_preserves_ordinary_requests() {
+    const FLAG: &str = "--experimental-native-frame-terminal-only";
+    let mut f = Fixture::new("terminal-only", "files");
+    f.request.source = xtask::shell_timing::ImageSource::OwnedRing;
+    f.request.frame_transactions = true;
+    f.request.frames = 4;
+    let mut config = serde_json::json!({"wire":"files","source":"owned_ring","producer":"cpu","output":1,
+        "frames":4,"height":24,"hold_msec":60000,"ring_slots":2,"frame_transactions":true});
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    let ordinary = validate(&f.request).unwrap();
+    assert!(!ordinary.iter().any(|a| a == FLAG));
+    assert!(
+        serde_json::to_value(&f.request)
+            .unwrap()
+            .get("frame_terminal_only")
+            .is_none()
+    );
+    config["terminal_only"] = true.into();
+    f.put("peer-config", config.to_string().as_bytes(), false);
+    assert!(validate(&f.request).is_err());
+    f.request.frame_terminal_only = true;
+    let terminal = validate(&f.request).unwrap();
+    assert_eq!(terminal.iter().filter(|a| a.as_str() == FLAG).count(), 1);
+    assert_eq!(&terminal[..ordinary.len()], ordinary);
+    let metrics = xtask::shell_timing::collect_terminal_frame_metrics(
+        include_str!("fixtures/sft/schema8-terminal-h24.ndjson"),
+        4,
+    )
+    .unwrap();
+    xtask::shell_timing_native::validate_captured_config(
+        &metrics,
+        &f.request,
+        config.to_string().as_bytes(),
+    )
+    .unwrap();
+    let ordinary_metrics =
+        xtask::shell_timing::collect_metrics(include_str!("fixtures/sft/schema8-h24.ndjson"), 4)
+            .unwrap();
+    assert!(
+        xtask::shell_timing_native::validate_captured_config(
+            &ordinary_metrics,
+            &f.request,
+            config.to_string().as_bytes()
+        )
+        .is_err()
+    );
+    f.request.frame_terminal_only = false;
+    assert!(
+        xtask::shell_timing_native::validate_captured_config(
+            &metrics,
+            &f.request,
+            config.to_string().as_bytes()
+        )
+        .is_err()
+    );
+    f.request.frame_terminal_only = true;
+
+    f.request.frame_transactions = false;
+    assert!(validate(&f.request).is_err());
+    f.request.frame_transactions = true;
+    for value in [
+        serde_json::json!(false),
+        serde_json::json!(null),
+        serde_json::json!("true"),
+    ] {
+        config["terminal_only"] = value;
+        f.put("peer-config", config.to_string().as_bytes(), false);
+        assert!(validate(&f.request).is_err());
+    }
 }

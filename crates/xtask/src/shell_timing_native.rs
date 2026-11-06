@@ -99,6 +99,9 @@ pub struct Request {
     /// and validate-session-args remain the package's prelaunch responsibility.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub frame_transactions: bool,
+    /// Optional terminal-only SFT notices; must match the peer config.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub frame_terminal_only: bool,
 }
 
 /// Who renders the peer's pixels.
@@ -158,6 +161,8 @@ struct PeerConfig {
     retire_on_present: Option<bool>,
     #[serde(default, deserialize_with = "present_bool")]
     frame_transactions: Option<bool>,
+    #[serde(default, deserialize_with = "present_bool")]
+    terminal_only: Option<bool>,
     image: Option<ImageConfig>,
     /// Explicit pixel producer of a matched-benchmark peer. Absent keeps
     /// every historical config: historical CPU peers carry no key, so
@@ -475,6 +480,9 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
     {
         return Err("retire-on-present requires a files owned-ring peer plan".into());
     }
+    if request.frame_terminal_only && !request.frame_transactions {
+        return Err("terminal-only notices require SFT".into());
+    }
     if request.frame_transactions
         && (request.wire != "files"
             || request.source != ImageSource::OwnedRing
@@ -548,6 +556,9 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
             return Err(
                 "retire-on-present requires the peer key and the host flag together".into(),
             );
+        }
+        if request.frame_terminal_only != (peer.terminal_only == Some(true)) {
+            return Err("terminal-only notices require paired host/peer permission".into());
         }
         if request.frame_transactions != (peer.frame_transactions == Some(true))
             || request.frame_transactions
@@ -705,6 +716,9 @@ pub fn validate(request: &Request) -> Result<Vec<String>, String> {
     }
     if request.frame_transactions {
         argv.push("--experimental-native-frame-transaction".into());
+    }
+    if request.frame_terminal_only {
+        argv.push("--experimental-native-frame-terminal-only".into());
     }
     if request.retire_on_present {
         argv.push("--experimental-shell-retire-on-present".into());
@@ -875,7 +889,11 @@ pub fn validate_captured_config(
     if request.frame_transactions {
         if peer.frame_transactions != Some(true)
             || metrics.schema != 8
-            || metrics.frame.is_none()
+            || metrics
+                .frame
+                .as_ref()
+                .is_none_or(|frame| frame.terminal_only != request.frame_terminal_only)
+            || (peer.terminal_only == Some(true)) != request.frame_terminal_only
             || !metrics.permits.is_empty()
         {
             return Err("captured SFT journal or peer permission missing".into());
@@ -1324,7 +1342,11 @@ fn run_inner(
                 split_capture(std::str::from_utf8(&capture).map_err(|e| e.to_string())?)?;
             write(&stage.join("client.ndjson"), client.as_bytes())?;
             write(&stage.join("native.log"), host.as_bytes())?;
-            let metrics = crate::shell_timing::collect_metrics(&client, plan.request.frames)?;
+            let metrics = if plan.request.frame_terminal_only {
+                crate::shell_timing::collect_terminal_frame_metrics(&client, plan.request.frames)?
+            } else {
+                crate::shell_timing::collect_metrics(&client, plan.request.frames)?
+            };
             let peer_bytes = bounded(&plan.request.artifacts["peer-config"].path, MAX_INPUT)?;
             if sha256(&peer_bytes) != plan.request.artifacts["peer-config"].sha256 {
                 return Err("peer configuration changed during capture".into());

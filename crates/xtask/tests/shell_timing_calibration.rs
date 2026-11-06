@@ -227,6 +227,7 @@ impl World {
             managed_destination_reuse: false,
             retire_on_present: false,
             frame_transactions: false,
+            frame_terminal_only: false,
             frames: shape.frames,
             mode_millihz: 120_000,
             instrumentation: shape.instrumentation.into(),

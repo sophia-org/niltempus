@@ -1,0 +1,13 @@
+{
+  "source": "/home/niltempus/.local/state/sophia-sft-terminal-activation-01/peer-feature.log",
+  "source_sha256": "87b2f532009bb4f63f112722c0d069acf8c6479b8c8220a656569c9b88e6482c",
+  "peer_commit": "73e250ea62c3637800eb3137abcbb613cdc76909",
+  "host_commit": "2fa54bd8469cf4a68a9531c1a0142dc2b90064b7",
+  "sdk_commit": "fd9330b64fb415dab8daacb769bcca835b546661",
+  "selection": "Actual JSON lines from case indices 2/5 of the pinned owner test: legacy/SFT/terminal at heights24/512. No field or value changed.",
+  "native_presentation": false,
+  "files": {
+    "schema8-terminal-h24.ndjson": "e06212f0fefa02d702a90faa6704a674617eb933f64d6c06ba406cbc3800fa57",
+    "schema8-terminal-h512.ndjson": "5e0461c25e646abd145660fe89ebddb842dfa8e1d134ed99e469363a452fe61a"
+  }
+}

@@ -865,6 +865,7 @@ fn prepared_plan(
         managed_destination_reuse: false,
         retire_on_present: false,
         frame_transactions: false,
+        frame_terminal_only: false,
         frames: arm.frames,
         mode_millihz: 120_000,
         instrumentation: match arm.measurement {

@@ -226,6 +226,20 @@ pub fn collect(journal: &str, expected: usize) -> Result<Vec<Offer>, String> {
 }
 
 pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String> {
+    collect_metrics_inner(journal, expected, false)
+}
+
+/// Parse only an explicitly requested terminal-only SFT capture.
+/// Ordinary collect_metrics still requires every Prepared notice.
+pub fn collect_terminal_frame_metrics(journal: &str, expected: usize) -> Result<Journal, String> {
+    collect_metrics_inner(journal, expected, true)
+}
+
+fn collect_metrics_inner(
+    journal: &str,
+    expected: usize,
+    terminal_only: bool,
+) -> Result<Journal, String> {
     if journal.len() > MAX_BYTES as usize
         || !(1..=MAX_RECORDS).contains(&expected)
         || !journal.ends_with('\n')
@@ -243,11 +257,14 @@ pub fn collect_metrics(journal: &str, expected: usize) -> Result<Journal, String
     let start_schema = serde_json::from_str::<Schema>(start)
         .map_err(|e| e.to_string())?
         .schema;
+    if terminal_only && start_schema != 8 {
+        return Err("terminal-only capture requires SFT schema 8".into());
+    }
     if matches!(start_schema, 5 | 7) {
         return ring::collect(journal, expected, start_schema);
     }
     if start_schema == 8 {
-        return frame::collect(journal, expected);
+        return frame::collect(journal, expected, terminal_only);
     }
     if start_schema == 6 {
         return draw::collect(journal, expected);

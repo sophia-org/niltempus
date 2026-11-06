@@ -170,10 +170,13 @@ fn frame_ring_config(config: &serde_json::Value) -> bool {
         "producer",
         "frame_transactions",
     ];
-    config
-        .as_object()
-        .is_some_and(|o| o.len() == KEYS.len() && o.keys().all(|k| KEYS.contains(&k.as_str())))
-        && config["wire"] == "files"
+    config.as_object().is_some_and(|o| {
+        let expected = KEYS.len() + usize::from(o.contains_key("terminal_only"));
+        o.len() == expected
+            && KEYS.iter().all(|key| o.contains_key(*key))
+            && o.get("terminal_only")
+                .is_none_or(serde_json::Value::is_boolean)
+    }) && config["wire"] == "files"
         && config["source"] == "owned_ring"
         && config["producer"] == "cpu"
         && config["ring_slots"] == 2
