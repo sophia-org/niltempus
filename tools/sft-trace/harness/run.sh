@@ -4,7 +4,7 @@ umask 077
 harness="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 sdk="$(realpath "${1:?SDK worktree}")"
 out="$(realpath -m "${2:?new output directory}")"
-[[ "$(git -C "$sdk" rev-parse HEAD)" == b483e1ee9d79730705d372ffcebd47c7b12c4514 ]]
+[[ "$(git -C "$sdk" rev-parse HEAD)" == fd9330b64fb415dab8daacb769bcca835b546661 ]]
 [[ -z "$(git -C "$sdk" status --porcelain)" ]]
 mkdir "$out"
 mkdir "$out/traces"

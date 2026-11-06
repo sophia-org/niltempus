@@ -1,6 +1,6 @@
 # SFT client runtime trace gate
 
-This checks the actual Rust SDK FrameStream state transitions at b483e1e against
+This checks the actual Rust SDK FrameStream state transitions at fd9330b against
 an executable TLA+ client lifecycle projection. It complements, rather than
 replaces, Sophia's host admission/copy/resource models and typed wire tests.
 The patch is applied only in a disposable SDK worktree. It must never be used
@@ -26,7 +26,7 @@ retains pending state and never reopens.
 
 ## Reproduce
 
-Create a detached clean SDK worktree at b483e1ee9d79730705d372ffcebd47c7b12c4514.
+Create a detached clean SDK worktree at fd9330be9d79730705d372ffcebd47c7b12c4514.
 Run `bash tools/sft-trace/harness/run.sh SDK_WORKTREE NEW_OUTPUT_DIR` from this
 checkout. It applies the exact patch, runs the existing SDK scenarios with
 cargo-slot, and writes traces and tests.log. Use Specula's run_trace_validation
@@ -39,3 +39,15 @@ For a reproducible command-line check after capture, set
 Specula jars, then run `bash tools/sft-trace/harness/check.sh TRACE_DIR NEW_CHECK_DIR`.
 It verifies both jar hashes, checks MC.cfg and validates every nonempty trace
 with a bounded TLC invocation. An error or mismatch stops the check.
+
+## Terminal-only activation checkpoint
+
+The pinned SDK is terminal-only support on the held reference peer SDK revision,
+retaining its journal-progress wait correction. Existing instrumentation and the
+client model are unchanged: Terminal already permits a pending candidate without
+an observed Prepared. The expanded real journal tests include exact bit-19
+negotiation and terminal-only completion. Validate every captured post-state and
+explicitly count terminal transitions whose previous pending state was not
+prepared. This validates the client lifecycle projection, not the host's internal
+preparation or physical submission ordering, wire authorization, C internals or
+native CPU/latency. Those retain their separate tests/model/qualification gates.
