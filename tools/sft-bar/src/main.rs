@@ -18,6 +18,7 @@ const WAIT: Duration = Duration::from_secs(5);
 mod journal;
 use journal::{Event, RetireCounters, Upload};
 mod legacy;
+mod prepare_log;
 mod ring_journal;
 mod sft;
 mod wire;

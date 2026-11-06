@@ -200,10 +200,13 @@ pub fn frame(
             },
         )
         .map_err(|e| format!("ring upload: {e:?}"))?;
-    eprintln!(
-        "gpu_bar_prepare schema=1 arm=owned_ring generation={generation} resource_id={} start_usec={fill_start_usec} end_usec={begin_usec}",
-        resource.id
-    );
+    crate::prepare_log::write(
+        &mut std::io::stderr().lock(),
+        generation,
+        resource.id,
+        fill_start_usec,
+        begin_usec,
+    )?;
     let slot = u64::from(
         wire.client
             .image_ring_offer(offer)

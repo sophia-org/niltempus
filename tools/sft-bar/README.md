@@ -1,5 +1,12 @@
 # CPU reference for Sophia Frame Transactions
 
+The `gpu_bar_prepare` stderr receipt is formatted with its newline before it is
+written. Both legacy and SFT use the same writer: an accepting sink receives the
+whole record in one write, instead of interleaving format pieces with the host's
+log records. Short writes and errors follow `write_all`; this is not a general
+atomicity guarantee for every sink. Native comparisons use this peer in both
+arms. Record bytes, workload and protocol are unchanged; no CPU saving is claimed.
+
 A separate, default-off SFT experiment. The existing `gpu-bar/dma` executable,
 including its GPU and W2 modes, is unchanged. This workspace pins the same SDK
 as the real Lom SFT implementation and does not retarget the root runner.
