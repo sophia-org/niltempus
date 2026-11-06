@@ -13,15 +13,19 @@ mod host;
 #[test]
 fn both_protocols_present_identical_cpu_frames_and_drain_the_owner() {
     for height in [24, 512] {
-        let legacy = run(height, false);
-        let sft = run(height, true);
+        let legacy = run(height, false, false);
+        let sft = run(height, true, false);
         assert_eq!(sft, legacy);
+        let terminal = run(height, true, true);
+        assert_eq!(terminal, legacy);
     }
 }
 
-fn run(height: u32, sft: bool) -> Vec<Vec<u8>> {
-    let directory =
-        std::env::temp_dir().join(format!("sft-bar-{}-{height}-{sft}", std::process::id()));
+fn run(height: u32, sft: bool, terminal_only: bool) -> Vec<Vec<u8>> {
+    let directory = std::env::temp_dir().join(format!(
+        "sft-bar-{}-{height}-{sft}-{terminal_only}",
+        std::process::id()
+    ));
     assert!(!directory.exists());
     let mut owner = ShellComponentConnections::new().unwrap();
     let slot = owner
@@ -33,7 +37,11 @@ fn run(height: u32, sft: bool) -> Vec<Vec<u8>> {
         )
         .unwrap();
     if sft {
-        owner.enable_frame_transactions().unwrap();
+        if terminal_only {
+            owner.enable_terminal_frame_transactions().unwrap();
+        } else {
+            owner.enable_frame_transactions().unwrap();
+        }
     }
     let key = owner.reserve_attempt(slot).unwrap();
     owner
@@ -52,7 +60,12 @@ fn run(height: u32, sft: bool) -> Vec<Vec<u8>> {
             Box::new(authority::Factory),
         )
         .unwrap();
-    let peer = start(owner.socket_path(slot).unwrap().into(), height, sft);
+    let peer = start(
+        owner.socket_path(slot).unwrap().into(),
+        height,
+        sft,
+        terminal_only,
+    );
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut host = host::Host::default();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -108,6 +121,7 @@ fn start(
     socket: PathBuf,
     height: u32,
     sft: bool,
+    terminal_only: bool,
 ) -> std::thread::JoinHandle<std::result::Result<(), String>> {
     std::thread::spawn(move || {
         use crate::*;
@@ -145,6 +159,11 @@ fn start(
                         sophia_shell_protocol::shell_files::SHELL_FRAME_CAPABILITY
                     } else {
                         0
+                    }
+                    | if terminal_only {
+                        sophia_shell_protocol::shell_files::SHELL_FRAME_TERMINAL_ONLY_CAPABILITY
+                    } else {
+                        0
                     },
                 handshake_timeout: timeout,
             },
@@ -161,6 +180,7 @@ fn start(
             height,
             hold_msec: 0,
             frame_transactions: sft,
+            terminal_only,
         };
         run_connected(&mut wire, &config, socket.as_os_str()).map_err(|e| e.to_string())
     })

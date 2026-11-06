@@ -60,3 +60,24 @@ SDK. The guard prevents the internal wait drive from consuming SlotReleased and
 then sleeping until the caller deadline. Evidence: sophia-frame-peer-wait-progress-01;
 no native causality or performance claim. Host dev-test pin remains 502029a; its
 wire contract is unchanged. The old GPU/W2 peer is not retargeted.
+
+## Terminal-only SFT experiment
+
+The optional `terminal_only` JSON boolean defaults to false and requires
+`frame_transactions: true` plus the existing experimental build feature. The
+owner must independently permit required r13 bit 19 using
+`--experimental-native-frame-transaction --experimental-native-frame-terminal-only`.
+Unsupported or missing grants refuse the connection; the peer never retries with
+a weaker request. Ordinary r10 and r13 requests are unchanged.
+
+The SDK rejects a Prepared frame outcome under this grant. The peer still waits
+for accepted source, source release, actual Presented, predecessor release and
+returned frame credit. Only Prepared logging disappears. This source option is
+not a CPU claim or an installed-default change; native qualification is separate.
+
+The terminal-only reference SDK pin is `fd9330b64fb415dab8daacb769bcca835b546661`,
+a signed child of the held `ae473881` SDK, so the journal-progress wait fix remains.
+The host used only by tests is `2fa54bd8469cf4a68a9531c1a0142dc2b90064b7`.
+Registry versions/checksums are unchanged. The copied-ring owner test compares
+r10, ordinary r13 and terminal-only r13 at heights 24 and 512, checks identical
+pixels and drains resources. Evidence: `~/.local/state/sophia-sft-terminal-activation-01`.

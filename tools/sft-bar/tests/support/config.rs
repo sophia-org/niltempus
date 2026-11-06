@@ -43,3 +43,18 @@ fn pixels_match_the_held_shade_workload_and_keep_alpha_opaque() {
             ]));
     }
 }
+
+#[test]
+fn terminal_only_is_explicit_and_cannot_weaken_to_legacy() {
+    let mut value: serde_json::Value = serde_json::from_str(CONFIG).unwrap();
+    assert!(!Config::parse(CONFIG).unwrap().terminal_only);
+    value["terminal_only"] = true.into();
+    assert!(Config::parse(&value.to_string()).is_err());
+    value["frame_transactions"] = true.into();
+    assert_eq!(
+        Config::parse(&value.to_string()).is_ok(),
+        cfg!(feature = "experimental-frame-transactions")
+    );
+    value["terminal_only"] = "true".into();
+    assert!(Config::parse(&value.to_string()).is_err());
+}

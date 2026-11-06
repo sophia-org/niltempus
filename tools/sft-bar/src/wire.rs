@@ -20,6 +20,7 @@ fn adopt(fd: i32) -> Result<UnixStream> {
 impl Wire {
     pub(super) fn connect(
         frame_transactions: bool,
+        terminal_only: bool,
     ) -> Result<(Self, sophia_9p_client::pipeline::Pipeline)> {
         if std::env::var_os("SOPHIA_SHELL_SOCKET").is_some() {
             return Err("ambiguous shell wire".into());
@@ -57,7 +58,12 @@ impl Wire {
                 | SOPHIA_SHELL_CAPABILITY_CONTENT_SURFACE
                 | SOPHIA_SHELL_CAPABILITY_CONTENT_DISCRETE_INPUT
                 | IMAGE_CAPABILITY_OWNED_RING
-                | frame,
+                | frame
+                | if terminal_only {
+                    sophia_shell_protocol::shell_files::SHELL_FRAME_TERMINAL_ONLY_CAPABILITY
+                } else {
+                    0
+                },
             handshake_timeout: WAIT,
         };
         Ok((

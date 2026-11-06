@@ -36,6 +36,8 @@ struct Config {
     hold_msec: u64,
     #[serde(default)]
     frame_transactions: bool,
+    #[serde(default)]
+    terminal_only: bool,
 }
 impl Config {
     fn parse(text: &str) -> Result<Self> {
@@ -49,6 +51,7 @@ impl Config {
             || !(1..=512).contains(&config.height)
             || config.hold_msec > 600000
             || (config.frame_transactions && !cfg!(feature = "experimental-frame-transactions"))
+            || (config.terminal_only && !config.frame_transactions)
         {
             return Err(
                 "requires bounded CPU/two-slot/files workload and explicit SFT build permission"
@@ -110,7 +113,7 @@ fn run() -> Result<()> {
         ring_journal::SCHEMA
     });
     let socket = std::env::var_os("SOPHIA_SHELL_9P_SOCKET").ok_or("missing file endpoint")?;
-    let (mut wire, _relay) = Wire::connect(config.frame_transactions)?;
+    let (mut wire, _relay) = Wire::connect(config.frame_transactions, config.terminal_only)?;
     eprintln!("cpu_bar schema=1 source=owned_ring producer=cpu_shm fill=shade_mod128_a255");
     run_connected(&mut wire, &config, &socket)
 }
