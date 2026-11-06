@@ -55,6 +55,39 @@ A SIGKILLed sampler loses only its footer. The analyzer accepts a run with no fo
 - `ticks` is utime+stime of the whole thread group: live threads plus exited threads, excluding children.
 - `self_cpu_ns` is the sampler's own rusage, used for the overhead label.
 
+## Opt-in process CPU clock (JSONL, version 2)
+
+Add `--cpu-accounting process-clock` to `sample` on Linux. The panel diagnostic
+runner accepts the optional descriptor field `"cpu_accounting":"process-clock"`;
+omitting it retains the version-1 sampler and tick accounting unchanged.
+
+Version 2 keeps the version-1 fields and adds:
+
+- Header: `version:2`, `cpu_accounting:"process-clock"`, and a positive integer
+  `clock_resolution_ns` in each process identity.
+- Successful process reads: `process_cpu_ns`, a nonnegative integer from that
+  process's POSIX CPU clock, including its threads and excluding children.
+- Error reads and footer: unchanged. No silent fallback to ticks.
+
+The sampler resolves each clock once with `clock_getcpuclockid`. Every clock read
+is surrounded by reads of the retained `/proc/PID/stat` fd; comm and start time
+must match the binding before and after. All reads remain inside the row's
+monotonic `t0`/`t1` bracket. Exit or identity uncertainty invalidates the read.
+
+Every analyzer plan run must explicitly select `"cpu_accounting":"process-clock"`.
+Mixed modes, mismatched capture/plan modes, malformed or decreasing counters and
+process-clock intervals disjoint from the existing tick intervals are refused.
+The same fully-inside/fully-outside samples bound the CPU delta; there is no
+interpolation or boundary correction. Version-2 results report `inner_cpu_ns`
+and `outer_cpu_ns` in `procs`, retain the independent tick calculation in
+`tick_crosscheck_per_proc`, and report `clock_resolution_ns` separately.
+
+These are bounds on kernel-accounted process CPU between monotonic anchors.
+Clock resolution is not measurement accuracy; neither these bounds nor the tick
+bounds are confidence intervals or guarantees about a different run. Sampler
+CPU and row widths remain visible. Compare controls and candidates with the same
+sampler mode and recipe; do not pool historical tick-only runs into that result.
+
 ## Analyzer
 
 ```

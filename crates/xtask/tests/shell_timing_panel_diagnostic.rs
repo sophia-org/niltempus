@@ -15,6 +15,7 @@ fn fixture() -> (Descriptor, Request) {
     };
     (
         Descriptor {
+            cpu_accounting: None,
             schema: 1,
             raster: None,
             workload: None,
@@ -396,4 +397,15 @@ fn sft_diagnostic_is_a_separate_explicit_cpu_policy() {
     d.workload = None;
     d.bar_height = Some(512);
     assert!(policy(&d, &r, 0).is_ok());
+}
+
+#[test]
+fn process_clock_accounting_is_explicit_and_unknown_modes_refuse() {
+    let (mut descriptor, request) = fixture();
+    assert!(descriptor.cpu_accounting.is_none());
+    assert!(policy(&descriptor, &request, 0).is_ok());
+    descriptor.cpu_accounting = Some("process-clock".into());
+    assert!(policy(&descriptor, &request, 0).is_ok());
+    descriptor.cpu_accounting = Some("guess".into());
+    assert!(policy(&descriptor, &request, 0).is_err());
 }

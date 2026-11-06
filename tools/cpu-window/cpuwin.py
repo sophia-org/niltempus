@@ -47,6 +47,7 @@ The intervals are attribution intervals, not confidence intervals. One run is a
 stage observation, never a bound on another run.
 """
 import argparse
+import ctypes
 import json
 import os
 import resource
@@ -80,7 +81,38 @@ def self_cpu_ns():
 # ---------------------------------------------------------------- sampler
 
 
+def process_clock(pid):
+    """Resolve once; identity remains guarded by the retained proc stat fd."""
+    if sys.platform != "linux":
+        raise OSError("process-clock accounting requires Linux")
+    function = ctypes.CDLL(None).clock_getcpuclockid
+    function.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
+    function.restype = ctypes.c_int
+    clock = ctypes.c_int()
+    error = function(pid, ctypes.byref(clock))
+    if error:
+        raise OSError(error, os.strerror(error))
+    resolution = max(1, round(time.clock_getres(clock.value) * NS))
+    return clock.value, resolution
+
+
+def process_read(p, precise):
+    first = parse_stat(os.pread(p["fd"], 4096, 0).decode())
+    comm, start, ut, st = first
+    if (comm, start) != (p["comm"], p["starttime"]):
+        raise Refused("identity_changed")
+    result = dict(pid=p["pid"], starttime=start, comm=comm, ticks=ut + st)
+    if precise:
+        cpu = time.clock_gettime_ns(p["clock"])
+        after = parse_stat(os.pread(p["fd"], 4096, 0).decode())
+        if after[:2] != first[:2]:
+            raise Refused("identity_changed")
+        result["process_cpu_ns"] = cpu
+    return result
+
+
 def cmd_sample(args):
+    precise = getattr(args, "cpu_accounting", "ticks") == "process-clock"
     procs = {}
     for spec in args.pid:
         name, _, rest = spec.partition("=")
@@ -103,6 +135,14 @@ def cmd_sample(args):
             print(f"{name}: pid {pid} starttime {got} != bound {start}", file=sys.stderr)
             sys.exit(EXIT_BINDING)
         procs[name] = dict(pid=int(pid), fd=fd, comm=comm, starttime=got)
+    if precise:
+        for p in procs.values():
+            try:
+                p["clock"], p["clock_resolution_ns"] = process_clock(p["pid"])
+                process_read(p, True)
+            except (OSError, Refused) as error:
+                print(f"process clock binding refused: {error}", file=sys.stderr)
+                return EXIT_BINDING
     clk_tck = os.sysconf("SC_CLK_TCK")
     interval = int(args.interval_ms * 1_000_000)
     with open("/proc/sys/kernel/random/boot_id") as f:
@@ -117,11 +157,15 @@ def cmd_sample(args):
     def emit(rec):
         out.write(json.dumps(rec, separators=(",", ":")) + "\n")
 
-    emit(dict(kind="header", version=1, clk_tck=clk_tck, interval_ns=interval,
-              boot_id=boot_id, sampler_pid=os.getpid(),
-              procs={n: dict(pid=p["pid"], starttime=p["starttime"], comm=p["comm"])
-                     for n, p in procs.items()}))
-
+    header = dict(kind="header", version=2 if precise else 1, clk_tck=clk_tck,
+                  interval_ns=interval, boot_id=boot_id, sampler_pid=os.getpid(),
+                  procs={n: dict(pid=p["pid"], starttime=p["starttime"], comm=p["comm"])
+                         for n, p in procs.items()})
+    if precise:
+        header["cpu_accounting"] = "process-clock"
+        for n, p in procs.items():
+            header["procs"][n]["clock_resolution_ns"] = p["clock_resolution_ns"]
+    emit(header)
     gone = set()
 
     def sample(seq):
@@ -132,10 +176,16 @@ def cmd_sample(args):
                 reads[name] = dict(pid=p["pid"], error="exited")
                 continue
             try:
-                comm, start, ut, st = parse_stat(os.pread(p["fd"], 4096, 0).decode())
-                reads[name] = dict(pid=p["pid"], starttime=start, comm=comm, ticks=ut + st)
-                if start != p["starttime"]:
-                    stop.append("identity_changed")
+                if precise:
+                    reads[name] = process_read(p, True)
+                else:
+                    comm, start, ut, st = parse_stat(os.pread(p["fd"], 4096, 0).decode())
+                    reads[name] = dict(pid=p["pid"], starttime=start, comm=comm, ticks=ut + st)
+                    if start != p["starttime"]:
+                        stop.append("identity_changed")
+            except Refused:
+                reads[name] = dict(pid=p["pid"], error="identity_changed")
+                stop.append("identity_changed")
             except OSError as e:  # ESRCH: the bound process has been reaped
                 reads[name] = dict(pid=p["pid"], error=e.strerror)
                 gone.add(name)
@@ -178,8 +228,15 @@ def is_int(v, low=0):
 
 
 def check_header(h, where):
-    if h.get("version") != 1 or isinstance(h.get("version"), bool):
-        raise Refused(f"{where}: header version {h.get('version')!r}, want 1")
+    if h.get("version") not in (1, 2) or isinstance(h.get("version"), bool):
+        raise Refused(f"{where}: header version {h.get('version')!r}, want 1 or 2")
+    if h["version"] == 2:
+        if h.get("cpu_accounting") != "process-clock":
+            raise Refused(f"{where}: header version 2 requires process-clock mode")
+        if not isinstance(h.get("procs"), dict) or not all(
+                isinstance(p, dict) and is_int(p.get("clock_resolution_ns"), 1)
+                for p in h["procs"].values()):
+            raise Refused(f"{where}: missing clock resolution")
     if not is_int(h.get("clk_tck"), 1) or not is_int(h.get("interval_ns"), 1):
         raise Refused(f"{where}: clk_tck and interval_ns must be positive integers")
     if not isinstance(h.get("boot_id"), str):
@@ -197,7 +254,7 @@ def check_header(h, where):
     return h
 
 
-def check_sample(rec, names, where):
+def check_sample(rec, names, where, precise=False):
     if not all(is_int(rec.get(k)) for k in ("seq", "t0", "t1", "self_cpu_ns")):
         raise Refused(f"{where}: sample needs integer seq, t0, t1 and self_cpu_ns")
     procs = rec.get("procs")
@@ -206,8 +263,10 @@ def check_sample(rec, names, where):
     for name, r in procs.items():
         ok = isinstance(r, dict) and is_int(r.get("pid"), 1) and (
             (set(r) == {"pid", "error"} and isinstance(r["error"], str))
-            or (set(r) == {"pid", "starttime", "comm", "ticks"} and is_int(r["starttime"])
-                and isinstance(r["comm"], str) and is_int(r["ticks"])))
+            or (set(r) == ({"pid", "starttime", "comm", "ticks"} |
+                          ({"process_cpu_ns"} if precise else set())) and is_int(r["starttime"])
+                and isinstance(r["comm"], str) and is_int(r["ticks"])
+                and (not precise or is_int(r["process_cpu_ns"]))))
         if not ok:
             raise Refused(f"{where}: malformed read for {name!r}")
 
@@ -230,7 +289,7 @@ def load(path):
                     raise Refused(f"{where}: first record is {kind!r}, want the header")
                 header = check_header(rec, where)
             elif kind == "sample":
-                check_sample(rec, set(header["procs"]), where)
+                check_sample(rec, set(header["procs"]), where, header["version"] == 2)
                 samples.append(rec)
             elif kind == "footer":
                 footer = rec
@@ -260,6 +319,10 @@ def anchor(v, what):
 
 def analyze_run(run, max_gap_ms=None):
     header, s, footer = load(run["samples"])
+    precise = header["version"] == 2
+    expected_mode = "process-clock" if precise else "ticks"
+    if run.get("cpu_accounting", "ticks") != expected_mode:
+        raise Refused("declared accounting mode differs from capture")
     names = sorted(header["procs"])
     expect = run.get("expect", {})
     if sorted(expect) != names:
@@ -326,6 +389,8 @@ def analyze_run(run, max_gap_ms=None):
                 raise Refused(f"{name}: identity changed at seq {n}")
             if n > k and r["ticks"] < s[n - 1]["procs"][name]["ticks"]:
                 raise Refused(f"{name}: counter went backwards at seq {n}")
+            if precise and n > k and r["process_cpu_ns"] < s[n - 1]["procs"][name]["process_cpu_ns"]:
+                raise Refused(f"{name}: process clock went backwards at seq {n}")
     outside = sum(1 for n, rec in enumerate(s) if not k <= n <= l
                   for name in names
                   if "error" in rec["procs"].get(name, {"error": 1})
@@ -338,6 +403,14 @@ def analyze_run(run, max_gap_ms=None):
         outer = s[l]["procs"][name]["ticks"] - s[k]["procs"][name]["ticks"]
         per[name] = dict(inner_ticks=inner, outer_ticks=outer,
                          lower_ns=max(0, inner - 2) * tick, upper_ns=(outer + 2) * tick)
+    tick_per = {name: dict(value) for name, value in per.items()}
+    if precise:
+        for name in names:
+            inner = s[j]["procs"][name]["process_cpu_ns"] - s[i]["procs"][name]["process_cpu_ns"]
+            outer = s[l]["procs"][name]["process_cpu_ns"] - s[k]["procs"][name]["process_cpu_ns"]
+            if inner > tick_per[name]["upper_ns"] or outer < tick_per[name]["lower_ns"]:
+                raise Refused(f"{name}: process-clock and tick bounds disagree")
+            per[name] = dict(inner_cpu_ns=inner, outer_cpu_ns=outer, lower_ns=inner, upper_ns=outer)
     lower = sum(p["lower_ns"] for p in per.values())
     upper = sum(p["upper_ns"] for p in per.values())
 
@@ -360,6 +433,10 @@ def analyze_run(run, max_gap_ms=None):
         late_slots=footer["late_slots"] if footer else None,
         unclean_reads_outside_window=outside,
     )
+    if precise:
+        result["cpu_accounting"] = "process-clock"
+        result["tick_crosscheck_per_proc"] = tick_per
+        result["clock_resolution_ns"] = {n: header["procs"][n]["clock_resolution_ns"] for n in names}
     if mode == "frames":
         result["per_frame_us"] = (lower / intervals / 1000, upper / intervals / 1000)
         result["per_proc_per_frame_us"] = {
@@ -382,6 +459,10 @@ def mean_interval(rows, metric="per_frame_us"):
 def cmd_analyze(args):
     with open(args.plan) as f:
         plan = json.load(f)
+    accounting = {run.get("cpu_accounting", "ticks") for run in plan["runs"]}
+    if len(accounting) != 1 or not accounting <= {"ticks", "process-clock"}:
+        print("REFUSED: only one cpu_accounting mode per plan")
+        return 1
     modes = {run.get("window_mode", "frames") for run in plan["runs"]}
     if len(modes) != 1 or not modes <= {"frames", "fixed"}:
         print("REFUSED: compare only one window_mode per plan")
@@ -436,9 +517,13 @@ def cmd_analyze(args):
         print(f"arm {arm}: mean over {len(arms[arm])} runs [{lo:.1f}, {hi:.1f}] {units}")
     for k, (lo, hi) in diffs.items():
         print(f"{k}: [{lo:.1f}, {hi:.1f}] {units} (interval of the difference of run means)")
-    tick_ms = results[0]["tick_ns"] / 1e6 if results else 0
-    print(f"Ticks are {tick_ms:.0f} ms; each process adds 4 ticks of width to its interval. "
-          "Attribution intervals, not confidence intervals; stage observations, not bounds on other runs.")
+    if accounting == {"process-clock"}:
+        print("Kernel-accounted process CPU with monotonic boundary bounds; tick intervals cross-checked. "
+              "Reported clock resolution is not measurement accuracy. Attribution intervals, not confidence intervals.")
+    else:
+        tick_ms = results[0]["tick_ns"] / 1e6 if results else 0
+        print(f"Ticks are {tick_ms:.0f} ms; each process adds 4 ticks of width to its interval. "
+              "Attribution intervals, not confidence intervals; stage observations, not bounds on other runs.")
     if args.json:
         with open(args.json, "w") as f:
             json.dump(dict(runs=results, refused=refused, arms=summary, differences=diffs), f, indent=1)
@@ -454,6 +539,7 @@ def main():
     s.add_argument("--interval-ms", type=float, default=5.0)
     s.add_argument("--seconds", type=float, required=True, help="hard bound: runtime plus margin")
     s.add_argument("--pid", action="append", required=True, help="NAME=PID:STARTTIME, repeatable")
+    s.add_argument("--cpu-accounting", choices=("ticks", "process-clock"), default="ticks")
     s.set_defaults(fn=cmd_sample)
     a = sub.add_parser("analyze")
     a.add_argument("plan")

@@ -24,6 +24,9 @@ pub struct Descriptor {
     pub target: ProvenanceTarget,
     pub python: Artifact,
     pub sampler: Artifact,
+    /// Optional observer accounting; never changes the measured processes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_accounting: Option<String>,
     pub warmup: usize,
     pub counted: usize,
     pub interval_ms: u64,
@@ -42,6 +45,12 @@ pub struct Descriptor {
 /// instrumentation nor external-reference acceptance enters this path.
 pub fn policy(d: &Descriptor, r: &Request, probe: u64) -> Result<(), String> {
     d.target.validate()?;
+    if d.cpu_accounting
+        .as_deref()
+        .is_some_and(|mode| mode != "process-clock")
+    {
+        return Err("unknown CPU accounting mode".into());
+    }
     let source_matches = match d.schema {
         1 => {
             d.raster.is_none()
@@ -458,6 +467,9 @@ impl CampaignObserver for Observer<'_> {
             .arg("-I")
             .arg(&self.descriptor.sampler.path)
             .arg("sample");
+        if let Some(mode) = &self.descriptor.cpu_accounting {
+            command.args(["--cpu-accounting", mode]);
+        }
         if let Some(binding) = &self.raster_binding {
             command.arg("--pid").arg(format!(
                 "raster={}:{}",
