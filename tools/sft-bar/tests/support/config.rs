@@ -58,3 +58,33 @@ fn terminal_only_is_explicit_and_cannot_weaken_to_legacy() {
     value["terminal_only"] = "true".into();
     assert!(Config::parse(&value.to_string()).is_err());
 }
+#[test]
+fn pixel_fill_handles_short_unaligned_slices_without_touching_neighbors() {
+    for pixels in [0, 1, 3, 4, 7, 8, 17, 65] {
+        for prefix in 0..4 {
+            for generation in [0, 127, 128, u64::MAX] {
+                let end = prefix + pixels * 4;
+                let mut bytes = vec![0xa5; end + 4];
+                fill_cpu(&mut bytes[prefix..end], generation);
+                assert!(bytes[..prefix].iter().all(|&b| b == 0xa5));
+                assert!(bytes[end..].iter().all(|&b| b == 0xa5));
+                for pixel in bytes[prefix..end].chunks_exact(4) {
+                    let shade = (generation % 128) as u8;
+                    assert_eq!(pixel, [shade, shade, shade, 255]);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn pixel_fill_refuses_incomplete_pixels_before_writing() {
+    for length in [1, 2, 3, 5, 6, 7, 259] {
+        let mut bytes = vec![0xa5; length];
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fill_cpu(&mut bytes, 42)))
+                .is_err()
+        );
+        assert!(bytes.iter().all(|&b| b == 0xa5));
+    }
+}
