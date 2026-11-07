@@ -124,6 +124,10 @@ fn run() -> Result<()> {
 }
 
 fn run_connected(wire: &mut Wire, config: &Config, socket: &std::ffi::OsStr) -> Result<()> {
+    if config.lean {
+        // The events re-arm rides with the next commit instead of waking the host alone.
+        wire.client.set_deferred_event_reads(true)?;
+    }
     let ShellContentRecord::Limits(limits) = wire.receive()? else {
         return Err("missing limits".into());
     };

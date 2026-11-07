@@ -117,6 +117,6 @@ grant the SDK carries the cumulative ACK in the FrameCommit header word, treats
 the exact Rwrite as custody and rejects a Submitted record; the peer's loops
 are unchanged because they settle on resource status, the terminal outcome and
 releases, none of which lean removes. The owner test adds a lean arm with the
-same pixel and drain checks. Pins: Rust SDK `a5cb339a009ed45b33620ed4068ce57a8fe93799`
-and host `2c32847498c77d7d4a15c21209a54443eb3971d1`, both local `file://`
+same pixel and drain checks. Pins: Rust SDK `0621e10dce8641998a4b15d43e874a5924e39cf1` (deferred events re-arm, opted into under lean)
+and host `9406f7219f7e1a39195a14dd5e4eede8ef227982`, both local `file://`
 sources until published. Not a CPU claim; native comparison is separate.

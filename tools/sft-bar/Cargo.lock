@@ -692,7 +692,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sophia-9p",
- "sophia-9p-client 0.4.0 (git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=a5cb339a009ed45b33620ed4068ce57a8fe93799)",
+ "sophia-9p-client 0.4.0 (git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=0621e10dce8641998a4b15d43e874a5924e39cf1)",
  "sophia-config",
  "sophia-image-producer",
  "sophia-launch-client",
@@ -700,7 +700,7 @@ dependencies = [
  "sophia-runtime",
  "sophia-session",
  "sophia-shell-client",
- "sophia-shell-protocol 0.4.0 (git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=a5cb339a009ed45b33620ed4068ce57a8fe93799)",
+ "sophia-shell-protocol 0.4.0 (git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=0621e10dce8641998a4b15d43e874a5924e39cf1)",
 ]
 
 [[package]]
@@ -742,44 +742,44 @@ checksum = "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8"
 [[package]]
 name = "sophia-9p"
 version = "0.1.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 dependencies = [
  "rustix",
- "sophia-9p-records 0.4.0 (git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1)",
+ "sophia-9p-records 0.4.0 (git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982)",
 ]
 
 [[package]]
 name = "sophia-9p-client"
 version = "0.4.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=0621e10dce8641998a4b15d43e874a5924e39cf1#0621e10dce8641998a4b15d43e874a5924e39cf1"
 dependencies = [
  "rustix",
- "sophia-9p-records 0.4.0 (git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1)",
+ "sophia-9p-records 0.4.0 (git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=0621e10dce8641998a4b15d43e874a5924e39cf1)",
 ]
 
 [[package]]
 name = "sophia-9p-client"
 version = "0.4.0"
-source = "git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=a5cb339a009ed45b33620ed4068ce57a8fe93799#a5cb339a009ed45b33620ed4068ce57a8fe93799"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 dependencies = [
  "rustix",
- "sophia-9p-records 0.4.0 (git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=a5cb339a009ed45b33620ed4068ce57a8fe93799)",
+ "sophia-9p-records 0.4.0 (git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982)",
 ]
 
 [[package]]
 name = "sophia-9p-records"
 version = "0.4.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=0621e10dce8641998a4b15d43e874a5924e39cf1#0621e10dce8641998a4b15d43e874a5924e39cf1"
 
 [[package]]
 name = "sophia-9p-records"
 version = "0.4.0"
-source = "git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=a5cb339a009ed45b33620ed4068ce57a8fe93799#a5cb339a009ed45b33620ed4068ce57a8fe93799"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 
 [[package]]
 name = "sophia-broker"
 version = "0.1.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 dependencies = [
  "sophia-broker-protocol",
  "sophia-protocol",
@@ -788,12 +788,12 @@ dependencies = [
 [[package]]
 name = "sophia-broker-protocol"
 version = "0.4.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 
 [[package]]
 name = "sophia-config"
 version = "0.1.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 dependencies = [
  "kdl",
  "rustix",
@@ -803,17 +803,17 @@ dependencies = [
 [[package]]
 name = "sophia-desktop-ids"
 version = "0.4.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=0621e10dce8641998a4b15d43e874a5924e39cf1#0621e10dce8641998a4b15d43e874a5924e39cf1"
 
 [[package]]
 name = "sophia-desktop-ids"
 version = "0.4.0"
-source = "git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=a5cb339a009ed45b33620ed4068ce57a8fe93799#a5cb339a009ed45b33620ed4068ce57a8fe93799"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 
 [[package]]
 name = "sophia-engine"
 version = "0.1.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 dependencies = [
  "rustix",
  "sha2",
@@ -827,11 +827,11 @@ dependencies = [
 [[package]]
 name = "sophia-factotum"
 version = "0.1.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 dependencies = [
  "rustix",
  "sophia-9p",
- "sophia-9p-client 0.4.0 (git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1)",
+ "sophia-9p-client 0.4.0 (git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982)",
  "tracing",
  "zeroize",
 ]
@@ -839,7 +839,7 @@ dependencies = [
 [[package]]
 name = "sophia-factotum-pam"
 version = "0.1.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 dependencies = [
  "libc",
  "rustix",
@@ -849,18 +849,18 @@ dependencies = [
 [[package]]
 name = "sophia-image-producer"
 version = "0.4.0"
-source = "git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=a5cb339a009ed45b33620ed4068ce57a8fe93799#a5cb339a009ed45b33620ed4068ce57a8fe93799"
+source = "git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=0621e10dce8641998a4b15d43e874a5924e39cf1#0621e10dce8641998a4b15d43e874a5924e39cf1"
 dependencies = [
  "rustix",
  "sophia-isb",
  "sophia-lock-protocol",
- "sophia-shell-protocol 0.4.0 (git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=a5cb339a009ed45b33620ed4068ce57a8fe93799)",
+ "sophia-shell-protocol 0.4.0 (git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=0621e10dce8641998a4b15d43e874a5924e39cf1)",
 ]
 
 [[package]]
 name = "sophia-input-authority"
 version = "0.1.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 dependencies = [
  "sophia-protocol",
 ]
@@ -868,7 +868,7 @@ dependencies = [
 [[package]]
 name = "sophia-isb"
 version = "0.4.0"
-source = "git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=a5cb339a009ed45b33620ed4068ce57a8fe93799#a5cb339a009ed45b33620ed4068ce57a8fe93799"
+source = "git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=0621e10dce8641998a4b15d43e874a5924e39cf1#0621e10dce8641998a4b15d43e874a5924e39cf1"
 dependencies = [
  "rustix",
 ]
@@ -876,16 +876,16 @@ dependencies = [
 [[package]]
 name = "sophia-launch-client"
 version = "0.4.0"
-source = "git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=a5cb339a009ed45b33620ed4068ce57a8fe93799#a5cb339a009ed45b33620ed4068ce57a8fe93799"
+source = "git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=0621e10dce8641998a4b15d43e874a5924e39cf1#0621e10dce8641998a4b15d43e874a5924e39cf1"
 dependencies = [
  "rustix",
- "sophia-9p-client 0.4.0 (git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=a5cb339a009ed45b33620ed4068ce57a8fe93799)",
+ "sophia-9p-client 0.4.0 (git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=0621e10dce8641998a4b15d43e874a5924e39cf1)",
 ]
 
 [[package]]
 name = "sophia-linux-peer"
 version = "0.1.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 dependencies = [
  "libc",
 ]
@@ -893,16 +893,16 @@ dependencies = [
 [[package]]
 name = "sophia-lock-protocol"
 version = "0.4.0"
-source = "git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=a5cb339a009ed45b33620ed4068ce57a8fe93799#a5cb339a009ed45b33620ed4068ce57a8fe93799"
+source = "git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=0621e10dce8641998a4b15d43e874a5924e39cf1#0621e10dce8641998a4b15d43e874a5924e39cf1"
 
 [[package]]
 name = "sophia-portal"
 version = "0.1.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 dependencies = [
  "rustix",
  "sophia-9p",
- "sophia-9p-client 0.4.0 (git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1)",
+ "sophia-9p-client 0.4.0 (git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982)",
  "sophia-protocol",
  "sophia-runtime",
 ]
@@ -910,18 +910,18 @@ dependencies = [
 [[package]]
 name = "sophia-protocol"
 version = "0.1.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 dependencies = [
  "serde",
  "serde_json",
- "sophia-desktop-ids 0.4.0 (git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1)",
- "sophia-shell-protocol 0.4.0 (git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1)",
+ "sophia-desktop-ids 0.4.0 (git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982)",
+ "sophia-shell-protocol 0.4.0 (git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982)",
 ]
 
 [[package]]
 name = "sophia-renderer-live"
 version = "0.1.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 dependencies = [
  "parley",
  "rustix",
@@ -936,11 +936,11 @@ dependencies = [
 [[package]]
 name = "sophia-runtime"
 version = "0.1.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 dependencies = [
  "rustix",
  "sophia-9p",
- "sophia-9p-client 0.4.0 (git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1)",
+ "sophia-9p-client 0.4.0 (git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982)",
  "sophia-linux-peer",
  "sophia-protocol",
  "sophia-wake",
@@ -951,7 +951,7 @@ dependencies = [
 [[package]]
 name = "sophia-session"
 version = "0.1.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 dependencies = [
  "rustix",
  "sha2",
@@ -976,35 +976,35 @@ dependencies = [
 [[package]]
 name = "sophia-shell-client"
 version = "0.4.0"
-source = "git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=a5cb339a009ed45b33620ed4068ce57a8fe93799#a5cb339a009ed45b33620ed4068ce57a8fe93799"
+source = "git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=0621e10dce8641998a4b15d43e874a5924e39cf1#0621e10dce8641998a4b15d43e874a5924e39cf1"
 dependencies = [
  "rustix",
- "sophia-9p-client 0.4.0 (git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=a5cb339a009ed45b33620ed4068ce57a8fe93799)",
- "sophia-9p-records 0.4.0 (git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=a5cb339a009ed45b33620ed4068ce57a8fe93799)",
+ "sophia-9p-client 0.4.0 (git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=0621e10dce8641998a4b15d43e874a5924e39cf1)",
+ "sophia-9p-records 0.4.0 (git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=0621e10dce8641998a4b15d43e874a5924e39cf1)",
  "sophia-image-producer",
- "sophia-shell-protocol 0.4.0 (git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=a5cb339a009ed45b33620ed4068ce57a8fe93799)",
+ "sophia-shell-protocol 0.4.0 (git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=0621e10dce8641998a4b15d43e874a5924e39cf1)",
 ]
 
 [[package]]
 name = "sophia-shell-protocol"
 version = "0.4.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=0621e10dce8641998a4b15d43e874a5924e39cf1#0621e10dce8641998a4b15d43e874a5924e39cf1"
 dependencies = [
- "sophia-desktop-ids 0.4.0 (git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1)",
+ "sophia-desktop-ids 0.4.0 (git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=0621e10dce8641998a4b15d43e874a5924e39cf1)",
 ]
 
 [[package]]
 name = "sophia-shell-protocol"
 version = "0.4.0"
-source = "git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=a5cb339a009ed45b33620ed4068ce57a8fe93799#a5cb339a009ed45b33620ed4068ce57a8fe93799"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 dependencies = [
- "sophia-desktop-ids 0.4.0 (git+file:///home/niltempus/dev/sophia-desktop-sdk-rs?rev=a5cb339a009ed45b33620ed4068ce57a8fe93799)",
+ "sophia-desktop-ids 0.4.0 (git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982)",
 ]
 
 [[package]]
 name = "sophia-sysv-shm"
 version = "0.1.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 dependencies = [
  "libc",
 ]
@@ -1012,7 +1012,7 @@ dependencies = [
 [[package]]
 name = "sophia-wake"
 version = "0.1.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 dependencies = [
  "rustix",
 ]
@@ -1020,7 +1020,7 @@ dependencies = [
 [[package]]
 name = "sophia-x-authority"
 version = "0.1.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 dependencies = [
  "miniz_oxide",
  "rustix",
@@ -1038,7 +1038,7 @@ dependencies = [
 [[package]]
 name = "sophia-xshmfence"
 version = "0.1.0"
-source = "git+file:///home/niltempus/dev/sophia?rev=2c32847498c77d7d4a15c21209a54443eb3971d1#2c32847498c77d7d4a15c21209a54443eb3971d1"
+source = "git+file:///home/niltempus/dev/sophia?rev=9406f7219f7e1a39195a14dd5e4eede8ef227982#9406f7219f7e1a39195a14dd5e4eede8ef227982"
 dependencies = [
  "libloading",
 ]
