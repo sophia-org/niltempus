@@ -21,6 +21,7 @@ impl Wire {
     pub(super) fn connect(
         frame_transactions: bool,
         terminal_only: bool,
+        lean: bool,
     ) -> Result<(Self, sophia_9p_client::pipeline::Pipeline)> {
         if std::env::var_os("SOPHIA_SHELL_SOCKET").is_some() {
             return Err("ambiguous shell wire".into());
@@ -61,6 +62,11 @@ impl Wire {
                 | frame
                 | if terminal_only {
                     sophia_shell_protocol::shell_files::SHELL_FRAME_TERMINAL_ONLY_CAPABILITY
+                } else {
+                    0
+                }
+                | if lean {
+                    sophia_shell_protocol::shell_files::SHELL_FRAME_LEAN_CAPABILITY
                 } else {
                     0
                 },

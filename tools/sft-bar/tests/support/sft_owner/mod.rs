@@ -13,17 +13,19 @@ mod host;
 #[test]
 fn both_protocols_present_identical_cpu_frames_and_drain_the_owner() {
     for height in [24, 512] {
-        let legacy = run(height, false, false);
-        let sft = run(height, true, false);
+        let legacy = run(height, false, false, false);
+        let sft = run(height, true, false, false);
         assert_eq!(sft, legacy);
-        let terminal = run(height, true, true);
+        let terminal = run(height, true, true, false);
         assert_eq!(terminal, legacy);
+        let lean = run(height, true, true, true);
+        assert_eq!(lean, legacy);
     }
 }
 
-fn run(height: u32, sft: bool, terminal_only: bool) -> Vec<Vec<u8>> {
+fn run(height: u32, sft: bool, terminal_only: bool, lean: bool) -> Vec<Vec<u8>> {
     let directory = std::env::temp_dir().join(format!(
-        "sft-bar-{}-{height}-{sft}-{terminal_only}",
+        "sft-bar-{}-{height}-{sft}-{terminal_only}-{lean}",
         std::process::id()
     ));
     assert!(!directory.exists());
@@ -37,7 +39,9 @@ fn run(height: u32, sft: bool, terminal_only: bool) -> Vec<Vec<u8>> {
         )
         .unwrap();
     if sft {
-        if terminal_only {
+        if lean {
+            owner.enable_lean_frame_transactions().unwrap();
+        } else if terminal_only {
             owner.enable_terminal_frame_transactions().unwrap();
         } else {
             owner.enable_frame_transactions().unwrap();
@@ -65,6 +69,7 @@ fn run(height: u32, sft: bool, terminal_only: bool) -> Vec<Vec<u8>> {
         height,
         sft,
         terminal_only,
+        lean,
     );
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut host = host::Host::default();
@@ -122,6 +127,7 @@ fn start(
     height: u32,
     sft: bool,
     terminal_only: bool,
+    lean: bool,
 ) -> std::thread::JoinHandle<std::result::Result<(), String>> {
     std::thread::spawn(move || {
         use crate::*;
@@ -164,6 +170,11 @@ fn start(
                         sophia_shell_protocol::shell_files::SHELL_FRAME_TERMINAL_ONLY_CAPABILITY
                     } else {
                         0
+                    }
+                    | if lean {
+                        sophia_shell_protocol::shell_files::SHELL_FRAME_LEAN_CAPABILITY
+                    } else {
+                        0
                     },
                 handshake_timeout: timeout,
             },
@@ -181,6 +192,7 @@ fn start(
             hold_msec: 0,
             frame_transactions: sft,
             terminal_only,
+            lean,
         };
         run_connected(&mut wire, &config, socket.as_os_str()).map_err(|e| e.to_string())
     })

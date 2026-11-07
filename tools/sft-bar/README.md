@@ -106,3 +106,17 @@ order. It does not establish fewer syscalls, owner passes or CPU time. Exact-pin
 integration evidence is recorded separately at
 `~/.local/state/sophia-sft-combined-submit-publication-01`; native qualification
 and adoption remain outstanding. No new peer `.rs` behavior is introduced.
+
+## Lean SFT experiment
+
+The optional `lean` JSON boolean defaults to false and requires
+`terminal_only: true`. It requests r13 bit 20 in addition to bit 19; the owner
+must permit it with `--experimental-native-frame-lean` after the terminal-only
+flag, and an unsupported or missing grant refuses the connection. Under the
+grant the SDK carries the cumulative ACK in the FrameCommit header word, treats
+the exact Rwrite as custody and rejects a Submitted record; the peer's loops
+are unchanged because they settle on resource status, the terminal outcome and
+releases, none of which lean removes. The owner test adds a lean arm with the
+same pixel and drain checks. Pins: Rust SDK `a5cb339a009ed45b33620ed4068ce57a8fe93799`
+and host `2c32847498c77d7d4a15c21209a54443eb3971d1`, both local `file://`
+sources until published. Not a CPU claim; native comparison is separate.
