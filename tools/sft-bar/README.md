@@ -88,3 +88,21 @@ The host used only by tests is `2fa54bd8469cf4a68a9531c1a0142dc2b90064b7`.
 Registry versions/checksums are unchanged. The copied-ring owner test compares
 r10, ordinary r13 and terminal-only r13 at heights 24 and 512, checks identical
 pixels and drains resources. Evidence: `~/.local/state/sophia-sft-terminal-activation-01`.
+
+## Optional complete FrameCommit submission
+
+The current reference pins signed Rust SDK
+`564be8c7a6c20b3100fd6345b2df7aa0b542737a` and host dev-test snapshot
+`f3dd02fae087de08fe4b1f6c039227f669d8ae52`. The SDK discovers `frame-submit`
+after opening the ordinary reusable writer and uses it only for a complete
+eligible FrameCommit. The peer's rendering loops and JSON configuration are
+unchanged. Absent nodes retain the paired path; no fallback follows uncertain
+custody. r10 does not probe the node, and terminal-only remains independently
+selected.
+
+The pre-signing device-free trace removes one Twrite/Rwrite pair and 58 wire
+bytes from each of 16 SFT commits, with identical payloads and frame-event kind
+order. It does not establish fewer syscalls, owner passes or CPU time. Exact-pin
+integration evidence is recorded separately at
+`~/.local/state/sophia-sft-combined-submit-publication-01`; native qualification
+and adoption remain outstanding. No new peer `.rs` behavior is introduced.
