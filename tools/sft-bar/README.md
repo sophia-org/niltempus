@@ -106,3 +106,17 @@ order. It does not establish fewer syscalls, owner passes or CPU time. Exact-pin
 integration evidence is recorded separately at
 `~/.local/state/sophia-sft-combined-submit-publication-01`; native qualification
 and adoption remain outstanding. No new peer `.rs` behavior is introduced.
+
+## Already-ready batching experiment
+
+This candidate changes only the SDK pin to signed
+`90e14d25b84ede9b9655c0600c4e4d154554da70`, the child of `564be8c7`.
+The host test pin remains `f3dd02fae`; every peer source file is unchanged.
+The SDK applies its one buffered journal event before retiring outputs and
+queuing requests, allowing an eligible ACK and an already-ready frame to share
+the existing output buffer. It does not delay work to wait for a batch.
+
+The device-free fixture shows fewer sends in bounded FrameCommit ranges, not
+fewer native owner passes or lower CPU. The native comparison must use the
+same host and ordinary r13 mode in both variants; only this SDK pin and the
+resulting peer binary vary. Evidence: `~/.local/state/sophia-sft-ready-batch-01`.
