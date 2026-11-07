@@ -11,23 +11,21 @@ publish = false
 experimental-frame-transactions = []
 
 [dependencies]
-# shortcut: local file:// pins to unpublished lean SDK/host commits; replace with the
-# GitHub URLs at the same revs once they are pushed, before any release.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rustix = { version = "1.1", features = ["process", "time", "event"] }
-sophia-shell-protocol = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "0621e10dce8641998a4b15d43e874a5924e39cf1" }
-sophia-shell-client = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "0621e10dce8641998a4b15d43e874a5924e39cf1" }
-sophia-launch-client = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "0621e10dce8641998a4b15d43e874a5924e39cf1" }
-sophia-9p-client = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "0621e10dce8641998a4b15d43e874a5924e39cf1" }
-sophia-image-producer = { git = "file:///home/niltempus/dev/sophia-desktop-sdk-rs", rev = "0621e10dce8641998a4b15d43e874a5924e39cf1" }
+sophia-shell-protocol = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "0621e10dce8641998a4b15d43e874a5924e39cf1" }
+sophia-shell-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "0621e10dce8641998a4b15d43e874a5924e39cf1" }
+sophia-launch-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "0621e10dce8641998a4b15d43e874a5924e39cf1" }
+sophia-9p-client = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "0621e10dce8641998a4b15d43e874a5924e39cf1" }
+sophia-image-producer = { git = "https://github.com/sophia-org/sophia-desktop-sdk-rs", rev = "0621e10dce8641998a4b15d43e874a5924e39cf1" }
 
 [dev-dependencies]
-host-protocol = { package = "sophia-protocol", git = "file:///home/niltempus/dev/sophia", rev = "9406f7219f7e1a39195a14dd5e4eede8ef227982" }
-sophia-config = { git = "file:///home/niltempus/dev/sophia", rev = "9406f7219f7e1a39195a14dd5e4eede8ef227982" }
-sophia-session = { git = "file:///home/niltempus/dev/sophia", rev = "9406f7219f7e1a39195a14dd5e4eede8ef227982", features = ["experimental-native-frame-transaction"] }
-sophia-runtime = { git = "file:///home/niltempus/dev/sophia", rev = "9406f7219f7e1a39195a14dd5e4eede8ef227982", features = ["experimental-native-frame-transaction"] }
-sophia-9p = { git = "file:///home/niltempus/dev/sophia", rev = "9406f7219f7e1a39195a14dd5e4eede8ef227982" }
+host-protocol = { package = "sophia-protocol", git = "https://github.com/sophia-org/sophia.git", rev = "9406f7219f7e1a39195a14dd5e4eede8ef227982" }
+sophia-config = { git = "https://github.com/sophia-org/sophia.git", rev = "9406f7219f7e1a39195a14dd5e4eede8ef227982" }
+sophia-session = { git = "https://github.com/sophia-org/sophia.git", rev = "9406f7219f7e1a39195a14dd5e4eede8ef227982", features = ["experimental-native-frame-transaction"] }
+sophia-runtime = { git = "https://github.com/sophia-org/sophia.git", rev = "9406f7219f7e1a39195a14dd5e4eede8ef227982", features = ["experimental-native-frame-transaction"] }
+sophia-9p = { git = "https://github.com/sophia-org/sophia.git", rev = "9406f7219f7e1a39195a14dd5e4eede8ef227982" }
 
 [profile.dev]
 debug = "line-tables-only"
